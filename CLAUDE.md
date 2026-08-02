@@ -184,7 +184,7 @@ its cost.
 ### Git
 - Default branch: `main`.
 - Workflow: feature branch → PR → CI green → merge. No direct commits to `main`.
-- Commit messages: one line, plain short description of what changed. No `type:` prefix, no body.
+- Commit messages: one line, plain short description of what the code now does. No `type:` prefix, no body, no internal planning terms (e.g. "milestone 1") — describe the change, not where it sits in the schedule.
 - No AI attribution (e.g. `Co-Authored-By: Claude`) in commit messages.
 - Commit granularity is one commit per completed, tested stage, not per file or per intermediate step. For milestone 1 that stage is the whole billing engine (all six modules, full test suite) — one commit, not six.
 - While a stage is in progress, local commits are fine as a safety net (uncommitted work has no recovery path if something goes wrong). They stay local and get squashed into the single stage commit before the first push — the public history never shows the intermediate steps.
