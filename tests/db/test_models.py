@@ -11,7 +11,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.orm import Session
 
-from volleyflow.db.engine import engine
+from volleyflow.db.engine import get_session
 from volleyflow.db.models import GameRow, PlayerRow, SeasonRow
 from volleyflow.schedule import GameStatus
 
@@ -58,7 +58,7 @@ def test_game_stores_its_status(db_session: Session) -> None:
 
 @pytest.mark.postgres
 def test_player_round_trips_through_neon() -> None:
-    with Session(engine) as session:
+    with get_session() as session:
         session.add(PlayerRow(id=999_999, name="Postgres smoke test"))
         session.commit()
 
