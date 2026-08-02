@@ -49,6 +49,10 @@ python_version = "3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not postgres'"
+markers = [
+    "postgres: hits the real Neon database instead of in-memory SQLite; excluded by default, run explicitly with -m postgres",
+]
 
 [tool.coverage.run]
 source = ["src/volleyflow"]
