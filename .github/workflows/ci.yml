@@ -28,5 +28,13 @@ jobs:
       - name: Type check
         run: uv run mypy src
 
+      - name: Import boundaries
+        run: uv run lint-imports
+
       - name: Test
         run: uv run pytest --cov --cov-report=term-missing
+
+      - name: Postgres tests
+        run: uv run pytest -m postgres
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
