@@ -9,7 +9,7 @@ table with no columns beyond the two foreign keys.
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Enum, ForeignKey, Numeric
+from sqlalchemy import Enum, ForeignKey, Identity, Numeric
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from volleyflow.ledger import EntryType
@@ -23,15 +23,16 @@ class Base(DeclarativeBase):
 class PlayerRow(Base):
     __tablename__ = "players"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     name: Mapped[str]
 
 
 class SeasonRow(Base):
     __tablename__ = "seasons"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     total_venue_cost: Mapped[Decimal] = mapped_column(Numeric(10, 0))
+    capacity: Mapped[int] = mapped_column(default=18)
 
 
 class SeasonMemberRow(Base):
@@ -46,7 +47,7 @@ class SeasonMemberRow(Base):
 class GameRow(Base):
     __tablename__ = "games"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id"))
     date: Mapped[date]
     status: Mapped[GameStatus] = mapped_column(
@@ -57,7 +58,7 @@ class GameRow(Base):
 class AbsenceRow(Base):
     __tablename__ = "absences"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     recorded_at: Mapped[datetime]
@@ -66,7 +67,7 @@ class AbsenceRow(Base):
 class DropInRow(Base):
     __tablename__ = "drop_ins"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     signed_up_at: Mapped[datetime]
@@ -76,7 +77,7 @@ class DropInRow(Base):
 class WaitlistEntryRow(Base):
     __tablename__ = "waitlist_entries"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     queued_at: Mapped[datetime]
@@ -85,7 +86,7 @@ class WaitlistEntryRow(Base):
 class LedgerEntryRow(Base):
     __tablename__ = "ledger_entries"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
     entry_type: Mapped[EntryType] = mapped_column(Enum(EntryType, name="entry_type"))
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 0))

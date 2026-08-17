@@ -91,3 +91,73 @@ uv run lint-imports
 ```
 
 Still open in milestone 2: FastAPI endpoints, API-layer tests.
+
+## 2026-08-17 — API layer (Milestone 2, part 2 — milestone 2 complete)
+
+Built the five endpoints milestone 2 calls for, on top of the DB layer
+above. The domain modules (`players.py` through `settlement.py`) still
+don't know FastAPI or SQLAlchemy exist.
+
+- `db/models.py` — surrogate primary keys switched from an implicit
+  (undocumented) Postgres `SERIAL` default to an explicit `Identity()`.
+  Verified first that the implicit behavior was already working
+  (inserted a row with no `id`, watched Postgres assign one) before
+  concluding this was a style improvement, not a bug fix — a case of
+  checking evidence instead of trusting a guess about the code.
+- `SeasonRow` gained a `capacity` column (default 18, per CLAUDE.md
+  2.2's "single game capacity 18, configurable"). Adding a `NOT NULL`
+  column to a table that already had rows required a `server_default`
+  in the migration to backfill them, then dropping the default
+  afterward — new inserts always supply it via the Python-side default.
+- `api/schemas.py` — Pydantic request/response models. Deliberately
+  separate from `db/models.py`: a request has no id yet, a response
+  doesn't need every internal column.
+- `api/routes.py`:
+  - `POST /seasons` — accepts member names, not ids; finds-or-creates
+    each `PlayerRow` by name so "one person, one Player, forever" holds
+    even though there's no login yet.
+  - `POST /absences` — rejects absences for players who aren't a fixed
+    member of that game's season (400), then checks the waitlist for
+    that game and promotes the earliest entry into a confirmed drop-in
+    if anyone's waiting (CLAUDE.md 2.3: an absence offers the slot to
+    the waitlist in order).
+  - `POST /drop-ins` — confirms immediately if
+    `(members - this game's absences) + active drop-ins < capacity`,
+    otherwise queues a `WaitlistEntry`.
+  - `POST /drop-ins/{id}/cancel` — same waitlist-promotion call as
+    absence, plus a guard against cancelling an already-cancelled
+    drop-in (without it, calling cancel twice would promote someone
+    from the waitlist twice for the same freed slot).
+  - `GET /seasons/{id}/settlement` — the one endpoint that reads
+    instead of writes. Pulls every row touching a season (games,
+    members, absences, drop-ins), converts them to the milestone 1
+    dataclasses via the new `api/conversion.py`, and calls
+    `settle_member()` — the actual billing engine, unmodified, running
+    for the first time against real signup/absence data instead of
+    hand-built test fixtures.
+- Two real bugs surfaced and fixed while building this, both left in
+  the log because they're the kind of thing worth remembering:
+  - FastAPI's `Depends(get_db)` pattern trips ruff's B008 (no function
+    calls in default arguments) — a legitimate rule everywhere except
+    here. Fixed by whitelisting it via
+    `[tool.ruff.lint.flake8-bugbear] extend-immutable-calls`, not by
+    disabling the rule.
+  - In-memory SQLite plus FastAPI's `TestClient` fails with
+    `SQLite objects created in a thread can only be used in that same
+    thread` — the test client runs route handlers in a worker thread,
+    which a bare `:memory:` connection doesn't allow. Fixed with
+    `connect_args={"check_same_thread": False}` and `poolclass=StaticPool`
+    on the test engine (`tests/conftest.py`).
+- Proved the whole stack end-to-end against real Neon, not just
+  SQLite: started a season (8 games, 5 members, `total_venue_cost`
+  10000 -> `share_per_game` 250), recorded one covered absence, and
+  confirmed the settlement endpoint returned `refund: "250"`,
+  `net: "-1750"` for that member and `net: "-2000"` for everyone else.
+
+51 tests, 98% coverage. Milestone 2 is done.
+
+Key commands:
+```
+uv run uvicorn volleyflow.api.main:app --port 8000   # run the dev server
+# then open http://127.0.0.1:8000/docs for interactive Swagger UI
+```
