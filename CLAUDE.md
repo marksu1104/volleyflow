@@ -189,6 +189,7 @@ its cost.
 - Commit granularity is one commit per completed, tested stage, not per file or per intermediate step. For milestone 1 that stage is the whole billing engine (all six modules, full test suite) — one commit, not six.
 - While a stage is in progress, local commits are fine as a safety net (uncommitted work has no recovery path if something goes wrong). They stay local and get squashed into the single stage commit before the first push — the public history never shows the intermediate steps.
 - No ADR files, no rationale in commit bodies (there are no bodies). Decision rationale lives in conversation and, eventually, `README.md` (milestone 5). Don't create standalone decision-record documents — they duplicate what the README already covers, and the duplicate goes stale first.
+- The one exception: [`docs/dev-log.md`](docs/dev-log.md), a single running file appended to once per completed stage — what got built and why, key commands included. Purpose is different from the README (that's resume-facing, written once at the end): this is a trail for coming back later and re-learning how the project was actually built. Append to it, don't create a second log file.
 
 ### Tooling
 - `uv` for environment and dependency management. `uv.lock` is committed.
