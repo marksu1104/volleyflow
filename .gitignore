@@ -11,10 +11,12 @@ venv/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.import_linter_cache/
 
 # 環境變數（未來會放 LINE token、DB 連線字串，絕不可進版控）
 .env
 .env.*
+!.env.example
 
 # 編輯器 / OS
 .vscode/

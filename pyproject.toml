@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "Signup, waitlist, and billing engine for a weekly volleyball game"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "alembic>=1.18.5",
+    "psycopg[binary]>=3.3.4",
+    "python-dotenv>=1.2.2",
+    "sqlalchemy>=2.0.51",
+]
 
 [dependency-groups]
 dev = [
@@ -13,6 +18,7 @@ dev = [
     "mypy>=1.14",
     "ruff>=0.9",
     "pre-commit>=4.0",
+    "import-linter>=2.13",
 ]
 
 [build-system]
@@ -25,6 +31,7 @@ packages = ["src/volleyflow"]
 [tool.ruff]
 line-length = 88
 target-version = "py312"
+extend-exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
 select = [
@@ -42,6 +49,10 @@ python_version = "3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not postgres'"
+markers = [
+    "postgres: hits the real Neon database instead of in-memory SQLite; excluded by default, run explicitly with -m postgres",
+]
 
 [tool.coverage.run]
 source = ["src/volleyflow"]
@@ -49,3 +60,23 @@ source = ["src/volleyflow"]
 [tool.coverage.report]
 fail_under = 0
 show_missing = true
+
+[tool.importlinter]
+root_package = "volleyflow"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Domain modules must not depend on the db layer"
+type = "forbidden"
+source_modules = [
+    "volleyflow.players",
+    "volleyflow.schedule",
+    "volleyflow.attendance",
+    "volleyflow.pricing",
+    "volleyflow.settlement",
+    "volleyflow.ledger",
+]
+forbidden_modules = [
+    "volleyflow.db",
+    "sqlalchemy",
+]
