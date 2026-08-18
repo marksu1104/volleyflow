@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from volleyflow.api.line_webhook import router as line_webhook_router
 from volleyflow.api.routes import router
 
 app = FastAPI(title="VolleyFlow")
@@ -20,3 +21,4 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(line_webhook_router)
