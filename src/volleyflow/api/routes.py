@@ -1,5 +1,6 @@
 """API routes."""
 
+from collections import defaultdict
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -19,9 +20,13 @@ from volleyflow.api.schemas import (
     DropInCancelOut,
     DropInCreate,
     DropInOut,
+    DropInSummary,
+    GameDetailOut,
     GameOut,
+    MemberOut,
     MemberSettlementOut,
     SeasonCreate,
+    SeasonDetailOut,
     SeasonOut,
     SettlementOut,
 )
@@ -152,6 +157,78 @@ def start_season(payload: SeasonCreate, db: Session = Depends(get_db)) -> Season
         capacity=season.capacity,
         games=[GameOut(id=g.id, date=g.date, status=g.status) for g in games],
         member_ids=member_ids,
+    )
+
+
+@router.get("/seasons/{season_id}", response_model=SeasonDetailOut)
+def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut:
+    season_row = db.get(SeasonRow, season_id)
+    if season_row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+
+    game_rows = db.query(GameRow).filter(GameRow.season_id == season_id).all()
+    game_ids = [g.id for g in game_rows]
+    member_rows = (
+        db.query(PlayerRow)
+        .join(SeasonMemberRow, SeasonMemberRow.player_id == PlayerRow.id)
+        .filter(SeasonMemberRow.season_id == season_id)
+        .all()
+    )
+
+    # One query per attendance kind for the whole season, not one per
+    # game — looping a query per game (3 * N round trips to Neon for N
+    # games) is the classic N+1 problem and was most of why this
+    # endpoint felt slow. Group the results by game_id in Python instead.
+    absences_by_game: dict[int, list[str]] = defaultdict(list)
+    for absence, player in (
+        db.query(AbsenceRow, PlayerRow)
+        .join(PlayerRow, AbsenceRow.player_id == PlayerRow.id)
+        .filter(AbsenceRow.game_id.in_(game_ids))
+        .all()
+    ):
+        absences_by_game[absence.game_id].append(player.name)
+
+    confirmed_by_game: dict[int, list[DropInSummary]] = defaultdict(list)
+    for drop_in, player in (
+        db.query(DropInRow, PlayerRow)
+        .join(PlayerRow, DropInRow.player_id == PlayerRow.id)
+        .filter(DropInRow.game_id.in_(game_ids), DropInRow.cancelled_at.is_(None))
+        .all()
+    ):
+        confirmed_by_game[drop_in.game_id].append(
+            DropInSummary(id=drop_in.id, player_name=player.name)
+        )
+
+    waitlist_by_game: dict[int, list[DropInSummary]] = defaultdict(list)
+    for entry, player in (
+        db.query(WaitlistEntryRow, PlayerRow)
+        .join(PlayerRow, WaitlistEntryRow.player_id == PlayerRow.id)
+        .filter(WaitlistEntryRow.game_id.in_(game_ids))
+        .order_by(WaitlistEntryRow.queued_at)
+        .all()
+    ):
+        waitlist_by_game[entry.game_id].append(
+            DropInSummary(id=entry.id, player_name=player.name)
+        )
+
+    games = [
+        GameDetailOut(
+            id=game.id,
+            date=game.date,
+            status=game.status,
+            absent_player_names=absences_by_game[game.id],
+            confirmed_drop_ins=confirmed_by_game[game.id],
+            waitlist_entries=waitlist_by_game[game.id],
+        )
+        for game in game_rows
+    ]
+
+    return SeasonDetailOut(
+        id=season_row.id,
+        total_venue_cost=season_row.total_venue_cost,
+        capacity=season_row.capacity,
+        members=[MemberOut(id=m.id, name=m.name) for m in member_rows],
+        games=games,
     )
 
 

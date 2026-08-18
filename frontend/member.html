@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VolleyFlow - 會員頁</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 480px; margin: 0 auto; padding: 16px; background: #f7f7f8; }
+  h1 { font-size: 20px; }
+  .setup { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .setup input { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 6px; min-width: 80px; }
+  .setup button { padding: 8px 12px; border: none; border-radius: 6px; background: #06c755; color: white; }
+  .game { background: white; border-radius: 10px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .game-header { display: flex; justify-content: space-between; align-items: center; }
+  .status { font-size: 14px; color: #555; }
+  .status.absent { color: #d9534f; }
+  .status.confirmed { color: #06c755; }
+  .status.waitlisted { color: #f0ad4e; }
+  .roster { font-size: 12px; color: #888; margin-top: 6px; }
+  button.action { padding: 6px 10px; border: none; border-radius: 6px; background: #06c755; color: white; }
+  button.action.cancel { background: #d9534f; }
+  #error { color: #d9534f; font-size: 14px; }
+</style>
+</head>
+<body>
+  <h1>本季場次</h1>
+  <div id="identity" class="status"></div>
+  <div class="setup">
+    <input id="season-id" type="number" placeholder="季別 ID" value="1">
+    <input id="player-name" type="text" placeholder="你的名字">
+    <button onclick="loadSeason()">載入</button>
+  </div>
+  <div id="error"></div>
+  <div id="games"></div>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8000";
+    const LIFF_ID = "2011156233-6CouG6VI";
+
+    // Try to get the player's real LINE identity via LIFF. If this page
+    // wasn't opened through LIFF (e.g. testing directly in a desktop
+    // browser), fall back to the manual name input below — the API
+    // identifies players by name either way, so nothing else changes.
+    (async function initLiff() {
+      const identityEl = document.getElementById("identity");
+      try {
+        await liff.init({ liffId: LIFF_ID });
+        if (!liff.isLoggedIn()) {
+          liff.login();
+          return; // page reloads after LINE login redirects back
+        }
+        const profile = await liff.getProfile();
+        const nameInput = document.getElementById("player-name");
+        nameInput.value = profile.displayName;
+        nameInput.disabled = true;
+        identityEl.textContent = `已用 LINE 身分登入：${profile.displayName}`;
+      } catch (e) {
+        console.warn("LIFF unavailable, falling back to manual name entry:", e);
+        identityEl.textContent = "（非 LINE 環境，手動輸入名字測試）";
+      }
+    })();
+
+    async function loadSeason() {
+      const seasonId = document.getElementById("season-id").value;
+      const errorEl = document.getElementById("error");
+      errorEl.textContent = "";
+      try {
+        const res = await fetch(`${API_BASE}/seasons/${seasonId}`);
+        if (!res.ok) { errorEl.textContent = "找不到這一季"; return; }
+        const season = await res.json();
+        renderGames(season);
+      } catch (e) {
+        errorEl.textContent = "連不上伺服器：" + e.message;
+      }
+    }
+
+    function renderGames(season) {
+      const playerName = document.getElementById("player-name").value.trim();
+      const isMember = season.members.some((m) => m.name === playerName);
+      const container = document.getElementById("games");
+      container.innerHTML = "";
+
+      for (const game of season.games) {
+        const isAbsent = game.absent_player_names.includes(playerName);
+        const myDropIn = game.confirmed_drop_ins.find((d) => d.player_name === playerName);
+        const myWaitlist = game.waitlist_entries.find((d) => d.player_name === playerName);
+
+        let statusClass = "";
+        let statusText = "";
+        let actionHtml = "";
+
+        if (isMember) {
+          statusClass = isAbsent ? "absent" : "";
+          statusText = isAbsent ? "已請假" : "預期出席";
+          if (!isAbsent) {
+            actionHtml = `<button class="action" onclick="recordAbsence(${game.id})">請假</button>`;
+          }
+        } else if (myDropIn) {
+          statusClass = "confirmed";
+          statusText = "已報名（確認）";
+          actionHtml = `<button class="action cancel" onclick="cancelDropIn(${myDropIn.id})">取消</button>`;
+        } else if (myWaitlist) {
+          statusClass = "waitlisted";
+          statusText = "候補中";
+          actionHtml = `<button class="action cancel" onclick="cancelDropIn(${myWaitlist.id})">取消候補</button>`;
+        } else {
+          statusText = "尚未報名";
+          actionHtml = playerName
+            ? `<button class="action" onclick="signUp(${game.id})">+1 報名</button>`
+            : "";
+        }
+
+        const div = document.createElement("div");
+        div.className = "game";
+        div.innerHTML = `
+          <div class="game-header">
+            <strong>${game.date}</strong>
+            <span class="status ${statusClass}">${statusText}</span>
+          </div>
+          <div>${actionHtml}</div>
+          <div class="roster">
+            請假：${game.absent_player_names.join("、") || "無"}<br>
+            臨打確認：${game.confirmed_drop_ins.map((d) => d.player_name).join("、") || "無"}<br>
+            候補：${game.waitlist_entries.map((d) => d.player_name).join("、") || "無"}
+          </div>
+        `;
+        container.appendChild(div);
+      }
+    }
+
+    async function postJson(path, body) {
+      const res = await fetch(`${API_BASE}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || res.statusText);
+      return data;
+    }
+
+    async function recordAbsence(gameId) {
+      const playerName = document.getElementById("player-name").value.trim();
+      try {
+        await postJson("/absences", { player_name: playerName, game_id: gameId });
+        loadSeason();
+      } catch (e) {
+        alert("請假失敗：" + e.message);
+      }
+    }
+
+    async function signUp(gameId) {
+      const playerName = document.getElementById("player-name").value.trim();
+      try {
+        const data = await postJson("/drop-ins", { player_name: playerName, game_id: gameId });
+        alert(data.status === "confirmed" ? "報名成功！" : "已加入候補名單");
+        loadSeason();
+      } catch (e) {
+        alert("報名失敗：" + e.message);
+      }
+    }
+
+    async function cancelDropIn(dropInId) {
+      try {
+        await postJson(`/drop-ins/${dropInId}/cancel`, {});
+        loadSeason();
+      } catch (e) {
+        alert("取消失敗：" + e.message);
+      }
+    }
+  </script>
+</body>
+</html>

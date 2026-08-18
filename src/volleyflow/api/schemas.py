@@ -80,3 +80,31 @@ class MemberSettlementOut(BaseModel):
 class SettlementOut(BaseModel):
     season_id: int
     members: list[MemberSettlementOut]
+
+
+class MemberOut(BaseModel):
+    id: int
+    name: str
+
+
+class DropInSummary(BaseModel):
+    id: int
+    """The drop-in or waitlist entry id — pass this to the cancel endpoint."""
+    player_name: str
+
+
+class GameDetailOut(BaseModel):
+    id: int
+    date: date
+    status: GameStatus
+    absent_player_names: list[str]
+    confirmed_drop_ins: list[DropInSummary]
+    waitlist_entries: list[DropInSummary]
+
+
+class SeasonDetailOut(BaseModel):
+    id: int
+    total_venue_cost: Decimal
+    capacity: int
+    members: list[MemberOut]
+    games: list[GameDetailOut]

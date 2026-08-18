@@ -161,3 +161,62 @@ Key commands:
 uv run uvicorn volleyflow.api.main:app --port 8000   # run the dev server
 # then open http://127.0.0.1:8000/docs for interactive Swagger UI
 ```
+
+## 2026-08-18 — LIFF frontend (Milestone 3 complete)
+
+Plain HTML/JS pages (no build step, no framework) plus one read endpoint
+milestone 2 was missing, plus two real performance bugs found by actually
+using the pages instead of just passing tests.
+
+- `GET /seasons/{id}` — the read endpoint the frontend actually needs:
+  every game in the season plus, per game, who's absent, who's a
+  confirmed drop-in (with their drop-in id, needed to cancel), and who's
+  waitlisted (same). Didn't exist before because milestone 2's five
+  endpoints were all writes; nothing was built yet.
+- `frontend/member.html` — this season's games, with a 請假/+1/取消
+  button per game depending on whether the viewer is a season member,
+  a confirmed drop-in, or waitlisted. `frontend/organizer.html` —
+  attendance per game plus the settlement table, one screen.
+- CORS added to the FastAPI app (`allow_origins=["*"]`) — without it
+  the browser blocks every request from a page served on a different
+  origin before it reaches a route at all.
+- Two real performance problems, found because the pages felt slow, not
+  because a test caught them:
+  - `db/engine.py`'s `get_engine()` called `create_engine()` fresh on
+    every request — a new connection pool (full TCP+TLS handshake to
+    Neon) before a single query could run. Fixed with `@lru_cache`, a
+    lazy singleton: still nothing happens at import time, but the
+    engine is built once and reused.
+  - `GET /seasons/{id}` ran 3 queries per game in a loop (absences,
+    confirmed drop-ins, waitlist) — the classic N+1 problem. Fixed by
+    querying all of a season's games at once with `game_id.in_(...)`
+    and grouping the results by game_id in Python instead.
+  - Measured: `GET /seasons/{id}` went from a consistent ~2s to ~0.4s
+    once warm.
+- LIFF integration: registered a LINE Login channel + LIFF app in the
+  LINE Developers Console, added the LIFF SDK to `member.html`. On
+  load it calls `liff.init()` and `liff.getProfile()` to fill in the
+  player's real LINE display name (falls back to the manual name input
+  if LIFF isn't available, e.g. testing outside LINE). Hit a "channel
+  is in developing status, user needs developer role" error the first
+  time — caused by creating the channel under a different LINE identity
+  than the one on the test phone; fixed by recreating the channel
+  logged in as the actual phone account instead of chasing the
+  cross-account role-invite flow.
+- LIFF requires an HTTPS endpoint, which localhost isn't. Used
+  `cloudflared tunnel --url http://127.0.0.1:5500` to get a temporary
+  public HTTPS URL for the local frontend — ngrok was tried first but
+  Windows Defender flagged the downloaded binary, so switched tools
+  rather than override the antivirus warning. cloudflared's free quick
+  tunnels get a new random URL every restart, so the LIFF app's
+  endpoint URL has to be updated each time the tunnel restarts; a
+  stable URL only exists once this deploys for real in milestone 4.
+  Verified end to end on an actual phone inside the LINE app: the page
+  loads the real LINE display name automatically, no typing required.
+
+Key commands:
+```
+uv run uvicorn volleyflow.api.main:app --port 8000        # API
+python -m http.server 5500                                # frontend, from frontend/
+cloudflared tunnel --url http://127.0.0.1:5500             # public HTTPS for LIFF testing
+```

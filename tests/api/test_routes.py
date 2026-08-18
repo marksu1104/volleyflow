@@ -241,3 +241,48 @@ def test_settlement_for_an_unknown_season_returns_404(client: TestClient) -> Non
     response = client.get("/seasons/999999/settlement")
 
     assert response.status_code == 404
+
+
+def test_get_season_lists_games_and_members(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice", "Bob"])
+
+    response = client.get(f"/seasons/{season['id']}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert {m["name"] for m in body["members"]} == {"Alice", "Bob"}
+    assert len(body["games"]) == 2
+    assert body["games"][0]["absent_player_names"] == []
+    assert body["games"][0]["confirmed_drop_ins"] == []
+    assert body["games"][0]["waitlist_entries"] == []
+
+
+def test_get_season_reflects_absences_signups_and_waitlist(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["Alice"], capacity=1)
+    game_id = season["games"][0]["id"]
+    client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
+    bob_signup = client.post(
+        "/drop-ins", json={"player_name": "Bob", "game_id": game_id}
+    )
+    carol_signup = client.post(
+        "/drop-ins", json={"player_name": "Carol", "game_id": game_id}
+    )
+
+    response = client.get(f"/seasons/{season['id']}")
+
+    game = next(g for g in response.json()["games"] if g["id"] == game_id)
+    assert game["absent_player_names"] == ["Alice"]
+    assert game["confirmed_drop_ins"] == [
+        {"id": bob_signup.json()["id"], "player_name": "Bob"}
+    ]
+    assert game["waitlist_entries"] == [
+        {"id": carol_signup.json()["id"], "player_name": "Carol"}
+    ]
+
+
+def test_get_season_for_an_unknown_season_returns_404(client: TestClient) -> None:
+    response = client.get("/seasons/999999")
+
+    assert response.status_code == 404
