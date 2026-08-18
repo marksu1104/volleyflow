@@ -19,6 +19,7 @@ class SeasonCreate(BaseModel):
     game_dates: list[date] = Field(min_length=1)
     member_names: list[str] = Field(min_length=1)
     capacity: int = 18
+    minimum_roster: int = 12
 
 
 class GameOut(BaseModel):
@@ -31,6 +32,7 @@ class SeasonOut(BaseModel):
     id: int
     total_venue_cost: Decimal
     capacity: int
+    minimum_roster: int
     games: list[GameOut]
     member_ids: list[int]
 
@@ -106,5 +108,6 @@ class SeasonDetailOut(BaseModel):
     id: int
     total_venue_cost: Decimal
     capacity: int
+    minimum_roster: int
     members: list[MemberOut]
     games: list[GameDetailOut]

@@ -33,6 +33,9 @@ class SeasonRow(Base):
     id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     total_venue_cost: Mapped[Decimal] = mapped_column(Numeric(10, 0))
     capacity: Mapped[int] = mapped_column(default=18)
+    minimum_roster: Mapped[int] = mapped_column(default=12)
+    """Below this expected attendance, the organizer gets a short-roster
+    alert. Default 12 is two full 6-a-side sides."""
 
 
 class SeasonMemberRow(Base):

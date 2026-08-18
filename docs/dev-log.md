@@ -220,3 +220,54 @@ uv run uvicorn volleyflow.api.main:app --port 8000        # API
 python -m http.server 5500                                # frontend, from frontend/
 cloudflared tunnel --url http://127.0.0.1:5500             # public HTTPS for LIFF testing
 ```
+
+## 2026-08-19 — LINE Messaging integration (Milestone 4, part 1)
+
+Pre-game reminders and short-roster alerts, per CLAUDE.md 2.3. Deployment
+and keep-awake are still open — this is just the notification half.
+
+- A LIFF channel (milestone 3) and a Messaging API channel are different
+  things in LINE Developers Console; Messaging API channels can no
+  longer be created directly there — you create a LINE Official Account
+  first, then enable Messaging API on it from the Official Account
+  Manager, which links back to a channel in the console.
+- `notify/line_client.py` — a thin wrapper around the push-message
+  endpoint, with two named functions (`push_to_user`, `push_to_group`)
+  even though they call the same underlying request, because at the
+  call site it matters a lot whether a line of code messages one person
+  or the whole group — unlike `drop_in_fee` back in milestone 1, this
+  isn't a no-op wrapper, the two names carry real meaning.
+- `notify/reminders.py` — for a game, the expected roster is fixed
+  members minus that game's absences, plus confirmed drop-ins. Always
+  pushes the roster to the group (if `LINE_GROUP_ID` is configured);
+  additionally alerts the organizer alone, never the group or the
+  waitlist, when the roster is under the season's `minimum_roster` — a
+  new per-season configurable column (default 12, two 6-a-side sides),
+  same server_default-then-drop migration pattern as `capacity` for
+  backfilling existing rows.
+- `api/line_webhook.py` — verifies LINE's HMAC-SHA256 request signature
+  using the channel secret before trusting anything in the body. Right
+  now it only logs events; the immediate reason it exists is to capture
+  the volleyball group's LINE group id once the bot is added to it
+  (deferred — didn't want to add a still-being-tested bot to the real
+  group chat) — logging first, deciding what to automate later.
+- LIFF needed an HTTPS endpoint for local testing; the Messaging API
+  webhook needs the same thing, but pointed at the API (port 8000) not
+  the frontend (port 5500) — a second `cloudflared` tunnel, since one
+  tunnel is one port.
+- Verified end to end twice against the real LINE API: a direct push to
+  the organizer's own user id, then the full `send_reminders_for_date`
+  path against a real season in Neon — both arrived on an actual phone.
+- `.github/workflows/reminders.yml` runs the script daily; it doesn't
+  try to know the group's actual game day, it just checks whether any
+  game is scheduled for tomorrow and no-ops otherwise. Talks to Neon
+  and the LINE API directly — no dependency on the web API being
+  deployed or awake, so this keeps working even before Render exists.
+
+64 tests, 98% coverage.
+
+Key commands:
+```
+uv run python -m volleyflow.notify.reminders   # run the reminder job once, for real
+gh workflow run reminders.yml                  # trigger the scheduled job manually
+```

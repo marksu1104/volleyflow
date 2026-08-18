@@ -1,0 +1,31 @@
+name: Send game reminders
+
+on:
+  schedule:
+    # 01:00 UTC = 09:00 Taiwan time. Runs daily; the script itself finds
+    # whether any game is scheduled for tomorrow and no-ops otherwise, so
+    # it doesn't need to know the group's actual game day.
+    - cron: "0 1 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Send reminders
+        run: uv run python -m volleyflow.notify.reminders
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_ORGANIZER_USER_ID: ${{ secrets.LINE_ORGANIZER_USER_ID }}
+          LINE_GROUP_ID: ${{ secrets.LINE_GROUP_ID }}

@@ -133,7 +133,9 @@ def _promote_from_waitlist(db: Session, game_id: int) -> int | None:
 @router.post("/seasons", response_model=SeasonOut)
 def start_season(payload: SeasonCreate, db: Session = Depends(get_db)) -> SeasonOut:
     season = SeasonRow(
-        total_venue_cost=payload.total_venue_cost, capacity=payload.capacity
+        total_venue_cost=payload.total_venue_cost,
+        capacity=payload.capacity,
+        minimum_roster=payload.minimum_roster,
     )
     db.add(season)
     db.flush()
@@ -155,6 +157,7 @@ def start_season(payload: SeasonCreate, db: Session = Depends(get_db)) -> Season
         id=season.id,
         total_venue_cost=season.total_venue_cost,
         capacity=season.capacity,
+        minimum_roster=season.minimum_roster,
         games=[GameOut(id=g.id, date=g.date, status=g.status) for g in games],
         member_ids=member_ids,
     )
@@ -227,6 +230,7 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
         id=season_row.id,
         total_venue_cost=season_row.total_venue_cost,
         capacity=season_row.capacity,
+        minimum_roster=season_row.minimum_roster,
         members=[MemberOut(id=m.id, name=m.name) for m in member_rows],
         games=games,
     )
