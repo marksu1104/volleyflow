@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VolleyFlow - 主揪儀表板</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 720px; margin: 0 auto; padding: 16px; background: #f7f7f8; }
+  h1 { font-size: 20px; }
+  h2 { font-size: 16px; margin-top: 28px; }
+  .setup { display: flex; gap: 8px; margin-bottom: 16px; }
+  .setup input { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+  .setup button { padding: 8px 12px; border: none; border-radius: 6px; background: #06c755; color: white; }
+  table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 14px; }
+  th { background: #fafafa; }
+  .owed-positive { color: #06c755; }
+  .owed-negative { color: #d9534f; }
+  #error { color: #d9534f; font-size: 14px; }
+</style>
+</head>
+<body>
+  <h1>主揪儀表板</h1>
+  <div class="setup">
+    <input id="season-id" type="number" placeholder="季別 ID" value="1">
+    <button onclick="loadDashboard()">載入</button>
+  </div>
+  <div id="error"></div>
+
+  <h2>每場出席狀況</h2>
+  <table>
+    <thead>
+      <tr><th>日期</th><th>狀態</th><th>請假</th><th>臨打確認</th><th>候補</th></tr>
+    </thead>
+    <tbody id="attendance-body"></tbody>
+  </table>
+
+  <h2>結算（正值 = 主揪應退還，負值 = 該成員尚欠款）</h2>
+  <table>
+    <thead>
+      <tr><th>會員</th><th>季費</th><th>退費</th><th>結餘</th></tr>
+    </thead>
+    <tbody id="settlement-body"></tbody>
+  </table>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8000";
+
+    async function loadDashboard() {
+      const seasonId = document.getElementById("season-id").value;
+      const errorEl = document.getElementById("error");
+      errorEl.textContent = "";
+      try {
+        const [seasonRes, settlementRes] = await Promise.all([
+          fetch(`${API_BASE}/seasons/${seasonId}`),
+          fetch(`${API_BASE}/seasons/${seasonId}/settlement`),
+        ]);
+        if (!seasonRes.ok || !settlementRes.ok) {
+          errorEl.textContent = "找不到這一季";
+          return;
+        }
+        renderAttendance(await seasonRes.json());
+        renderSettlement(await settlementRes.json());
+      } catch (e) {
+        errorEl.textContent = "連不上伺服器：" + e.message;
+      }
+    }
+
+    function renderAttendance(season) {
+      const body = document.getElementById("attendance-body");
+      body.innerHTML = "";
+      for (const game of season.games) {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${game.date}</td>
+          <td>${game.status}</td>
+          <td>${game.absent_player_names.join("、") || "-"}</td>
+          <td>${game.confirmed_drop_ins.map((d) => d.player_name).join("、") || "-"}</td>
+          <td>${game.waitlist_entries.map((d) => d.player_name).join("、") || "-"}</td>
+        `;
+        body.appendChild(row);
+      }
+    }
+
+    function renderSettlement(settlement) {
+      const body = document.getElementById("settlement-body");
+      body.innerHTML = "";
+      for (const member of settlement.members) {
+        const row = document.createElement("tr");
+        const netClass = Number(member.net) >= 0 ? "owed-positive" : "owed-negative";
+        row.innerHTML = `
+          <td>${member.player_name}</td>
+          <td>${member.season_fee}</td>
+          <td>${member.refund}</td>
+          <td class="${netClass}">${member.net}</td>
+        `;
+        body.appendChild(row);
+      }
+    }
+  </script>
+</body>
+</html>
