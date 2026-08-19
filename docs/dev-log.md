@@ -271,3 +271,49 @@ Key commands:
 uv run python -m volleyflow.notify.reminders   # run the reminder job once, for real
 gh workflow run reminders.yml                  # trigger the scheduled job manually
 ```
+
+## 2026-08-19 — Deployment (Milestone 4, part 2)
+
+Backend on Render, frontend on GitHub Pages, both wired to the real
+LIFF/webhook config instead of temporary local tunnels. Keep-awake
+(UptimeRobot) is the one thing still open.
+
+- Render auto-detected Python and pre-filled a Django-shaped start
+  command (`gunicorn your_application.wsgi`) — wrong framework
+  entirely. Replaced with
+  `uv run uvicorn volleyflow.api.main:app --host 0.0.0.0 --port $PORT`;
+  the host/port aren't optional here — `0.0.0.0` so Render's proxy can
+  reach the process at all, `$PORT` because Render assigns it
+  dynamically per instance, not the `8000` used locally.
+- Region picked to sit next to Neon (`ap-southeast-1`), not the
+  auto-suggested Oregon default — this is the same latency lesson from
+  the N+1/connection-pool fix earlier, just at the server-to-database
+  level instead of client-to-server. Paid off: Render -> Neon measured
+  at ~0.1s per request, faster than this machine's ~0.4s to Neon
+  directly.
+- Pre-Deploy Command (for running `alembic upgrade head` automatically
+  on each deploy) turned out to be gated behind a paid instance type.
+  Skipped rather than upgrade off the free tier — migrations keep being
+  applied manually from a local machine, exactly as they have been the
+  whole project; automating it was a nice-to-have, not a requirement.
+- Frontend deployed to GitHub Pages via
+  `.github/workflows/deploy-pages.yml` (the `actions/deploy-pages`
+  flow, not the classic branch-based Pages setting) — enabled through
+  `gh api repos/.../pages -X POST -f build_type=workflow` rather than
+  clicking through Settings. Serves straight from `frontend/`; no
+  `docs/` folder trick, which would have collided with this project's
+  actual `docs/` (billing rules, this log).
+- `frontend/*.html`'s `API_BASE` switched from `http://127.0.0.1:8000`
+  to the real Render URL. CORS (`allow_origins=["*"]`, set back in
+  milestone 3) needed no changes — confirmed with a manual OPTIONS
+  request carrying the GitHub Pages origin before trusting it in a
+  real browser.
+- LIFF's endpoint URL and the Messaging API webhook URL both moved off
+  the temporary `cloudflared` tunnels onto the permanent GitHub
+  Pages/Render URLs. Verified both for real: a correctly-signed webhook
+  request against the live Render URL returned `200 {"status":"ok"}`,
+  and the LIFF page opened on an actual phone still shows the real LINE
+  display name automatically.
+
+Still open: UptimeRobot (or equivalent) to keep the Render free
+instance from sleeping after 15 minutes idle.
