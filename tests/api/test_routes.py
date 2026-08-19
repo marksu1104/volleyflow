@@ -286,3 +286,10 @@ def test_get_season_for_an_unknown_season_returns_404(client: TestClient) -> Non
     response = client.get("/seasons/999999")
 
     assert response.status_code == 404
+
+
+def test_health_check_returns_ok(client: TestClient) -> None:
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}

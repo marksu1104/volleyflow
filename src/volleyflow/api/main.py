@@ -8,17 +8,23 @@ from volleyflow.api.routes import router
 
 app = FastAPI(title="VolleyFlow")
 
-# The frontend (milestone 3) is plain static HTML/JS served from a
+# The frontend is plain static HTML/JS served from GitHub Pages — a
 # different origin than this API — without CORS enabled, the browser
-# blocks every fetch() call before it reaches a route. Wide open for
-# now; this app has no cookies/session auth to leak, and it'll narrow
-# to the real frontend origin once that's deployed (milestone 4).
+# blocks every fetch() call before it reaches a route.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://marksu1104.github.io"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(router)
 app.include_router(line_webhook_router)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    """Liveness check — no DB touch on purpose, so pinging it to keep
+    the free Render instance awake doesn't also load Neon every time.
+    """
+    return {"status": "ok"}
