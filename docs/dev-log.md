@@ -315,5 +315,12 @@ LIFF/webhook config instead of temporary local tunnels. Keep-awake
   and the LIFF page opened on an actual phone still shows the real LINE
   display name automatically.
 
-Still open: UptimeRobot (or equivalent) to keep the Render free
-instance from sleeping after 15 minutes idle.
+- Added `GET /health` (no DB touch, just a liveness check) specifically
+  as an UptimeRobot target — pinging `/docs` instead would render the
+  full Swagger UI on every check for no reason, and there's no benefit
+  to querying Neon on a keep-awake ping that isn't about DB health.
+  UptimeRobot polls it every 5 minutes, comfortably under Render's
+  15-minute idle-sleep threshold.
+
+Milestone 4 is done: reminders, deployment, and keep-awake all live and
+verified against the real services, not just tests.
