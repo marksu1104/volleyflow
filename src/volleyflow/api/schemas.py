@@ -38,6 +38,18 @@ class SeasonOut(BaseModel):
     member_ids: list[int]
 
 
+class SeasonSummaryOut(BaseModel):
+    """One row in the season picker — enough to label a season without
+    fetching its full detail (dates, not an opaque id)."""
+
+    id: int
+    first_game_date: date
+    last_game_date: date
+    total_games: int
+    member_count: int
+    settled: bool
+
+
 class AbsenceCreate(BaseModel):
     player_name: str
     game_id: int

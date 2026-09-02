@@ -1,0 +1,69 @@
+:root {
+  --ink: #1c2230;
+  --ink-soft: #5b6478;
+  --paper: #f4f5f7;
+  --surface: #ffffff;
+  --accent: #1d6fa0;
+  --accent-soft: #e3eef5;
+  --good: #1d8a5f;
+  --good-soft: #e1f3ea;
+  --warn: #a8660a;
+  --warn-soft: #fbedd9;
+  --bad: #b73a3a;
+  --bad-soft: #fbe4e4;
+  --rule: #e2e5eb;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, "PingFang TC", "Noto Sans TC", "Segoe UI", system-ui, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  margin: 0;
+  padding: 20px 16px 60px;
+  line-height: 1.55;
+}
+.wrap { max-width: 520px; margin: 0 auto; }
+.wrap.wide { max-width: 760px; }
+
+h1 { font-size: 1.2rem; margin: 0 0 4px; }
+h2 { font-size: .9rem; margin: 28px 0 10px; color: var(--ink-soft); font-weight: 600; }
+.sub { color: var(--ink-soft); font-size: .84rem; margin: 0 0 18px; }
+
+/* season picker */
+.season-picker {
+  width: 100%; padding: 11px 12px; border: 1px solid var(--rule); border-radius: 8px;
+  font-size: .95rem; background: var(--surface); color: var(--ink); appearance: none;
+}
+#error { color: var(--bad); font-size: .85rem; margin: 6px 0 0; min-height: 1em; }
+
+/* calendar strip */
+.cal-strip {
+  display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 8px; margin: 14px 0 4px;
+  scrollbar-width: thin;
+}
+.cal-chip {
+  flex: 0 0 auto; width: 52px; padding: 7px 4px; border-radius: 10px; text-align: center;
+  border: 1px solid var(--rule); background: var(--surface); cursor: pointer;
+}
+.cal-chip .wd { font-size: .66rem; color: var(--ink-soft); }
+.cal-chip .day { font-size: 1rem; font-weight: 700; margin: 2px 0; }
+.cal-chip .dot { width: 6px; height: 6px; border-radius: 50%; margin: 0 auto; background: var(--rule); }
+.cal-chip.today { border-color: var(--accent); background: var(--accent-soft); }
+.cal-chip.past { opacity: .5; }
+.cal-chip .dot.has-absence { background: var(--bad); }
+.cal-chip .dot.has-dropins { background: var(--good); }
+.cal-chip .dot.has-waitlist { background: var(--warn); }
+
+/* at-a-glance summary */
+.glance {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 12px;
+  padding: 14px 16px; margin: 4px 0 6px;
+}
+.glance-label { font-size: .74rem; color: var(--ink-soft); margin-bottom: 4px; }
+.glance-main { font-size: 1rem; font-weight: 600; }
+.glance-sub { font-size: .8rem; color: var(--ink-soft); margin-top: 2px; }
+
+.tag { display: inline-block; font-size: .7rem; padding: 1px 7px; border-radius: 10px; margin-right: 4px; }
+.tag.absent { background: var(--bad-soft); color: var(--bad); }
+.tag.confirmed { background: var(--good-soft); color: var(--good); }
+.tag.waitlist { background: var(--warn-soft); color: var(--warn); }

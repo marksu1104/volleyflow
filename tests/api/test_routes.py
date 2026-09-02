@@ -7,6 +7,38 @@ from fastapi.testclient import TestClient
 from tests.api.factories import start_season as _start_season
 
 
+def test_list_seasons_summarizes_each_season(client: TestClient) -> None:
+    _start_season(
+        client, game_dates=["2026-08-18", "2026-08-25"], member_names=["Alice"]
+    )
+
+    response = client.get("/seasons")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["first_game_date"] == "2026-08-18"
+    assert body[0]["last_game_date"] == "2026-08-25"
+    assert body[0]["total_games"] == 2
+    assert body[0]["member_count"] == 1
+    assert body[0]["settled"] is False
+
+
+def test_list_seasons_reflects_settled_status(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    client.post(f"/seasons/{season['id']}/settle")
+
+    body = client.get("/seasons").json()
+
+    assert body[0]["settled"] is True
+
+
+def test_list_seasons_is_empty_with_no_seasons(client: TestClient) -> None:
+    response = client.get("/seasons")
+
+    assert response.json() == []
+
+
 def test_start_season_creates_games_and_members(client: TestClient) -> None:
     body = _start_season(client)
 

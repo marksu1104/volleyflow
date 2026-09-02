@@ -34,6 +34,7 @@ from volleyflow.api.schemas import (
     SeasonDetailOut,
     SeasonOut,
     SeasonSettleOut,
+    SeasonSummaryOut,
     SettlementOut,
 )
 from volleyflow.db.models import (
@@ -238,6 +239,39 @@ def _member_settlement_out(ms: MemberSettlement) -> MemberSettlementOut:
         refund=ms.refund,
         net=ms.net,
     )
+
+
+@router.get("/seasons", response_model=list[SeasonSummaryOut])
+def list_seasons(db: Session = Depends(get_db)) -> list[SeasonSummaryOut]:
+    """Enough per season to label it in a picker — dates, not a bare id
+    a human has no way to recognize.
+    """
+    season_rows = db.query(SeasonRow).order_by(SeasonRow.id.desc()).all()
+    summaries = []
+    for season in season_rows:
+        game_dates = [
+            g.date
+            for g in db.query(GameRow)
+            .filter(GameRow.season_id == season.id)
+            .order_by(GameRow.date)
+            .all()
+        ]
+        member_count = (
+            db.query(SeasonMemberRow)
+            .filter(SeasonMemberRow.season_id == season.id)
+            .count()
+        )
+        summaries.append(
+            SeasonSummaryOut(
+                id=season.id,
+                first_game_date=game_dates[0],
+                last_game_date=game_dates[-1],
+                total_games=len(game_dates),
+                member_count=member_count,
+                settled=season.settled_at is not None,
+            )
+        )
+    return summaries
 
 
 @router.post("/seasons", response_model=SeasonOut)
