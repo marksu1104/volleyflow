@@ -4,52 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VolleyFlow 主揪儀表板</title>
+<link rel="stylesheet" href="shared.css">
 <style>
-  :root {
-    --ink: #1c2230;
-    --ink-soft: #5b6478;
-    --paper: #f4f5f7;
-    --surface: #ffffff;
-    --accent: #1d6fa0;
-    --accent-soft: #e3eef5;
-    --good: #1d8a5f;
-    --good-soft: #e1f3ea;
-    --warn: #a8660a;
-    --warn-soft: #fbedd9;
-    --bad: #b73a3a;
-    --bad-soft: #fbe4e4;
-    --rule: #e2e5eb;
-  }
-  * { box-sizing: border-box; }
-  body {
-    font-family: -apple-system, "PingFang TC", "Noto Sans TC", "Segoe UI", system-ui, sans-serif;
-    background: var(--paper);
-    color: var(--ink);
-    margin: 0;
-    padding: 20px 16px 60px;
-    line-height: 1.55;
-  }
-  .wrap { max-width: 760px; margin: 0 auto; }
-
-  h1 { font-size: 1.2rem; margin: 0 0 4px; }
-  h2 { font-size: .95rem; margin: 32px 0 10px; color: var(--ink-soft); font-weight: 600; }
-  .sub { color: var(--ink-soft); font-size: .84rem; margin: 0 0 20px; }
-
-  .setup { display: flex; gap: 8px; margin-bottom: 4px; }
-  .setup input {
-    flex: 1; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 8px;
-    font-size: .95rem; background: var(--surface);
-  }
-  .setup button {
-    padding: 10px 16px; border: none; border-radius: 8px; background: var(--accent);
-    color: white; font-size: .9rem; font-weight: 600; cursor: pointer;
-  }
-  .setup button:active { opacity: .85; }
-  #error { color: var(--bad); font-size: .85rem; margin-top: 8px; min-height: 1em; }
-
-  .season-meta {
-    display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px;
-  }
+  .season-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
   .pill {
     background: var(--surface); border: 1px solid var(--rule); border-radius: 20px;
     padding: 5px 12px; font-size: .78rem; color: var(--ink-soft);
@@ -59,17 +16,14 @@
 
   .card {
     background: var(--surface); border-radius: 12px; padding: 14px 16px;
-    margin-bottom: 8px; border: 1px solid var(--rule);
+    margin-bottom: 8px; border: 1px solid var(--rule); scroll-margin-top: 12px;
   }
+  .card.today { border-color: var(--accent); }
   .card-top { display: flex; justify-content: space-between; align-items: baseline; }
   .card-date { font-weight: 600; font-size: .95rem; }
+  .card-when { font-size: .72rem; color: var(--ink-soft); margin-left: 6px; }
   .card-status { font-size: .74rem; color: var(--ink-soft); }
   .roster-line { font-size: .82rem; color: var(--ink-soft); margin-top: 6px; }
-  .roster-line b { color: var(--ink); font-weight: 500; }
-  .tag { display: inline-block; font-size: .7rem; padding: 1px 7px; border-radius: 10px; margin-right: 4px; }
-  .tag.absent { background: var(--bad-soft); color: var(--bad); }
-  .tag.confirmed { background: var(--good-soft); color: var(--good); }
-  .tag.waitlist { background: var(--warn-soft); color: var(--warn); }
 
   .tbl-scroll { overflow-x: auto; border-radius: 12px; border: 1px solid var(--rule); }
   table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: .86rem; }
@@ -81,36 +35,35 @@
   .amt-negative { color: var(--bad); }
 
   .pay-form { display: flex; gap: 4px; align-items: center; }
-  .pay-form input {
-    width: 70px; padding: 5px 6px; border: 1px solid var(--rule); border-radius: 6px; font-size: .82rem;
-  }
+  .pay-form input { width: 70px; padding: 5px 6px; border: 1px solid var(--rule); border-radius: 6px; font-size: .82rem; }
   .pay-form button {
     padding: 5px 8px; border: none; border-radius: 6px; background: var(--accent-soft);
     color: var(--accent); font-size: .78rem; font-weight: 600; cursor: pointer; white-space: nowrap;
   }
 
   .settle-row { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
-  .settle-btn {
-    padding: 10px 18px; border: none; border-radius: 8px; background: var(--ink);
-    color: white; font-size: .88rem; font-weight: 600; cursor: pointer;
-  }
+  .settle-btn { padding: 10px 18px; border: none; border-radius: 8px; background: var(--ink); color: white; font-size: .88rem; font-weight: 600; cursor: pointer; }
   .settle-btn:disabled { background: var(--rule); color: var(--ink-soft); cursor: default; }
   .settle-note { font-size: .78rem; color: var(--ink-soft); }
-
   .empty { color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center; }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="wrap wide">
   <h1>主揪儀表板</h1>
   <p class="sub">出席狀況與收支，一頁看完</p>
 
-  <div class="setup">
-    <input id="season-id" type="number" placeholder="季別 ID" value="1">
-    <button onclick="loadDashboard()">載入</button>
-  </div>
+  <select id="season-picker" class="season-picker"></select>
   <div id="error"></div>
   <div id="season-meta" class="season-meta"></div>
+
+  <div id="glance" class="glance" style="display:none">
+    <div class="glance-label">下一場</div>
+    <div id="glance-main" class="glance-main"></div>
+    <div id="glance-sub" class="glance-sub"></div>
+  </div>
+
+  <div id="cal-strip" class="cal-strip"></div>
 
   <h2>每場出席狀況</h2>
   <div id="attendance-list"></div>
@@ -138,12 +91,16 @@
   </div>
 </div>
 
+<script src="shared.js"></script>
 <script>
   const API_BASE = "https://volleyflow.onrender.com";
   let currentSeason = null;
 
-  async function loadDashboard() {
-    const seasonId = document.getElementById("season-id").value;
+  initSeasonPicker(API_BASE, document.getElementById("season-picker"), "vf_org_season", (id) => {
+    if (id) loadDashboard(id);
+  });
+
+  async function loadDashboard(seasonId) {
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
     try {
@@ -160,6 +117,10 @@
       currentSeason = season;
 
       renderMeta(season);
+      renderGlance(season);
+      renderCalStrip(document.getElementById("cal-strip"), season.games, (gameId) => {
+        document.getElementById(`game-${gameId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
       renderAttendance(season);
       await renderSettlement(season, settlement);
     } catch (e) {
@@ -182,6 +143,19 @@
       : "結算後會把每人季費／退費寫進帳本，且不能重複結算";
   }
 
+  function renderGlance(season) {
+    const box = document.getElementById("glance");
+    const upcoming = season.games.find((g) => !describeDate(g.date).isPast) || season.games[season.games.length - 1];
+    if (!upcoming) { box.style.display = "none"; return; }
+    const info = describeDate(upcoming.date);
+    document.getElementById("glance-main").textContent = `${info.label}${info.relative ? "・" + info.relative : ""}`;
+    const expected = season.members.length - upcoming.absent_player_names.length + upcoming.confirmed_drop_ins.length;
+    document.getElementById("glance-sub").textContent =
+      `預計出席 ${expected} 人${upcoming.waitlist_entries.length ? `・候補 ${upcoming.waitlist_entries.length} 人` : ""}` +
+      (expected < season.minimum_roster ? "・低於人數門檻" : "");
+    box.style.display = "block";
+  }
+
   function renderAttendance(season) {
     const list = document.getElementById("attendance-list");
     list.innerHTML = "";
@@ -190,17 +164,16 @@
       return;
     }
     for (const game of season.games) {
+      const info = describeDate(game.date);
       const div = document.createElement("div");
-      div.className = "card";
-      const absentTags = game.absent_player_names
-        .map((n) => `<span class="tag absent">${n}</span>`).join("");
-      const confirmedTags = game.confirmed_drop_ins
-        .map((d) => `<span class="tag confirmed">${d.player_name}</span>`).join("");
-      const waitlistTags = game.waitlist_entries
-        .map((d) => `<span class="tag waitlist">${d.player_name}</span>`).join("");
+      div.className = "card" + (info.isToday ? " today" : "");
+      div.id = `game-${game.id}`;
+      const absentTags = game.absent_player_names.map((n) => `<span class="tag absent">${n}</span>`).join("");
+      const confirmedTags = game.confirmed_drop_ins.map((d) => `<span class="tag confirmed">${d.player_name}</span>`).join("");
+      const waitlistTags = game.waitlist_entries.map((d) => `<span class="tag waitlist">${d.player_name}</span>`).join("");
       div.innerHTML = `
         <div class="card-top">
-          <span class="card-date">${game.date}</span>
+          <span><span class="card-date">${info.label}</span><span class="card-when">${info.relative}</span></span>
           <span class="card-status">${statusLabel(game.status)}</span>
         </div>
         ${absentTags || confirmedTags || waitlistTags
@@ -268,7 +241,7 @@
       alert("結算失敗：" + (data.detail || res.statusText));
       return;
     }
-    loadDashboard();
+    loadDashboard(currentSeason.id);
   }
 
   async function recordPayment(playerId) {
@@ -289,7 +262,7 @@
       alert("記錄失敗：" + (data.detail || res.statusText));
       return;
     }
-    loadDashboard();
+    loadDashboard(currentSeason.id);
   }
 </script>
 </body>
