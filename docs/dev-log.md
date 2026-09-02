@@ -368,3 +368,41 @@ nobody queries."
   real HTTP requests, not just the 12 new pytest cases.
 
 77 tests, 98% coverage.
+
+## 2026-09-02 — Frontend UX pass
+
+User feedback after using the redesigned pages: picking a season by a
+bare numeric id made no sense, a manual "load" click was friction, and
+there was no way to see attendance at a glance or get a sense of time.
+
+- `GET /seasons` — didn't exist before; every other endpoint expects
+  you to already know a season's id. Returns just enough to label one
+  (date range, game count, member count, settled status), not the full
+  detail payload.
+- Both pages: the id `<input>` + "載入" button became a `<select>`
+  populated from `GET /seasons`, auto-loading on change — no button.
+  Last choice remembered per-page via `localStorage` so returning
+  doesn't mean re-picking.
+- `frontend/shared.css` and `frontend/shared.js` — the two pages had
+  started drifting apart on how they showed the same data (second time
+  this happened, after `factories.py` for tests); extracted once real
+  duplication existed rather than upfront.
+- Every date now shows weekday + a relative hint (今天/明天/N 天後/已結束)
+  instead of a bare ISO date — `describeDate()` in `shared.js`.
+- A horizontal date-chip strip gives an at-a-glance read of the whole
+  season (colour-coded dot per game: absence / drop-in / waitlist),
+  clickable to scroll to that game's card — a lighter alternative to a
+  full month-grid calendar, which would be mostly empty days for a
+  once-a-week game.
+- A "下一場" glance card surfaces the nearest upcoming game's expected
+  attendance without scrolling the full list.
+- Visual design: dropped the heavier card-shadow look from the first
+  pass for a flatter, border-based one — asked for something "not too
+  AI-feeling"; tried to find a specific Taiwan volleyball-booking app
+  the user likes for reference but couldn't get real screenshots of it,
+  so this is judgment-call design, not a matched reference.
+- Known gap surfaced by testing this for real: `/seasons` now visibly
+  lists all 9 seasons created while testing this project — needs a
+  cleanup pass before real handoff to the group.
+
+80 tests, 99% coverage.
