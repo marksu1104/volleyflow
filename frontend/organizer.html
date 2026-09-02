@@ -3,100 +3,294 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VolleyFlow - 主揪儀表板</title>
+<title>VolleyFlow 主揪儀表板</title>
 <style>
-  body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 720px; margin: 0 auto; padding: 16px; background: #f7f7f8; }
-  h1 { font-size: 20px; }
-  h2 { font-size: 16px; margin-top: 28px; }
-  .setup { display: flex; gap: 8px; margin-bottom: 16px; }
-  .setup input { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
-  .setup button { padding: 8px 12px; border: none; border-radius: 6px; background: #06c755; color: white; }
-  table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 14px; }
-  th { background: #fafafa; }
-  .owed-positive { color: #06c755; }
-  .owed-negative { color: #d9534f; }
-  #error { color: #d9534f; font-size: 14px; }
+  :root {
+    --ink: #1c2230;
+    --ink-soft: #5b6478;
+    --paper: #f4f5f7;
+    --surface: #ffffff;
+    --accent: #1d6fa0;
+    --accent-soft: #e3eef5;
+    --good: #1d8a5f;
+    --good-soft: #e1f3ea;
+    --warn: #a8660a;
+    --warn-soft: #fbedd9;
+    --bad: #b73a3a;
+    --bad-soft: #fbe4e4;
+    --rule: #e2e5eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang TC", "Noto Sans TC", "Segoe UI", system-ui, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    margin: 0;
+    padding: 20px 16px 60px;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+
+  h1 { font-size: 1.2rem; margin: 0 0 4px; }
+  h2 { font-size: .95rem; margin: 32px 0 10px; color: var(--ink-soft); font-weight: 600; }
+  .sub { color: var(--ink-soft); font-size: .84rem; margin: 0 0 20px; }
+
+  .setup { display: flex; gap: 8px; margin-bottom: 4px; }
+  .setup input {
+    flex: 1; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 8px;
+    font-size: .95rem; background: var(--surface);
+  }
+  .setup button {
+    padding: 10px 16px; border: none; border-radius: 8px; background: var(--accent);
+    color: white; font-size: .9rem; font-weight: 600; cursor: pointer;
+  }
+  .setup button:active { opacity: .85; }
+  #error { color: var(--bad); font-size: .85rem; margin-top: 8px; min-height: 1em; }
+
+  .season-meta {
+    display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px;
+  }
+  .pill {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 20px;
+    padding: 5px 12px; font-size: .78rem; color: var(--ink-soft);
+  }
+  .pill strong { color: var(--ink); font-weight: 600; }
+  .pill.settled { background: var(--good-soft); color: var(--good); border-color: transparent; }
+
+  .card {
+    background: var(--surface); border-radius: 12px; padding: 14px 16px;
+    margin-bottom: 8px; border: 1px solid var(--rule);
+  }
+  .card-top { display: flex; justify-content: space-between; align-items: baseline; }
+  .card-date { font-weight: 600; font-size: .95rem; }
+  .card-status { font-size: .74rem; color: var(--ink-soft); }
+  .roster-line { font-size: .82rem; color: var(--ink-soft); margin-top: 6px; }
+  .roster-line b { color: var(--ink); font-weight: 500; }
+  .tag { display: inline-block; font-size: .7rem; padding: 1px 7px; border-radius: 10px; margin-right: 4px; }
+  .tag.absent { background: var(--bad-soft); color: var(--bad); }
+  .tag.confirmed { background: var(--good-soft); color: var(--good); }
+  .tag.waitlist { background: var(--warn-soft); color: var(--warn); }
+
+  .tbl-scroll { overflow-x: auto; border-radius: 12px; border: 1px solid var(--rule); }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: .86rem; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  th { font-size: .72rem; color: var(--ink-soft); font-weight: 600; background: var(--paper); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .amt-positive { color: var(--good); }
+  .amt-negative { color: var(--bad); }
+
+  .pay-form { display: flex; gap: 4px; align-items: center; }
+  .pay-form input {
+    width: 70px; padding: 5px 6px; border: 1px solid var(--rule); border-radius: 6px; font-size: .82rem;
+  }
+  .pay-form button {
+    padding: 5px 8px; border: none; border-radius: 6px; background: var(--accent-soft);
+    color: var(--accent); font-size: .78rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+
+  .settle-row { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
+  .settle-btn {
+    padding: 10px 18px; border: none; border-radius: 8px; background: var(--ink);
+    color: white; font-size: .88rem; font-weight: 600; cursor: pointer;
+  }
+  .settle-btn:disabled { background: var(--rule); color: var(--ink-soft); cursor: default; }
+  .settle-note { font-size: .78rem; color: var(--ink-soft); }
+
+  .empty { color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center; }
 </style>
 </head>
 <body>
+<div class="wrap">
   <h1>主揪儀表板</h1>
+  <p class="sub">出席狀況與收支，一頁看完</p>
+
   <div class="setup">
     <input id="season-id" type="number" placeholder="季別 ID" value="1">
     <button onclick="loadDashboard()">載入</button>
   </div>
   <div id="error"></div>
+  <div id="season-meta" class="season-meta"></div>
 
   <h2>每場出席狀況</h2>
-  <table>
-    <thead>
-      <tr><th>日期</th><th>狀態</th><th>請假</th><th>臨打確認</th><th>候補</th></tr>
-    </thead>
-    <tbody id="attendance-body"></tbody>
-  </table>
+  <div id="attendance-list"></div>
 
-  <h2>結算（正值 = 主揪應退還，負值 = 該成員尚欠款）</h2>
-  <table>
-    <thead>
-      <tr><th>會員</th><th>季費</th><th>退費</th><th>結餘</th></tr>
-    </thead>
-    <tbody id="settlement-body"></tbody>
-  </table>
+  <h2>結算與收款</h2>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>成員</th>
+          <th class="num">季費</th>
+          <th class="num">退費</th>
+          <th class="num">應收 / 應退</th>
+          <th class="num">已結算餘額</th>
+          <th>記錄收款</th>
+        </tr>
+      </thead>
+      <tbody id="settlement-body"></tbody>
+    </table>
+  </div>
 
-  <script>
-    const API_BASE = "https://volleyflow.onrender.com";
+  <div class="settle-row">
+    <span id="settle-note" class="settle-note"></span>
+    <button id="settle-btn" class="settle-btn" onclick="settleSeason()">結算此季</button>
+  </div>
+</div>
 
-    async function loadDashboard() {
-      const seasonId = document.getElementById("season-id").value;
-      const errorEl = document.getElementById("error");
-      errorEl.textContent = "";
-      try {
-        const [seasonRes, settlementRes] = await Promise.all([
-          fetch(`${API_BASE}/seasons/${seasonId}`),
-          fetch(`${API_BASE}/seasons/${seasonId}/settlement`),
-        ]);
-        if (!seasonRes.ok || !settlementRes.ok) {
-          errorEl.textContent = "找不到這一季";
-          return;
-        }
-        renderAttendance(await seasonRes.json());
-        renderSettlement(await settlementRes.json());
-      } catch (e) {
-        errorEl.textContent = "連不上伺服器：" + e.message;
+<script>
+  const API_BASE = "https://volleyflow.onrender.com";
+  let currentSeason = null;
+
+  async function loadDashboard() {
+    const seasonId = document.getElementById("season-id").value;
+    const errorEl = document.getElementById("error");
+    errorEl.textContent = "";
+    try {
+      const [seasonRes, settlementRes] = await Promise.all([
+        fetch(`${API_BASE}/seasons/${seasonId}`),
+        fetch(`${API_BASE}/seasons/${seasonId}/settlement`),
+      ]);
+      if (!seasonRes.ok || !settlementRes.ok) {
+        errorEl.textContent = "找不到這一季";
+        return;
       }
-    }
+      const season = await seasonRes.json();
+      const settlement = await settlementRes.json();
+      currentSeason = season;
 
-    function renderAttendance(season) {
-      const body = document.getElementById("attendance-body");
-      body.innerHTML = "";
-      for (const game of season.games) {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-          <td>${game.date}</td>
-          <td>${game.status}</td>
-          <td>${game.absent_player_names.join("、") || "-"}</td>
-          <td>${game.confirmed_drop_ins.map((d) => d.player_name).join("、") || "-"}</td>
-          <td>${game.waitlist_entries.map((d) => d.player_name).join("、") || "-"}</td>
-        `;
-        body.appendChild(row);
-      }
+      renderMeta(season);
+      renderAttendance(season);
+      await renderSettlement(season, settlement);
+    } catch (e) {
+      errorEl.textContent = "連不上伺服器：" + e.message;
     }
+  }
 
-    function renderSettlement(settlement) {
-      const body = document.getElementById("settlement-body");
-      body.innerHTML = "";
-      for (const member of settlement.members) {
-        const row = document.createElement("tr");
-        const netClass = Number(member.net) >= 0 ? "owed-positive" : "owed-negative";
-        row.innerHTML = `
-          <td>${member.player_name}</td>
-          <td>${member.season_fee}</td>
-          <td>${member.refund}</td>
-          <td class="${netClass}">${member.net}</td>
-        `;
-        body.appendChild(row);
-      }
+  function renderMeta(season) {
+    const el = document.getElementById("season-meta");
+    const settled = season.settled_at !== null;
+    el.innerHTML = `
+      <span class="pill">場地費 <strong>$${season.total_venue_cost}</strong></span>
+      <span class="pill">人數上限 <strong>${season.capacity}</strong></span>
+      <span class="pill">最低人數門檻 <strong>${season.minimum_roster}</strong></span>
+      <span class="pill ${settled ? "settled" : ""}">${settled ? "已結算" : "尚未結算"}</span>
+    `;
+    document.getElementById("settle-btn").disabled = settled;
+    document.getElementById("settle-note").textContent = settled
+      ? `已於 ${season.settled_at.slice(0, 16).replace("T", " ")} 結算`
+      : "結算後會把每人季費／退費寫進帳本，且不能重複結算";
+  }
+
+  function renderAttendance(season) {
+    const list = document.getElementById("attendance-list");
+    list.innerHTML = "";
+    if (season.games.length === 0) {
+      list.innerHTML = '<div class="empty">這一季還沒有場次</div>';
+      return;
     }
-  </script>
+    for (const game of season.games) {
+      const div = document.createElement("div");
+      div.className = "card";
+      const absentTags = game.absent_player_names
+        .map((n) => `<span class="tag absent">${n}</span>`).join("");
+      const confirmedTags = game.confirmed_drop_ins
+        .map((d) => `<span class="tag confirmed">${d.player_name}</span>`).join("");
+      const waitlistTags = game.waitlist_entries
+        .map((d) => `<span class="tag waitlist">${d.player_name}</span>`).join("");
+      div.innerHTML = `
+        <div class="card-top">
+          <span class="card-date">${game.date}</span>
+          <span class="card-status">${statusLabel(game.status)}</span>
+        </div>
+        ${absentTags || confirmedTags || waitlistTags
+          ? `<div class="roster-line">${absentTags}${confirmedTags}${waitlistTags}</div>`
+          : '<div class="roster-line">尚無請假或臨打報名</div>'}
+      `;
+      list.appendChild(div);
+    }
+  }
+
+  function statusLabel(status) {
+    if (status === "scheduled") return "如期舉行";
+    if (status === "cancelled_unrefunded") return "取消・場地費不退";
+    if (status === "cancelled_refunded") return "取消・場地費已退";
+    return status;
+  }
+
+  async function renderSettlement(season, settlement) {
+    const body = document.getElementById("settlement-body");
+    body.innerHTML = "";
+    const settled = season.settled_at !== null;
+
+    for (const member of settlement.members) {
+      const memberInfo = season.members.find((m) => m.name === member.player_name);
+      const playerId = memberInfo ? memberInfo.id : null;
+
+      let balanceCell = "—";
+      if (settled && playerId) {
+        const ledger = await fetch(`${API_BASE}/players/${playerId}/ledger`).then((r) => r.json());
+        balanceCell = amountSpan(ledger.balance);
+      }
+
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${member.player_name}</td>
+        <td class="num">$${member.season_fee}</td>
+        <td class="num">$${member.refund}</td>
+        <td class="num">${amountSpan(member.net)}</td>
+        <td class="num">${balanceCell}</td>
+        <td>
+          ${playerId ? `
+            <div class="pay-form">
+              <input type="number" id="pay-${playerId}" placeholder="金額">
+              <button onclick="recordPayment(${playerId})">記收款</button>
+            </div>
+          ` : "-"}
+        </td>
+      `;
+      body.appendChild(row);
+    }
+  }
+
+  function amountSpan(value) {
+    const n = Number(value);
+    const cls = n >= 0 ? "amt-positive" : "amt-negative";
+    return `<span class="${cls}">$${value}</span>`;
+  }
+
+  async function settleSeason() {
+    if (!currentSeason) return;
+    if (!confirm("確定要結算這一季嗎？結算後每人的季費與退費會寫進帳本，且無法重複結算。")) return;
+    const res = await fetch(`${API_BASE}/seasons/${currentSeason.id}/settle`, { method: "POST" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert("結算失敗：" + (data.detail || res.statusText));
+      return;
+    }
+    loadDashboard();
+  }
+
+  async function recordPayment(playerId) {
+    const input = document.getElementById(`pay-${playerId}`);
+    const amount = input.value.trim();
+    if (!amount) return;
+    const res = await fetch(`${API_BASE}/players/${playerId}/payments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount,
+        season_id: currentSeason ? currentSeason.id : null,
+        note: "主揪儀表板手動記錄",
+      }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert("記錄失敗：" + (data.detail || res.statusText));
+      return;
+    }
+    loadDashboard();
+  }
+</script>
 </body>
 </html>
