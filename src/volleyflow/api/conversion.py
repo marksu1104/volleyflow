@@ -6,7 +6,15 @@ the one direction it's allowed to go: db row -> domain object.
 """
 
 from volleyflow.attendance import Absence, DropIn
-from volleyflow.db.models import AbsenceRow, DropInRow, GameRow, PlayerRow, SeasonRow
+from volleyflow.db.models import (
+    AbsenceRow,
+    DropInRow,
+    GameRow,
+    LedgerEntryRow,
+    PlayerRow,
+    SeasonRow,
+)
+from volleyflow.ledger import LedgerEntry
 from volleyflow.players import Player
 from volleyflow.schedule import Game, Season
 
@@ -48,4 +56,13 @@ def drop_in_from_row(
         game=games_by_id[row.game_id],
         signed_up_at=row.signed_up_at,
         cancelled_at=row.cancelled_at,
+    )
+
+
+def ledger_entry_from_row(row: LedgerEntryRow, player: Player) -> LedgerEntry:
+    return LedgerEntry(
+        player=player,
+        entry_type=row.entry_type,
+        amount=row.amount,
+        recorded_at=row.recorded_at,
     )

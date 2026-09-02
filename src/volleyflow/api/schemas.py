@@ -11,6 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from volleyflow.ledger import EntryType
 from volleyflow.schedule import GameStatus
 
 
@@ -109,5 +110,37 @@ class SeasonDetailOut(BaseModel):
     total_venue_cost: Decimal
     capacity: int
     minimum_roster: int
+    settled_at: datetime | None
     members: list[MemberOut]
     games: list[GameDetailOut]
+
+
+class SeasonSettleOut(BaseModel):
+    season_id: int
+    settled_at: datetime
+    members: list[MemberSettlementOut]
+
+
+class PaymentCreate(BaseModel):
+    amount: Decimal
+    """Signed from the player's point of view: positive means the player
+    paid the organizer, negative means the organizer paid the player."""
+    season_id: int | None = None
+    note: str | None = None
+
+
+class LedgerEntryOut(BaseModel):
+    id: int
+    entry_type: EntryType
+    amount: Decimal
+    recorded_at: datetime
+    season_id: int | None
+    note: str | None
+
+
+class PlayerLedgerOut(BaseModel):
+    player_id: int
+    player_name: str
+    balance: Decimal
+    """Positive: the organizer owes the player. Negative: the player owes."""
+    entries: list[LedgerEntryOut]

@@ -324,3 +324,47 @@ LIFF/webhook config instead of temporary local tunnels. Keep-awake
 
 Milestone 4 is done: reminders, deployment, and keep-awake all live and
 verified against the real services, not just tests.
+
+## 2026-09-02 — Ledger endpoints (post-milestone-4 gap fix)
+
+`ledger.py` and `LedgerEntryRow` existed since milestone 1/2 but nothing
+in the API ever wrote to them — `GET .../settlement` recomputed the
+answer from scratch every time and never recorded that anyone actually
+paid. Found by asking "what feels unfinished" after milestone 4, not by
+a test — this whole module had no automated way to surface "a table
+nobody queries."
+
+- `SeasonRow.settled_at` and `LedgerEntryRow.season_id` / `.note` added
+  (nullable, no server_default needed this time — unlike `capacity`
+  and `minimum_roster`, nothing existing violates a NOT NULL default).
+- A confirmed drop-in is charged `share_per_game` the moment they're
+  confirmed — at signup or at waitlist promotion — and refunded the
+  same amount the moment they cancel, via a same-typed entry with the
+  opposite sign rather than a separate "refund" entry type. This mirrors
+  how `PAYMENT` already uses sign for direction instead of two types.
+- `POST /seasons/{id}/settle` runs the exact same `settle_member()`
+  computation `GET .../settlement` already used (extracted into
+  `_gather_member_settlements()` so the two endpoints can't drift apart),
+  then writes `SEASON_FEE_CHARGED` and `ABSENCE_REFUND` entries and sets
+  `settled_at`. Rejects a second call — otherwise settling twice would
+  double-charge every member.
+- Cross-season carry-over needed no new code at all: the ledger is one
+  continuous running sum per player, never scoped or reset per season,
+  so an unpaid balance from one season just gets added to the next
+  season's charge automatically. Milestone 1's `CARRIED_OVER` entry
+  type modeled this as an explicit paired transaction; building the
+  real thing showed that was unnecessary — the type stays in `ledger.py`
+  unused for now rather than ripped out.
+- `POST /players/{id}/payments` records a manual cash movement, signed
+  from the player's side (paying the organizer is positive, receiving a
+  refund is negative) — CLAUDE.md 2.4's "marked received/paid manually
+  by the organizer," no payment gateway.
+- `GET /players/{id}/ledger` returns the full entry history plus the
+  balance `ledger.balance()` computes from it — the first real caller
+  of that milestone-1 function outside its own tests.
+- Verified end to end against real Neon: signup charge, cancel refund,
+  waitlist-promotion charge, season settle (fee + refund), double-settle
+  rejected, manual payment zeroing a balance — all six checked with
+  real HTTP requests, not just the 12 new pytest cases.
+
+77 tests, 98% coverage.
