@@ -36,6 +36,9 @@ class SeasonRow(Base):
     minimum_roster: Mapped[int] = mapped_column(default=12)
     """Below this expected attendance, the organizer gets a short-roster
     alert. Default 12 is two full 6-a-side sides."""
+    settled_at: Mapped[datetime | None] = mapped_column(default=None)
+    """Set once /settle has run for this season — guards against
+    charging member season fees twice."""
 
 
 class SeasonMemberRow(Base):
@@ -94,3 +97,9 @@ class LedgerEntryRow(Base):
     entry_type: Mapped[EntryType] = mapped_column(Enum(EntryType, name="entry_type"))
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 0))
     recorded_at: Mapped[datetime]
+    season_id: Mapped[int | None] = mapped_column(
+        ForeignKey("seasons.id"), default=None
+    )
+    """Which season this relates to, when there is one — a manual cash
+    payment might cover more than one season, so this stays optional."""
+    note: Mapped[str | None] = mapped_column(default=None)
