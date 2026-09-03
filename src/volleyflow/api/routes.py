@@ -280,6 +280,8 @@ def start_season(payload: SeasonCreate, db: Session = Depends(get_db)) -> Season
         total_venue_cost=payload.total_venue_cost,
         capacity=payload.capacity,
         minimum_roster=payload.minimum_roster,
+        game_start_time=payload.game_start_time,
+        game_end_time=payload.game_end_time,
     )
     db.add(season)
     db.flush()
@@ -302,6 +304,8 @@ def start_season(payload: SeasonCreate, db: Session = Depends(get_db)) -> Season
         total_venue_cost=season.total_venue_cost,
         capacity=season.capacity,
         minimum_roster=season.minimum_roster,
+        game_start_time=season.game_start_time,
+        game_end_time=season.game_end_time,
         games=[GameOut(id=g.id, date=g.date, status=g.status) for g in games],
         member_ids=member_ids,
     )
@@ -375,6 +379,8 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
         total_venue_cost=season_row.total_venue_cost,
         capacity=season_row.capacity,
         minimum_roster=season_row.minimum_roster,
+        game_start_time=season_row.game_start_time,
+        game_end_time=season_row.game_end_time,
         settled_at=season_row.settled_at,
         members=[MemberOut(id=m.id, name=m.name) for m in member_rows],
         games=games,

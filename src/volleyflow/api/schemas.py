@@ -5,7 +5,7 @@ receives isn't the same shape as a database row (a request has no id
 yet; a response doesn't need every internal column).
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Literal
 
@@ -21,6 +21,8 @@ class SeasonCreate(BaseModel):
     member_names: list[str] = Field(min_length=1)
     capacity: int = 18
     minimum_roster: int = 12
+    game_start_time: time | None = None
+    game_end_time: time | None = None
 
 
 class GameOut(BaseModel):
@@ -34,6 +36,8 @@ class SeasonOut(BaseModel):
     total_venue_cost: Decimal
     capacity: int
     minimum_roster: int
+    game_start_time: time | None
+    game_end_time: time | None
     games: list[GameOut]
     member_ids: list[int]
 
@@ -122,6 +126,8 @@ class SeasonDetailOut(BaseModel):
     total_venue_cost: Decimal
     capacity: int
     minimum_roster: int
+    game_start_time: time | None
+    game_end_time: time | None
     settled_at: datetime | None
     members: list[MemberOut]
     games: list[GameDetailOut]
