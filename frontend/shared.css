@@ -29,6 +29,19 @@ h1 { font-size: 1.2rem; margin: 0 0 4px; }
 h2 { font-size: .9rem; margin: 28px 0 10px; color: var(--ink-soft); font-weight: 600; }
 .sub { color: var(--ink-soft); font-size: .84rem; margin: 0 0 18px; }
 
+/* buttons — instant-feeling press state everywhere */
+button { transition: transform .08s ease, opacity .15s ease, background-color .15s ease; }
+button:active:not(:disabled) { transform: scale(.96); }
+button:disabled { opacity: .6; cursor: default; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
+
+/* content fade-in so a freshly loaded list doesn't just snap into place */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.game, .card { animation: fadeIn .22s ease both; }
+
 /* season picker */
 .season-picker {
   width: 100%; padding: 11px 12px; border: 1px solid var(--rule); border-radius: 8px;
@@ -36,23 +49,27 @@ h2 { font-size: .9rem; margin: 28px 0 10px; color: var(--ink-soft); font-weight:
 }
 #error { color: var(--bad); font-size: .85rem; margin: 6px 0 0; min-height: 1em; }
 
-/* calendar strip */
-.cal-strip {
-  display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 8px; margin: 14px 0 4px;
-  scrollbar-width: thin;
+/* month calendar */
+.mcal { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; margin: 14px 0 4px; }
+.mcal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.mcal-title { font-weight: 600; font-size: .9rem; }
+.mcal-nav {
+  border: 1px solid var(--rule); background: var(--surface); border-radius: 8px;
+  width: 30px; height: 30px; font-size: 1.05rem; color: var(--ink-soft); cursor: pointer; line-height: 1;
 }
-.cal-chip {
-  flex: 0 0 auto; width: 52px; padding: 7px 4px; border-radius: 10px; text-align: center;
-  border: 1px solid var(--rule); background: var(--surface); cursor: pointer;
+.mcal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.mcal-weekdays { margin-bottom: 4px; }
+.mcal-weekdays div { text-align: center; font-size: .68rem; color: var(--ink-soft); }
+.mcal-cell {
+  aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  border-radius: 8px; font-size: .8rem; color: var(--ink);
 }
-.cal-chip .wd { font-size: .66rem; color: var(--ink-soft); }
-.cal-chip .day { font-size: 1rem; font-weight: 700; margin: 2px 0; }
-.cal-chip .dot { width: 6px; height: 6px; border-radius: 50%; margin: 0 auto; background: var(--rule); }
-.cal-chip.today { border-color: var(--accent); background: var(--accent-soft); }
-.cal-chip.past { opacity: .5; }
-.cal-chip .dot.has-absence { background: var(--bad); }
-.cal-chip .dot.has-dropins { background: var(--good); }
-.cal-chip .dot.has-waitlist { background: var(--warn); }
+.mcal-cell.empty { visibility: hidden; }
+.mcal-cell.today { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.mcal-cell.has-game { cursor: pointer; font-weight: 700; background: var(--paper); }
+.mcal-cell.has-game.today { background: var(--accent-soft); }
+.mcal-cell.has-game:active { transform: scale(.92); }
+.mcal-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); margin-top: 1px; }
 
 /* at-a-glance summary */
 .glance {
@@ -62,6 +79,10 @@ h2 { font-size: .9rem; margin: 28px 0 10px; color: var(--ink-soft); font-weight:
 .glance-label { font-size: .74rem; color: var(--ink-soft); margin-bottom: 4px; }
 .glance-main { font-size: 1rem; font-weight: 600; }
 .glance-sub { font-size: .8rem; color: var(--ink-soft); margin-top: 2px; }
+
+/* attendance fraction, "X/18 已報名" style */
+.fraction { font-weight: 700; }
+.fraction .of { font-weight: 400; color: var(--ink-soft); }
 
 .tag { display: inline-block; font-size: .7rem; padding: 1px 7px; border-radius: 10px; margin-right: 4px; }
 .tag.absent { background: var(--bad-soft); color: var(--bad); }

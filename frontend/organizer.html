@@ -63,7 +63,7 @@
     <div id="glance-sub" class="glance-sub"></div>
   </div>
 
-  <div id="cal-strip" class="cal-strip"></div>
+  <div id="month-cal" class="mcal"></div>
 
   <h2>每場出席狀況</h2>
   <div id="attendance-list"></div>
@@ -118,7 +118,7 @@
 
       renderMeta(season);
       renderGlance(season);
-      renderCalStrip(document.getElementById("cal-strip"), season.games, (gameId) => {
+      renderMonthCalendar(document.getElementById("month-cal"), season.games, (gameId) => {
         document.getElementById(`game-${gameId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
       });
       renderAttendance(season);
@@ -171,11 +171,13 @@
       const absentTags = game.absent_player_names.map((n) => `<span class="tag absent">${n}</span>`).join("");
       const confirmedTags = game.confirmed_drop_ins.map((d) => `<span class="tag confirmed">${d.player_name}</span>`).join("");
       const waitlistTags = game.waitlist_entries.map((d) => `<span class="tag waitlist">${d.player_name}</span>`).join("");
+      const expected = expectedAttendance(season, game);
       div.innerHTML = `
         <div class="card-top">
           <span><span class="card-date">${info.label}</span><span class="card-when">${info.relative}</span></span>
           <span class="card-status">${statusLabel(game.status)}</span>
         </div>
+        <div class="roster-line"><span class="fraction">${expected}<span class="of">/${season.capacity} 已報名</span></span></div>
         ${absentTags || confirmedTags || waitlistTags
           ? `<div class="roster-line">${absentTags}${confirmedTags}${waitlistTags}</div>`
           : '<div class="roster-line">尚無請假或臨打報名</div>'}
@@ -193,37 +195,47 @@
 
   async function renderSettlement(season, settlement) {
     const body = document.getElementById("settlement-body");
-    body.innerHTML = "";
     const settled = season.settled_at !== null;
 
-    for (const member of settlement.members) {
+    // Every member's ledger is an independent request — fire them all
+    // at once instead of awaiting one at a time in the loop. Awaiting
+    // sequentially here was the same class of mistake as the N+1 query
+    // bug fixed earlier, just moved to the browser: for N members it
+    // took N round trips back-to-back instead of one round trip's worth.
+    const rows = settlement.members.map((member) => {
       const memberInfo = season.members.find((m) => m.name === member.player_name);
-      const playerId = memberInfo ? memberInfo.id : null;
+      return { member, playerId: memberInfo ? memberInfo.id : null };
+    });
+    const ledgers = await Promise.all(
+      rows.map(({ playerId }) =>
+        settled && playerId
+          ? fetch(`${API_BASE}/players/${playerId}/ledger`).then((r) => r.json())
+          : Promise.resolve(null)
+      )
+    );
 
-      let balanceCell = "—";
-      if (settled && playerId) {
-        const ledger = await fetch(`${API_BASE}/players/${playerId}/ledger`).then((r) => r.json());
-        balanceCell = amountSpan(ledger.balance);
-      }
-
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${member.player_name}</td>
-        <td class="num">$${member.season_fee}</td>
-        <td class="num">$${member.refund}</td>
-        <td class="num">${amountSpan(member.net)}</td>
-        <td class="num">${balanceCell}</td>
-        <td>
-          ${playerId ? `
-            <div class="pay-form">
-              <input type="number" id="pay-${playerId}" placeholder="金額">
-              <button onclick="recordPayment(${playerId})">記收款</button>
-            </div>
-          ` : "-"}
-        </td>
-      `;
-      body.appendChild(row);
-    }
+    body.innerHTML = rows
+      .map(({ member, playerId }, i) => {
+        const balanceCell = ledgers[i] ? amountSpan(ledgers[i].balance) : "—";
+        return `
+          <tr>
+            <td>${member.player_name}</td>
+            <td class="num">$${member.season_fee}</td>
+            <td class="num">$${member.refund}</td>
+            <td class="num">${amountSpan(member.net)}</td>
+            <td class="num">${balanceCell}</td>
+            <td>
+              ${playerId ? `
+                <div class="pay-form">
+                  <input type="number" id="pay-${playerId}" placeholder="金額">
+                  <button onclick="recordPayment(${playerId}, this)">記收款</button>
+                </div>
+              ` : "-"}
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
   }
 
   function amountSpan(value) {
@@ -235,27 +247,36 @@
   async function settleSeason() {
     if (!currentSeason) return;
     if (!confirm("確定要結算這一季嗎？結算後每人的季費與退費會寫進帳本，且無法重複結算。")) return;
-    const res = await fetch(`${API_BASE}/seasons/${currentSeason.id}/settle`, { method: "POST" });
+    const btn = document.getElementById("settle-btn");
+    let res;
+    await withButtonFeedback(btn, "結算中...", async () => {
+      res = await fetch(`${API_BASE}/seasons/${currentSeason.id}/settle`, { method: "POST" });
+    });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       alert("結算失敗：" + (data.detail || res.statusText));
+      btn.disabled = false;
+      btn.textContent = "結算此季";
       return;
     }
     loadDashboard(currentSeason.id);
   }
 
-  async function recordPayment(playerId) {
+  async function recordPayment(playerId, btn) {
     const input = document.getElementById(`pay-${playerId}`);
     const amount = input.value.trim();
     if (!amount) return;
-    const res = await fetch(`${API_BASE}/players/${playerId}/payments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        amount,
-        season_id: currentSeason ? currentSeason.id : null,
-        note: "主揪儀表板手動記錄",
-      }),
+    let res;
+    await withButtonFeedback(btn, "記錄中...", async () => {
+      res = await fetch(`${API_BASE}/players/${playerId}/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount,
+          season_id: currentSeason ? currentSeason.id : null,
+          note: "主揪儀表板手動記錄",
+        }),
+      });
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
