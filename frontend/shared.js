@@ -1,8 +1,12 @@
 // Shared helpers for member.html and organizer.html — date formatting,
-// the season picker, and the calendar strip. One copy so the two pages
+// the season picker, and the month calendar. One copy so the two pages
 // can't quietly drift apart on how they show the same data.
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+
+function dateKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 /** Weekday label + a relative "今天/明天/已結束" hint for one game date. */
 function describeDate(dateStr) {
@@ -25,6 +29,11 @@ function describeDate(dateStr) {
     isPast: diffDays < 0,
     isToday: diffDays === 0,
   };
+}
+
+/** How many people are expected at a game right now. */
+function expectedAttendance(season, game) {
+  return season.members.length - game.absent_player_names.length + game.confirmed_drop_ins.length;
 }
 
 /**
@@ -61,26 +70,77 @@ async function initSeasonPicker(apiBase, selectEl, storageKey, onChange) {
   onChange(selectEl.value);
 }
 
-/** A horizontal strip of date chips — one per game, colour-coded by
- * what's happening that day, click to jump to its card. */
-function renderCalStrip(container, games, onPick) {
-  container.innerHTML = "";
-  for (const game of games) {
-    const info = describeDate(game.date);
-    const chip = document.createElement("div");
-    chip.className = "cal-chip" + (info.isToday ? " today" : "") + (info.isPast ? " past" : "");
+/**
+ * A real month-grid calendar. Opens on the month of the nearest
+ * upcoming game, marks every day that has one, and lets you page
+ * between months. Tapping a marked day calls onPick(gameId).
+ */
+function renderMonthCalendar(container, games, onPick) {
+  const gamesByDate = {};
+  for (const g of games) gamesByDate[g.date] = g;
 
-    let dotClass = "";
-    if (game.absent_player_names.length > 0) dotClass = "has-absence";
-    else if (game.confirmed_drop_ins.length > 0) dotClass = "has-dropins";
-    else if (game.waitlist_entries.length > 0) dotClass = "has-waitlist";
+  const upcoming = games.find((g) => !describeDate(g.date).isPast) || games[games.length - 1];
+  const viewDate = upcoming ? new Date(upcoming.date + "T00:00:00") : new Date();
+  viewDate.setDate(1);
 
-    chip.innerHTML = `
-      <div class="wd">${info.weekday}</div>
-      <div class="day">${info.day}</div>
-      <div class="dot ${dotClass}"></div>
+  function draw() {
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const firstWeekday = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const todayKey = dateKey(new Date());
+
+    let cells = "";
+    for (let i = 0; i < firstWeekday; i++) cells += `<div class="mcal-cell empty"></div>`;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const key = dateKey(new Date(year, month, d));
+      const game = gamesByDate[key];
+      const cls = ["mcal-cell"];
+      if (key === todayKey) cls.push("today");
+      if (game) cls.push("has-game");
+      cells += `<div class="${cls.join(" ")}" ${game ? `data-game-id="${game.id}"` : ""}>
+        <span>${d}</span>${game ? '<div class="mcal-dot"></div>' : ""}
+      </div>`;
+    }
+
+    container.innerHTML = `
+      <div class="mcal-head">
+        <button class="mcal-nav" data-dir="-1" aria-label="上個月">‹</button>
+        <span class="mcal-title">${year} 年 ${month + 1} 月</span>
+        <button class="mcal-nav" data-dir="1" aria-label="下個月">›</button>
+      </div>
+      <div class="mcal-grid mcal-weekdays"><div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div></div>
+      <div class="mcal-grid">${cells}</div>
     `;
-    chip.onclick = () => onPick(game.id);
-    container.appendChild(chip);
+  }
+
+  container.onclick = (e) => {
+    const navBtn = e.target.closest(".mcal-nav");
+    if (navBtn) {
+      viewDate.setMonth(viewDate.getMonth() + Number(navBtn.dataset.dir));
+      draw();
+      return;
+    }
+    const cell = e.target.closest(".mcal-cell.has-game");
+    if (cell) onPick(Number(cell.dataset.gameId));
+  };
+
+  draw();
+}
+
+/** Disables a button and swaps its label while an async action runs,
+ * restoring it on failure (a successful action usually re-renders the
+ * whole page anyway). Makes a tap feel acknowledged immediately instead
+ * of sitting dead until the network call resolves. */
+async function withButtonFeedback(btn, busyLabel, action) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = busyLabel;
+  try {
+    await action();
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = original;
+    throw e;
   }
 }

@@ -68,7 +68,7 @@
     <span id="balance-value" class="balance-value"></span>
   </div>
 
-  <div id="cal-strip" class="cal-strip"></div>
+  <div id="month-cal" class="mcal"></div>
 
   <h2>場次列表</h2>
   <div id="games"></div>
@@ -120,7 +120,7 @@
       if (!res.ok) { errorEl.textContent = "找不到這一季"; return; }
       const season = await res.json();
       renderGlance(season);
-      renderCalStrip(document.getElementById("cal-strip"), season.games, (gameId) => {
+      renderMonthCalendar(document.getElementById("month-cal"), season.games, (gameId) => {
         document.getElementById(`game-${gameId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
       });
       renderGames(season);
@@ -181,23 +181,24 @@
         statusClass = isAbsent ? "absent" : "confirmed";
         statusText = isAbsent ? "已請假" : "預期出席";
         if (!isAbsent) {
-          actionHtml = `<button class="action" onclick="recordAbsence(${game.id})">請假</button>`;
+          actionHtml = `<button class="action" onclick="recordAbsence(${game.id}, this)">請假</button>`;
         }
       } else if (myDropIn) {
         statusClass = "confirmed";
         statusText = "已報名（確認）";
-        actionHtml = `<button class="action cancel" onclick="cancelDropIn(${myDropIn.id})">取消</button>`;
+        actionHtml = `<button class="action cancel" onclick="cancelDropIn(${myDropIn.id}, this)">取消</button>`;
       } else if (myWaitlist) {
         statusClass = "waitlisted";
         statusText = "候補中";
-        actionHtml = `<button class="action cancel" onclick="cancelDropIn(${myWaitlist.id})">取消候補</button>`;
+        actionHtml = `<button class="action cancel" onclick="cancelDropIn(${myWaitlist.id}, this)">取消候補</button>`;
       } else {
         statusText = "尚未報名";
         actionHtml = playerName
-          ? `<button class="action" onclick="signUp(${game.id})">+1 報名</button>`
+          ? `<button class="action" onclick="signUp(${game.id}, this)">+1 報名</button>`
           : "";
       }
 
+      const expected = expectedAttendance(season, game);
       const div = document.createElement("div");
       div.className = "game" + (info.isToday ? " today" : "");
       div.id = `game-${game.id}`;
@@ -206,6 +207,7 @@
           <span><span class="game-date">${info.label}</span><span class="game-when">${info.relative}</span></span>
           <span class="status ${statusClass}">${statusText}</span>
         </div>
+        <div class="roster"><span class="fraction">${expected}<span class="of">/${season.capacity} 已報名</span></span></div>
         ${actionHtml}
         <div class="roster">
           請假：${game.absent_player_names.join("、") || "無"}<br>
@@ -228,30 +230,38 @@
     return data;
   }
 
-  async function recordAbsence(gameId) {
+  async function recordAbsence(gameId, btn) {
     const playerName = document.getElementById("player-name").value.trim();
     try {
-      await postJson("/absences", { player_name: playerName, game_id: gameId });
+      await withButtonFeedback(btn, "處理中...", async () => {
+        await postJson("/absences", { player_name: playerName, game_id: gameId });
+      });
       loadSeason(currentSeasonId);
     } catch (e) {
       alert("請假失敗：" + e.message);
     }
   }
 
-  async function signUp(gameId) {
+  async function signUp(gameId, btn) {
     const playerName = document.getElementById("player-name").value.trim();
     try {
-      const data = await postJson("/drop-ins", { player_name: playerName, game_id: gameId });
-      alert(data.status === "confirmed" ? "報名成功！" : "已加入候補名單");
+      let status;
+      await withButtonFeedback(btn, "處理中...", async () => {
+        const data = await postJson("/drop-ins", { player_name: playerName, game_id: gameId });
+        status = data.status;
+      });
+      alert(status === "confirmed" ? "報名成功！" : "已加入候補名單");
       loadSeason(currentSeasonId);
     } catch (e) {
       alert("報名失敗：" + e.message);
     }
   }
 
-  async function cancelDropIn(dropInId) {
+  async function cancelDropIn(dropInId, btn) {
     try {
-      await postJson(`/drop-ins/${dropInId}/cancel`, {});
+      await withButtonFeedback(btn, "處理中...", async () => {
+        await postJson(`/drop-ins/${dropInId}/cancel`, {});
+      });
       loadSeason(currentSeasonId);
     } catch (e) {
       alert("取消失敗：" + e.message);
