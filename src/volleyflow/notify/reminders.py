@@ -56,11 +56,18 @@ def send_game_reminder(session: Session, game: GameRow) -> None:
 
     group_id = os.environ.get("LINE_GROUP_ID")
     if group_id:
+        time_range = ""
+        if season.game_start_time and season.game_end_time:
+            time_range = (
+                f"（{season.game_start_time.strftime('%H:%M')}"
+                f"-{season.game_end_time.strftime('%H:%M')}）"
+            )
         roster_text = "、".join(roster) if roster else "目前沒有人"
-        push_to_group(
-            group_id,
-            f"{game.date} 球局提醒\n預計出席（{len(roster)} 人）：{roster_text}",
+        message = (
+            f"{game.date} 球局提醒{time_range}\n"
+            f"預計出席（{len(roster)} 人）：{roster_text}"
         )
+        push_to_group(group_id, message)
 
     if len(roster) < season.minimum_roster:
         organizer_id = os.environ["LINE_ORGANIZER_USER_ID"]

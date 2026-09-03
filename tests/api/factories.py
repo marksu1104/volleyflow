@@ -12,6 +12,8 @@ def start_season(
     member_names: list[str] | None = None,
     capacity: int = 18,
     minimum_roster: int = 12,
+    game_start_time: str | None = None,
+    game_end_time: str | None = None,
 ) -> dict[str, Any]:
     response = client.post(
         "/seasons",
@@ -21,6 +23,8 @@ def start_season(
             "member_names": member_names or ["Alice", "Bob"],
             "capacity": capacity,
             "minimum_roster": minimum_roster,
+            "game_start_time": game_start_time,
+            "game_end_time": game_end_time,
         },
     )
     assert response.status_code == 200

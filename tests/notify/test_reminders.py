@@ -4,7 +4,7 @@ push_to_group/push_to_user are monkeypatched so nothing here ever hits
 the real LINE API — see the sent_messages fixture.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 
 import pytest
@@ -38,9 +38,18 @@ def sent_messages(monkeypatch: pytest.MonkeyPatch) -> SentMessages:
     return sent
 
 
-def _season(db_session: Session, minimum_roster: int = 2) -> SeasonRow:
+def _season(
+    db_session: Session,
+    minimum_roster: int = 2,
+    game_start_time: time | None = None,
+    game_end_time: time | None = None,
+) -> SeasonRow:
     season = SeasonRow(
-        total_venue_cost=Decimal("1000"), capacity=18, minimum_roster=minimum_roster
+        total_venue_cost=Decimal("1000"),
+        capacity=18,
+        minimum_roster=minimum_roster,
+        game_start_time=game_start_time,
+        game_end_time=game_end_time,
     )
     db_session.add(season)
     db_session.flush()
@@ -67,6 +76,40 @@ def test_reminder_sends_roster_to_the_group(
     group_id, text = sent_messages["group"][0]
     assert group_id == "Cgroup123"
     assert "Alice" in text
+
+
+def test_reminder_includes_the_season_time_slot_when_set(
+    db_session: Session, sent_messages: SentMessages, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LINE_GROUP_ID", "Cgroup123")
+    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "Uorganizer")
+    season = _season(
+        db_session, game_start_time=time(18, 30), game_end_time=time(22, 0)
+    )
+    game = GameRow(season_id=season.id, date=date(2026, 8, 25))
+    db_session.add(game)
+    db_session.flush()
+
+    reminders.send_game_reminder(db_session, game)
+
+    _, text = sent_messages["group"][0]
+    assert "18:30-22:00" in text
+
+
+def test_reminder_omits_time_range_when_season_has_none(
+    db_session: Session, sent_messages: SentMessages, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LINE_GROUP_ID", "Cgroup123")
+    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "Uorganizer")
+    season = _season(db_session)
+    game = GameRow(season_id=season.id, date=date(2026, 8, 25))
+    db_session.add(game)
+    db_session.flush()
+
+    reminders.send_game_reminder(db_session, game)
+
+    _, text = sent_messages["group"][0]
+    assert ":" not in text
 
 
 def test_reminder_excludes_absent_members_and_includes_drop_ins(

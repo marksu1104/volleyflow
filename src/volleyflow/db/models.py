@@ -6,7 +6,7 @@ Python class in the domain layer — season_members is a plain association
 table with no columns beyond the two foreign keys.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import Enum, ForeignKey, Identity, Numeric
@@ -39,6 +39,11 @@ class SeasonRow(Base):
     settled_at: Mapped[datetime | None] = mapped_column(default=None)
     """Set once /settle has run for this season — guards against
     charging member season fees twice."""
+    game_start_time: Mapped[time | None] = mapped_column(default=None)
+    game_end_time: Mapped[time | None] = mapped_column(default=None)
+    """The season's fixed weekly time slot, e.g. 18:30-22:00. Optional —
+    billing and attendance never depend on it, it's only shown to people
+    and included in reminder messages."""
 
 
 class SeasonMemberRow(Base):
