@@ -36,6 +36,21 @@ function expectedAttendance(season, game) {
   return season.members.length - game.absent_player_names.length + game.confirmed_drop_ins.length;
 }
 
+/** "2026年7月" / "2026年7~9月" / "2025年12月~2026年2月" — a season's
+ * game-date span read as a season, not an ISO date range. */
+function formatSeasonLabel(season) {
+  const first = new Date(season.first_game_date + "T00:00:00");
+  const last = new Date(season.last_game_date + "T00:00:00");
+  const fy = first.getFullYear();
+  const fm = first.getMonth() + 1;
+  const ly = last.getFullYear();
+  const lm = last.getMonth() + 1;
+
+  if (fy === ly && fm === lm) return `${fy}年${fm}月`;
+  if (fy === ly) return `${fy}年${fm}~${lm}月`;
+  return `${fy}年${fm}月~${ly}年${lm}月`;
+}
+
 /**
  * Fills a <select> with every season, labeled by its real dates instead
  * of a bare id. Restores the last choice from localStorage and calls
@@ -53,7 +68,7 @@ async function initSeasonPicker(apiBase, selectEl, storageKey, onChange) {
   selectEl.innerHTML = seasons
     .map((s) => {
       const settledTag = s.settled ? " · 已結算" : "";
-      return `<option value="${s.id}">${s.first_game_date} ~ ${s.last_game_date}（${s.total_games} 場・${s.member_count} 人）${settledTag}</option>`;
+      return `<option value="${s.id}">${formatSeasonLabel(s)}（${s.total_games} 場・${s.member_count} 人）${settledTag}</option>`;
     })
     .join("");
 
