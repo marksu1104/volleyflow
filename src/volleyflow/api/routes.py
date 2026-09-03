@@ -86,7 +86,20 @@ def _get_player_or_404(db: Session, player_id: int) -> PlayerRow:
 
 
 def _get_game_or_404(db: Session, game_id: int) -> GameRow:
-    game = db.get(GameRow, game_id)
+    """Locks the game row for the rest of this transaction.
+
+    Every caller of this reads the game's current roster to decide
+    something — is there an open slot, who's next on the waitlist — then
+    writes based on that read. Without the lock, two concurrent requests
+    for the same game (e.g. a burst of drop-ins racing for a slot that
+    just opened) can each read "one slot open" before either commits,
+    and both get confirmed past capacity. SELECT ... FOR UPDATE makes the
+    second request wait for the first to commit, so it sees the first
+    request's write before making its own decision. SQLite ignores this
+    (no row locking support) — only the `postgres`-marked tests actually
+    exercise it.
+    """
+    game = db.query(GameRow).filter(GameRow.id == game_id).with_for_update().first()
     if game is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No game with id {game_id}")
     return game
@@ -446,8 +459,7 @@ def cancel_drop_in(drop_in_id: int, db: Session = Depends(get_db)) -> DropInCanc
     if drop_in.cancelled_at is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Already cancelled")
 
-    game = db.get(GameRow, drop_in.game_id)
-    assert game is not None
+    game = _get_game_or_404(db, drop_in.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
 
