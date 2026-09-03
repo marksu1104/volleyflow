@@ -97,6 +97,12 @@
       nameInput.value = profile.displayName;
       nameInput.disabled = true;
       identityEl.textContent = `已用 LINE 身分登入：${profile.displayName}`;
+      // liff.getProfile() and the season picker's own /seasons fetch race
+      // each other on load. Setting .value here doesn't fire "change", so
+      // if the season already rendered while the name was still blank,
+      // nothing would ever show this person as a member. Re-render now
+      // that the real name is known, whichever order they resolved in.
+      if (currentSeasonId) loadSeason(currentSeasonId);
     } catch (e) {
       console.warn("LIFF unavailable, falling back to manual name entry:", e);
       identityEl.textContent = "（非 LINE 環境，手動輸入名字測試）";
