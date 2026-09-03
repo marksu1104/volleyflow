@@ -406,3 +406,50 @@ there was no way to see attendance at a glance or get a sense of time.
   cleanup pass before real handoff to the group.
 
 80 tests, 99% coverage.
+
+## 2026-09-04 — Real season data, and a real concurrency bug
+
+Deleted the 9 leftover test seasons (and everything under them: 22
+games, absences, drop-ins, ledger entries) and created the group's
+actual season: 2026-07-07 to 2026-09-29, every Tuesday, 18 fixed
+members, $54,990 total venue cost. No cascade delete configured on the
+FKs, so cleanup meant deleting child rows in dependency order inside
+one transaction rather than a single `DELETE FROM seasons`.
+
+- Season picker now reads as a season ("2026年7~9月") instead of a raw
+  ISO date range — `formatSeasonLabel()` in `shared.js`, built from the
+  same `first_game_date`/`last_game_date` `GET /seasons` already
+  returned.
+- Added an optional weekly time slot to `Season`
+  (`game_start_time`/`game_end_time`) — the schema had never stored
+  this at all, and the LINE reminder text only ever carried a date.
+  Nullable rather than required: billing and attendance never depend
+  on it, so tests that don't care about time don't need to supply it.
+- Found and fixed a real race condition in `member.html`: LIFF's
+  `liff.getProfile()` and the season picker's own `/seasons` fetch run
+  as two independent async calls on page load. Setting the name
+  `<input>`'s `.value` from the LIFF result doesn't fire a `change`
+  event, so if the season finished loading first, the page rendered
+  using a still-empty player name and never recognized the logged-in
+  user as a member — no error, just silently wrong, and it's what the
+  developer's own screenshot showed happening. Fixed by re-rendering
+  the current season once LIFF resolves, regardless of which of the
+  two races won.
+- Found and fixed a real concurrency bug while designing the "everyone
+  rushes to sign up when new games are announced" scenario: `sign_up`
+  read a game's current roster count, decided whether a slot was open,
+  then inserted — three separate steps with no lock between them.  Two
+  concurrent requests for the same game could each read "one slot
+  open" before either committed, and both get confirmed past capacity.
+  Fixed with `SELECT ... FOR UPDATE` on the game row
+  (`_get_game_or_404`, now used everywhere a game's roster gets read
+  before being written to), which makes the second request wait for
+  the first to commit before it reads. SQLite has no row locking, so
+  this is invisible to the normal test suite; added
+  `tests/api/test_concurrency.py`, a `postgres`-marked test that fires
+  6 real concurrent HTTP requests at a 4-capacity game and asserts
+  exactly 3 get confirmed. Verified the test actually catches the bug
+  by temporarily removing the lock and watching it fail 3/3 runs, then
+  restored it and confirmed 3/3 passes.
+
+84 tests (2 postgres-only), 99% coverage.
