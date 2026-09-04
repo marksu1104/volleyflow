@@ -453,3 +453,59 @@ one transaction rather than a single `DELETE FROM seasons`.
   restored it and confirmed 3/3 passes.
 
 84 tests (2 postgres-only), 99% coverage.
+
+## 2026-09-04 (cont'd) — Season location, per-game price, and a real detail view
+
+Finished what the concurrency detour interrupted: clicking a game now
+shows its full detail instead of everyone reading the same always-open
+flat list.
+
+- Added `Season.location` (nullable, same reasoning as the time slot:
+  display-only, never affects billing) and set it on the real season
+  (啪排郎) via a one-off script — no settings-edit endpoint exists yet,
+  and adding one wasn't this change's job.
+- `GET /seasons/{id}` now returns `share_per_game` — computed
+  server-side from the same `pricing.share_per_game()` the billing
+  engine uses, not recomputed in JS. The frontend showing its own
+  rounding logic would be a second place an amount could round
+  differently from the one that actually charges people.
+- `GameDetailOut` changed from two flat, unordered lists
+  (`absent_player_names`, `confirmed_drop_ins`) to explicit pairing:
+  each absence carries `covered_by` (the drop-in's name, or null), each
+  drop-in carries `covering` (the absent member's name, or null if it's
+  just filling an open slot). Built by sorting absences by
+  `recorded_at` and drop-ins by `signed_up_at` and zipping them —
+  mirrors the FIFO rule `settlement._covered_absences` uses for
+  refunds, reimplemented at the API layer for display since that
+  function returns a domain dataclass, not a name-to-name pairing, and
+  it answers a different question (how many are covered, not which
+  drop-in covers which absence).
+- Frontend: `renderAttendance` / `renderGames` (always-expanded,
+  identical-looking cards for every game in the season, 13 of them for
+  the real season) replaced by one `renderGameDetail()` panel below the
+  calendar, showing whichever day is clicked — time, location, price,
+  the full member roster with absence/coverage noted inline, confirmed
+  drop-ins, and waitlist. Selection persists across a reload (e.g.
+  after recording an absence) via a module-level `selectedGameId`,
+  reset to the next upcoming game only when switching seasons.
+  member.html's action buttons (請假/+1 報名/取消) moved into the panel
+  for whichever game is currently selected.
+- Removed `expectedAttendance`'s only other caller once the per-game
+  fraction display went away — kept the function itself since
+  organizer.html's glance card still needed the same formula, and
+  having it inline there too would've put the same three-term formula
+  in two places instead of one.
+- Testing this without a browser: extracted each page's inline script
+  and eval'd it against real season data pulled from the live API
+  (`TestClient` in-process, not a network call) plus a hand-built
+  synthetic game exercising every coverage-pairing branch (covered
+  absence, uncovered absence, drop-in covering vs. filling an open
+  slot, waitlist). Caught one real thing this way — not in the app
+  code, but in the *test harness*: assigning to a variable from outside
+  a direct `eval()` call doesn't reach `let` bindings declared inside
+  it, so an early version of the organizer test was silently reading
+  stale state and reporting a failure that wasn't real. Fixed by
+  driving the real `loadDashboard()` function (defined inside the same
+  eval, sharing its scope) instead of poking module state from outside.
+
+84 tests (2 postgres-only), 99% coverage.
