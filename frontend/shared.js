@@ -144,15 +144,28 @@ function renderMonthCalendar(container, games, onPick) {
 }
 
 /**
- * One game's full detail: time, location, per-game price, and the whole
- * roster with explicit absence -> drop-in coverage (not two separate
- * flat lists) — replaces an always-expanded per-game card list. The
- * calendar picks a day; this renders whichever one is picked.
- * `extraHtml` lets a page append its own content (e.g. an action
- * button) after the roster without this function knowing about it.
+ * One game's full detail: time, location, per-game price, and how many
+ * are expected are shown first; the whole roster (explicit absence ->
+ * drop-in coverage, not two separate flat lists) is behind a toggle so
+ * picking a day doesn't dump a wall of names on you immediately.
+ *
+ * `options`:
+ *   extraHtml — a page's own content (e.g. an action button), shown
+ *     above the roster toggle.
+ *   onAssignSubstitute(absenceId, name, gender) — if given, uncovered
+ *     absences get a "設定代打" control that calls this.
+ *   canAssignSubstitute(absence) — gates which absences get that
+ *     control (default: all of them — an organizer can arrange anyone's
+ *     substitute; member.html restricts this to the viewer's own row).
  */
-function renderGameDetail(container, season, game, extraHtml) {
+function renderGameDetail(container, season, game, options) {
+  const opts = options || {};
+  const extraHtml = opts.extraHtml || "";
+  const onAssignSubstitute = opts.onAssignSubstitute;
+  const canAssignSubstitute = opts.canAssignSubstitute || (() => true);
+
   const info = describeDate(game.date);
+  const expected = expectedAttendance(season, game);
 
   const metaParts = [];
   if (season.game_start_time && season.game_end_time) {
@@ -161,29 +174,56 @@ function renderGameDetail(container, season, game, extraHtml) {
   if (season.location) metaParts.push(season.location);
   metaParts.push(`每人每場 $${season.share_per_game}`);
 
-  const coveredBy = {};
-  for (const a of game.absences) coveredBy[a.player_name] = a.covered_by;
+  function genderTag(g) {
+    if (g === "male") return '<span class="gender-tag male">男</span>';
+    if (g === "female") return '<span class="gender-tag female">女</span>';
+    return "";
+  }
+
+  const absenceByName = {};
+  for (const a of game.absences) absenceByName[a.player_name] = a;
 
   const rosterRows = season.members
     .map((m) => {
-      if (Object.prototype.hasOwnProperty.call(coveredBy, m.name)) {
-        const by = coveredBy[m.name];
-        const note = by ? `已由 ${by} 遞補` : "尚無人遞補";
-        return `<div class="roster-row absent"><span>${m.name}</span><span class="roster-note">${note}</span></div>`;
+      const absence = absenceByName[m.name];
+      if (!absence) {
+        return `<div class="roster-row present"><span>${m.name}${genderTag(m.gender)}</span></div>`;
       }
-      return `<div class="roster-row present"><span>${m.name}</span></div>`;
+      const note = absence.covered_by ? `已由 ${absence.covered_by} 遞補` : "尚無人遞補";
+      const offerSub = !absence.covered_by && !game.locked && onAssignSubstitute && canAssignSubstitute(absence);
+      const subControl = offerSub
+        ? `<button class="mini-action" data-toggle-sub="${absence.id}">設定代打</button>`
+        : "";
+      const subForm = offerSub
+        ? `<div class="sub-form" data-sub-form="${absence.id}" hidden>
+             <input type="text" placeholder="代打姓名" data-sub-name="${absence.id}">
+             <select data-sub-gender="${absence.id}">
+               <option value="">性別</option>
+               <option value="male">男</option>
+               <option value="female">女</option>
+             </select>
+             <button data-confirm-sub="${absence.id}">確認</button>
+           </div>`
+        : "";
+      return `
+        <div class="roster-row absent">
+          <span>${m.name}${genderTag(m.gender)}</span>
+          <span class="roster-note">${note}${subControl}</span>
+        </div>
+        ${subForm}
+      `;
     })
     .join("");
 
   const dropInRows = game.confirmed_drop_ins
     .map((d) => {
       const note = d.covering ? `遞補 ${d.covering}` : "遞補開放名額";
-      return `<div class="roster-row dropin"><span>${d.player_name}</span><span class="roster-note">${note}</span></div>`;
+      return `<div class="roster-row dropin"><span>${d.player_name}${genderTag(d.gender)}</span><span class="roster-note">${note}</span></div>`;
     })
     .join("");
 
   const waitlistText = game.waitlist_entries.length
-    ? game.waitlist_entries.map((w) => w.player_name).join("、")
+    ? game.waitlist_entries.map((w) => `${w.player_name}${genderTag(w.gender)}`).join("、")
     : "無";
 
   container.innerHTML = `
@@ -192,17 +232,50 @@ function renderGameDetail(container, season, game, extraHtml) {
       <span class="gdetail-when">${info.relative}</span>
     </div>
     <div class="gdetail-meta">${metaParts.join("　・　")}</div>
-    ${extraHtml || ""}
-    <div class="gdetail-section-label">固定成員（${season.members.length} 人）</div>
-    <div class="gdetail-roster">${rosterRows}</div>
-    ${
-      game.confirmed_drop_ins.length
-        ? `<div class="gdetail-section-label">臨打確認</div><div class="gdetail-roster">${dropInRows}</div>`
-        : ""
-    }
-    <div class="gdetail-section-label">候補</div>
-    <div class="gdetail-waitlist">${waitlistText}</div>
+    <div class="gdetail-count">預計出席 <strong>${expected}</strong> 人</div>
+    ${game.locked ? '<div class="gdetail-locked">已過更動期限，這一場無法再變更</div>' : ""}
+    ${extraHtml}
+    <button type="button" class="gdetail-toggle" data-toggle-roster>出席名單 ▾</button>
+    <div class="gdetail-roster-wrap" data-roster-wrap hidden>
+      <div class="gdetail-section-label">固定成員（${season.members.length} 人）</div>
+      <div class="gdetail-roster">${rosterRows}</div>
+      ${
+        game.confirmed_drop_ins.length
+          ? `<div class="gdetail-section-label">臨打確認</div><div class="gdetail-roster">${dropInRows}</div>`
+          : ""
+      }
+      <div class="gdetail-section-label">候補</div>
+      <div class="gdetail-waitlist">${waitlistText}</div>
+    </div>
   `;
+
+  // Assigned directly (not addEventListener) so re-rendering this same
+  // container never accumulates duplicate handlers — matches
+  // renderMonthCalendar's pattern.
+  container.onclick = (e) => {
+    const toggleRoster = e.target.closest("[data-toggle-roster]");
+    if (toggleRoster) {
+      const wrap = container.querySelector("[data-roster-wrap]");
+      wrap.hidden = !wrap.hidden;
+      toggleRoster.textContent = wrap.hidden ? "出席名單 ▾" : "出席名單 ▴";
+      return;
+    }
+    const toggleSub = e.target.closest("[data-toggle-sub]");
+    if (toggleSub) {
+      const form = container.querySelector(`[data-sub-form="${toggleSub.dataset.toggleSub}"]`);
+      if (form) form.hidden = !form.hidden;
+      return;
+    }
+    const confirmSub = e.target.closest("[data-confirm-sub]");
+    if (confirmSub && onAssignSubstitute) {
+      const id = confirmSub.dataset.confirmSub;
+      const nameInput = container.querySelector(`[data-sub-name="${id}"]`);
+      const genderSelect = container.querySelector(`[data-sub-gender="${id}"]`);
+      const name = nameInput ? nameInput.value.trim() : "";
+      if (!name) return;
+      onAssignSubstitute(Number(id), name, (genderSelect && genderSelect.value) || null);
+    }
+  };
 }
 
 /** Disables a button and swaps its label while an async action runs,
@@ -220,4 +293,17 @@ async function withButtonFeedback(btn, busyLabel, action) {
     btn.textContent = original;
     throw e;
   }
+}
+
+/** POST or PUT a JSON body, returning the parsed response or throwing
+ * with the API's own error detail. */
+async function postJson(apiBase, path, body, method) {
+  const res = await fetch(`${apiBase}${path}`, {
+    method: method || "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || res.statusText);
+  return data;
 }

@@ -179,7 +179,12 @@
     const statusHtml = game.status === "scheduled"
       ? ""
       : `<div class="gdetail-mystatus absent">${statusLabel(game.status)}</div>`;
-    renderGameDetail(el, currentSeason, game, statusHtml);
+    renderGameDetail(el, currentSeason, game, {
+      extraHtml: statusHtml,
+      onAssignSubstitute: (absenceId, name, gender) => assignSubstitute(absenceId, name, gender),
+      // No canAssignSubstitute restriction — the organizer can arrange
+      // a substitute for anyone's absence, not just their own.
+    });
   }
 
   function openGameSheet() {
@@ -195,6 +200,18 @@
     if (e.target === gameSheetBackdrop) closeGameSheet();
   });
   document.querySelector(".gsheet-close").addEventListener("click", closeGameSheet);
+
+  async function assignSubstitute(absenceId, name, gender) {
+    try {
+      await postJson(API_BASE, `/absences/${absenceId}/substitute`, {
+        player_name: name,
+        gender,
+      });
+      loadDashboard(currentSeason.id);
+    } catch (e) {
+      alert("設定代打失敗：" + e.message);
+    }
+  }
 
   function statusLabel(status) {
     if (status === "cancelled_unrefunded") return "取消・場地費不退";
