@@ -38,3 +38,12 @@ jobs:
         run: uv run pytest -m postgres
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      # GitHub's push webhook to Render's auto-deploy stopped firing
+      # after the repo got deleted and recreated (see docs/dev-log.md,
+      # 2026-09-05) — several attempts to fix the GitHub App connection
+      # itself didn't hold, so deploys are triggered explicitly here
+      # instead of depending on that integration.
+      - name: Deploy to Render
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
