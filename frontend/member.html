@@ -24,19 +24,7 @@
   .balance-value.owed { color: var(--good); }
   .balance-value.even { color: var(--ink-soft); }
 
-  .game {
-    background: var(--surface); border: 1px solid var(--rule); border-radius: 12px;
-    padding: 14px 16px; margin-bottom: 8px; scroll-margin-top: 12px;
-  }
-  .game.today { border-color: var(--accent); }
-  .game-top { display: flex; justify-content: space-between; align-items: center; }
-  .game-date { font-weight: 600; font-size: .98rem; }
-  .game-when { font-size: .74rem; color: var(--ink-soft); margin-left: 6px; }
-  .status { font-size: .8rem; }
-  .status.absent { color: var(--bad); }
-  .status.confirmed { color: var(--good); }
-  .status.waitlisted { color: var(--warn); }
-  .roster { font-size: .76rem; color: var(--ink-soft); margin-top: 8px; line-height: 1.7; }
+  .empty { color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center; }
 
   button.action {
     margin-top: 10px; padding: 7px 14px; border: none; border-radius: 7px;
@@ -70,8 +58,8 @@
 
   <div id="month-cal" class="mcal"></div>
 
-  <h2>場次列表</h2>
-  <div id="games"></div>
+  <h2>場次詳情</h2>
+  <div id="game-detail" class="gdetail"></div>
 </div>
 
 <script src="shared.js"></script>
@@ -79,6 +67,8 @@
   const API_BASE = "https://volleyflow.onrender.com";
   const LIFF_ID = "2011156233-6CouG6VI";
   let currentSeasonId = null;
+  let currentSeason = null;
+  let selectedGameId = null;
 
   // Try to get the player's real LINE identity via LIFF. If this page
   // wasn't opened through LIFF (e.g. testing directly in a desktop
@@ -125,15 +115,66 @@
       const res = await fetch(`${API_BASE}/seasons/${seasonId}`);
       if (!res.ok) { errorEl.textContent = "找不到這一季"; return; }
       const season = await res.json();
+      const isNewSeason = !currentSeason || currentSeason.id !== season.id;
+      currentSeason = season;
+      // Keep whatever game was selected across a reload (e.g. after
+      // taking an action) — only reset to the next upcoming game when
+      // switching to a different season, or on first load.
+      if (isNewSeason || !season.games.some((g) => g.id === selectedGameId)) {
+        const upcoming = season.games.find((g) => !describeDate(g.date).isPast) || season.games[season.games.length - 1];
+        selectedGameId = upcoming ? upcoming.id : null;
+      }
       renderGlance(season);
-      renderMonthCalendar(document.getElementById("month-cal"), season.games, (gameId) => {
-        document.getElementById(`game-${gameId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
-      renderGames(season);
+      renderMonthCalendar(document.getElementById("month-cal"), season.games, selectGame);
+      renderSelectedGameDetail();
       await renderBalance(season);
     } catch (e) {
       errorEl.textContent = "連不上伺服器：" + e.message;
     }
+  }
+
+  function selectGame(gameId) {
+    selectedGameId = gameId;
+    renderSelectedGameDetail();
+  }
+
+  function renderSelectedGameDetail() {
+    const el = document.getElementById("game-detail");
+    const game = currentSeason && currentSeason.games.find((g) => g.id === selectedGameId);
+    if (!currentSeason || !game) {
+      el.innerHTML = '<div class="empty">這一季還沒有場次</div>';
+      return;
+    }
+    renderGameDetail(el, currentSeason, game, buildMyActionHtml(currentSeason, game));
+  }
+
+  function buildMyActionHtml(season, game) {
+    const playerName = document.getElementById("player-name").value.trim();
+    const isMember = season.members.some((m) => m.name === playerName);
+    const isAbsent = game.absences.some((a) => a.player_name === playerName);
+    const myDropIn = game.confirmed_drop_ins.find((d) => d.player_name === playerName);
+    const myWaitlist = game.waitlist_entries.find((d) => d.player_name === playerName);
+
+    if (isMember) {
+      if (isAbsent) return '<div class="gdetail-mystatus absent">你已請假這一場</div>';
+      return `<button class="action" onclick="recordAbsence(${game.id}, this)">請假</button>`;
+    }
+    if (myDropIn) {
+      return (
+        '<div class="gdetail-mystatus confirmed">你已確認報名這一場</div>' +
+        `<button class="action cancel" onclick="cancelDropIn(${myDropIn.id}, this)">取消</button>`
+      );
+    }
+    if (myWaitlist) {
+      return (
+        '<div class="gdetail-mystatus waitlisted">你目前候補中</div>' +
+        `<button class="action cancel" onclick="cancelDropIn(${myWaitlist.id}, this)">取消候補</button>`
+      );
+    }
+    if (playerName) {
+      return `<button class="action" onclick="signUp(${game.id}, this)">+1 報名</button>`;
+    }
+    return "";
   }
 
   function renderGlance(season) {
@@ -165,64 +206,6 @@
     value.textContent = n === 0 ? "$0（結清）" : n > 0 ? `你可以領回 $${ledger.balance}` : `你還欠 $${Math.abs(n)}`;
     value.className = "balance-value " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
     card.classList.add("show");
-  }
-
-  function renderGames(season) {
-    const playerName = document.getElementById("player-name").value.trim();
-    const isMember = season.members.some((m) => m.name === playerName);
-    const container = document.getElementById("games");
-    container.innerHTML = "";
-
-    for (const game of season.games) {
-      const info = describeDate(game.date);
-      const isAbsent = game.absent_player_names.includes(playerName);
-      const myDropIn = game.confirmed_drop_ins.find((d) => d.player_name === playerName);
-      const myWaitlist = game.waitlist_entries.find((d) => d.player_name === playerName);
-
-      let statusClass = "";
-      let statusText = "";
-      let actionHtml = "";
-
-      if (isMember) {
-        statusClass = isAbsent ? "absent" : "confirmed";
-        statusText = isAbsent ? "已請假" : "預期出席";
-        if (!isAbsent) {
-          actionHtml = `<button class="action" onclick="recordAbsence(${game.id}, this)">請假</button>`;
-        }
-      } else if (myDropIn) {
-        statusClass = "confirmed";
-        statusText = "已報名（確認）";
-        actionHtml = `<button class="action cancel" onclick="cancelDropIn(${myDropIn.id}, this)">取消</button>`;
-      } else if (myWaitlist) {
-        statusClass = "waitlisted";
-        statusText = "候補中";
-        actionHtml = `<button class="action cancel" onclick="cancelDropIn(${myWaitlist.id}, this)">取消候補</button>`;
-      } else {
-        statusText = "尚未報名";
-        actionHtml = playerName
-          ? `<button class="action" onclick="signUp(${game.id}, this)">+1 報名</button>`
-          : "";
-      }
-
-      const expected = expectedAttendance(season, game);
-      const div = document.createElement("div");
-      div.className = "game" + (info.isToday ? " today" : "");
-      div.id = `game-${game.id}`;
-      div.innerHTML = `
-        <div class="game-top">
-          <span><span class="game-date">${info.label}</span><span class="game-when">${info.relative}</span></span>
-          <span class="status ${statusClass}">${statusText}</span>
-        </div>
-        <div class="roster"><span class="fraction">${expected}<span class="of">/${season.capacity} 已報名</span></span></div>
-        ${actionHtml}
-        <div class="roster">
-          請假：${game.absent_player_names.join("、") || "無"}<br>
-          臨打確認：${game.confirmed_drop_ins.map((d) => d.player_name).join("、") || "無"}<br>
-          候補：${game.waitlist_entries.map((d) => d.player_name).join("、") || "無"}
-        </div>
-      `;
-      container.appendChild(div);
-    }
   }
 
   async function postJson(path, body) {

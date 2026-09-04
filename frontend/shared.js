@@ -33,7 +33,7 @@ function describeDate(dateStr) {
 
 /** How many people are expected at a game right now. */
 function expectedAttendance(season, game) {
-  return season.members.length - game.absent_player_names.length + game.confirmed_drop_ins.length;
+  return season.members.length - game.absences.length + game.confirmed_drop_ins.length;
 }
 
 /** "2026年7月" / "2026年7~9月" / "2025年12月~2026年2月" — a season's
@@ -141,6 +141,68 @@ function renderMonthCalendar(container, games, onPick) {
   };
 
   draw();
+}
+
+/**
+ * One game's full detail: time, location, per-game price, and the whole
+ * roster with explicit absence -> drop-in coverage (not two separate
+ * flat lists) — replaces an always-expanded per-game card list. The
+ * calendar picks a day; this renders whichever one is picked.
+ * `extraHtml` lets a page append its own content (e.g. an action
+ * button) after the roster without this function knowing about it.
+ */
+function renderGameDetail(container, season, game, extraHtml) {
+  const info = describeDate(game.date);
+
+  const metaParts = [];
+  if (season.game_start_time && season.game_end_time) {
+    metaParts.push(`${season.game_start_time.slice(0, 5)}-${season.game_end_time.slice(0, 5)}`);
+  }
+  if (season.location) metaParts.push(season.location);
+  metaParts.push(`每人每場 $${season.share_per_game}`);
+
+  const coveredBy = {};
+  for (const a of game.absences) coveredBy[a.player_name] = a.covered_by;
+
+  const rosterRows = season.members
+    .map((m) => {
+      if (Object.prototype.hasOwnProperty.call(coveredBy, m.name)) {
+        const by = coveredBy[m.name];
+        const note = by ? `已由 ${by} 遞補` : "尚無人遞補";
+        return `<div class="roster-row absent"><span>${m.name}</span><span class="roster-note">${note}</span></div>`;
+      }
+      return `<div class="roster-row present"><span>${m.name}</span></div>`;
+    })
+    .join("");
+
+  const dropInRows = game.confirmed_drop_ins
+    .map((d) => {
+      const note = d.covering ? `遞補 ${d.covering}` : "遞補開放名額";
+      return `<div class="roster-row dropin"><span>${d.player_name}</span><span class="roster-note">${note}</span></div>`;
+    })
+    .join("");
+
+  const waitlistText = game.waitlist_entries.length
+    ? game.waitlist_entries.map((w) => w.player_name).join("、")
+    : "無";
+
+  container.innerHTML = `
+    <div class="gdetail-head">
+      <span class="gdetail-date">${info.label}</span>
+      <span class="gdetail-when">${info.relative}</span>
+    </div>
+    <div class="gdetail-meta">${metaParts.join("　・　")}</div>
+    ${extraHtml || ""}
+    <div class="gdetail-section-label">固定成員（${season.members.length} 人）</div>
+    <div class="gdetail-roster">${rosterRows}</div>
+    ${
+      game.confirmed_drop_ins.length
+        ? `<div class="gdetail-section-label">臨打確認</div><div class="gdetail-roster">${dropInRows}</div>`
+        : ""
+    }
+    <div class="gdetail-section-label">候補</div>
+    <div class="gdetail-waitlist">${waitlistText}</div>
+  `;
 }
 
 /** Disables a button and swaps its label while an async action runs,
