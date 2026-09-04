@@ -540,3 +540,38 @@ No test count change — this is markup/CSS/event-wiring, nothing in
 `tests/` exercises it directly (frontend still has no dedicated test
 runner; verification here is the same eval-and-inspect approach used
 throughout this project's frontend work).
+
+## 2026-09-05 — Recreated the GitHub repo to clear a dangling commit
+
+An earlier commit had briefly included an unwanted `Co-Authored-By`
+trailer, caught and amended away the same day (see the
+`add optional weekly game time slot to seasons` commit's history — the
+amend isn't itself a log entry, but the trailer it removed is why this
+one exists). The amended-away commit stopped being reachable from any
+branch, but GitHub hadn't garbage-collected the object yet, and its
+trailer matched a real GitHub account — so it kept showing up in the
+repository's Contributors graph, weeks after the branch itself was
+clean. `git branch/tag --contains` on that SHA confirmed it was
+unreachable; `gh api repos/.../commits/<sha>` confirmed the object was
+still fetchable server-side despite that. Toggling the repo's
+visibility (a commonly reported trick for forcing GitHub to rebuild
+this cache) didn't clear it either.
+
+Deleted the repository and recreated it under the same name — the
+local history was already fully clean (the problem commit was never
+part of any locally reachable ref), so pushing it to the empty repo
+reproduced the real development history with identical SHAs, just
+without ever having exposed the bad commit to this repo's server-side
+storage. Re-enabled GitHub Pages (URL unchanged, same repo name),
+re-added the three GitHub Actions secrets, verified CI green again
+against real Neon. Confirmed via `contributors?anon=1`: contribution
+count matches the commit count exactly, one contributor.
+
+Render's connected source needed re-linking separately — deleting the
+GitHub repo very likely also deleted the GitHub-side webhook Render's
+auto-deploy depends on, independent of whatever Render's own settings
+page displays (a repo name matching in Render's UI doesn't prove the
+webhook subscription survived). This commit doubles as the test: if it
+shows up in Render's Deploys list without a manual trigger, the
+reconnect held; if not, the "Edit" next to the connected source needs
+a fresh re-auth.
