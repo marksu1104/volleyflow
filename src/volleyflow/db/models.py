@@ -25,6 +25,9 @@ class PlayerRow(Base):
 
     id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     name: Mapped[str]
+    gender: Mapped[str | None] = mapped_column(default=None)
+    """"male" or "female", self-reported. Never used by billing — display
+    only, e.g. counting how many of each are expected at a game."""
 
 
 class SeasonRow(Base):
@@ -47,6 +50,10 @@ class SeasonRow(Base):
     location: Mapped[str | None] = mapped_column(default=None)
     """The venue name, e.g. "啪排郎". Same reasoning as the time slot:
     display-only, optional."""
+    change_deadline_days: Mapped[int | None] = mapped_column(default=None)
+    """How many days before a game attendance changes (absence, signup,
+    cancelling either) are still allowed — 1 means "up to the day
+    before." None means no deadline, CLAUDE.md 2.3's stated default."""
 
 
 class SeasonMemberRow(Base):
@@ -76,6 +83,9 @@ class AbsenceRow(Base):
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     recorded_at: Mapped[datetime]
+    cancelled_at: Mapped[datetime | None] = mapped_column(default=None)
+    """Set if the member decided to attend after all. Only allowed while
+    nothing is covering this absence yet — see routes.cancel_absence."""
 
 
 class DropInRow(Base):
@@ -86,6 +96,12 @@ class DropInRow(Base):
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     signed_up_at: Mapped[datetime]
     cancelled_at: Mapped[datetime | None] = mapped_column(default=None)
+    covers_absence_id: Mapped[int | None] = mapped_column(
+        ForeignKey("absences.id"), default=None
+    )
+    """Set when this drop-in is a member's own named substitute ("代打")
+    for that specific absence, rather than a general signup matched by
+    FIFO order — see attendance.DropIn.covers."""
 
 
 class WaitlistEntryRow(Base):

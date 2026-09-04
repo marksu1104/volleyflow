@@ -1,8 +1,9 @@
 """API routes."""
 
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -17,6 +18,7 @@ from volleyflow.api.conversion import (
 )
 from volleyflow.api.dependencies import get_db
 from volleyflow.api.schemas import (
+    AbsenceCancelOut,
     AbsenceCreate,
     AbsenceDetailOut,
     AbsenceOut,
@@ -27,6 +29,8 @@ from volleyflow.api.schemas import (
     DropInSummary,
     GameDetailOut,
     GameOut,
+    Gender,
+    GenderUpdate,
     LedgerEntryOut,
     MemberOut,
     MemberSettlementOut,
@@ -38,6 +42,7 @@ from volleyflow.api.schemas import (
     SeasonSettleOut,
     SeasonSummaryOut,
     SettlementOut,
+    SubstituteCreate,
 )
 from volleyflow.db.models import (
     AbsenceRow,
@@ -51,7 +56,7 @@ from volleyflow.db.models import (
 )
 from volleyflow.ledger import EntryType, balance
 from volleyflow.pricing import share_per_game
-from volleyflow.settlement import MemberSettlement, settle_member
+from volleyflow.settlement import MemberSettlement, covered_absences, settle_member
 
 router = APIRouter()
 
@@ -136,6 +141,79 @@ def _has_open_slot(db: Session, game: GameRow, season: SeasonRow) -> bool:
     )
     expected = (member_count - absences) + active_drop_ins
     return expected < season.capacity
+
+
+def _gender(value: str | None) -> Gender | None:
+    """`PlayerRow.gender` is a plain column; every write to it goes
+    through `Gender`-typed input (GenderUpdate, SubstituteCreate), so
+    this narrows the read side back to that same type for callers.
+    """
+    if value == "male" or value == "female":
+        return cast(Gender, value)
+    return None
+
+
+_TAIWAN = timezone(timedelta(hours=8))
+
+
+def _today_in_taiwan() -> date:
+    """A change deadline is about calendar days from the group's own
+    perspective, not the server's UTC clock — using UTC for "today"
+    would flip the day boundary 8 hours too early every night.
+    """
+    return datetime.now(UTC).astimezone(_TAIWAN).date()
+
+
+def _within_change_deadline(game: GameRow, season: SeasonRow) -> bool:
+    """Whether absence/signup changes (and cancelling either) are still
+    allowed for this game. None means no deadline — CLAUDE.md 2.3's
+    stated default; otherwise a change must land at least this many
+    days before the game.
+    """
+    if season.change_deadline_days is None:
+        return True
+    return _today_in_taiwan() + timedelta(days=season.change_deadline_days) <= game.date
+
+
+def _require_within_change_deadline(game: GameRow, season: SeasonRow) -> None:
+    if not _within_change_deadline(game, season):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Past this season's change deadline for this game",
+        )
+
+
+def _is_absence_covered(db: Session, absence_row: AbsenceRow) -> bool:
+    """Whether a drop-in — an explicit substitute or a FIFO match — is
+    currently covering this absence, per the same rule settlement.py
+    uses for refunds. Cancelling an absence out from under someone who
+    already committed to cover it needs the organizer, not a silent
+    auto-fix, so callers use this to block that case.
+    """
+    game_row = db.get(GameRow, absence_row.game_id)
+    assert game_row is not None
+    game = game_from_row(game_row)
+
+    absence_rows = db.query(AbsenceRow).filter(AbsenceRow.game_id == game_row.id).all()
+    drop_in_rows = db.query(DropInRow).filter(DropInRow.game_id == game_row.id).all()
+    player_ids = {a.player_id for a in absence_rows} | {
+        d.player_id for d in drop_in_rows
+    }
+    players_by_id = {
+        p.id: player_from_row(p)
+        for p in db.query(PlayerRow).filter(PlayerRow.id.in_(player_ids)).all()
+    }
+    games_by_id = {game_row.id: game}
+    absences_by_id = {
+        row.id: absence_from_row(row, players_by_id, games_by_id)
+        for row in absence_rows
+    }
+    drop_ins = [
+        drop_in_from_row(row, players_by_id, games_by_id, absences_by_id)
+        for row in drop_in_rows
+    ]
+    covered = covered_absences(game, list(absences_by_id.values()), drop_ins)
+    return absences_by_id[absence_row.id] in covered
 
 
 def _drop_in_share(db: Session, season_row: SeasonRow) -> Decimal:
@@ -236,8 +314,15 @@ def _gather_member_settlements(
     players_by_id = {row.id: player_from_row(row) for row in player_rows}
     games_by_id = {row.id: game_from_row(row) for row in game_rows}
     season = season_from_rows(season_row, game_rows, member_rows)
-    absences = [absence_from_row(a, players_by_id, games_by_id) for a in absence_rows]
-    drop_ins = [drop_in_from_row(d, players_by_id, games_by_id) for d in drop_in_rows]
+    absences_by_id = {
+        row.id: absence_from_row(row, players_by_id, games_by_id)
+        for row in absence_rows
+    }
+    absences = list(absences_by_id.values())
+    drop_ins = [
+        drop_in_from_row(d, players_by_id, games_by_id, absences_by_id)
+        for d in drop_in_rows
+    ]
 
     settlements = [
         settle_member(players_by_id[m.id], season, absences, drop_ins)
@@ -298,6 +383,7 @@ def start_season(payload: SeasonCreate, db: Session = Depends(get_db)) -> Season
         game_start_time=payload.game_start_time,
         game_end_time=payload.game_end_time,
         location=payload.location,
+        change_deadline_days=payload.change_deadline_days,
     )
     db.add(season)
     db.flush()
@@ -323,6 +409,7 @@ def start_season(payload: SeasonCreate, db: Session = Depends(get_db)) -> Season
         game_start_time=season.game_start_time,
         game_end_time=season.game_end_time,
         location=season.location,
+        change_deadline_days=season.change_deadline_days,
         games=[GameOut(id=g.id, date=g.date, status=g.status) for g in games],
         member_ids=member_ids,
     )
@@ -349,18 +436,22 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
     # endpoint felt slow. Group the results by game_id in Python instead.
     # Absences and drop-ins are each ordered earliest-first per game so
     # they can be paired off FIFO below — same rule, applied here purely
-    # for display, as settlement._covered_absences applies for refunds.
-    absences_by_game: dict[int, list[str]] = defaultdict(list)
+    # for display, as settlement.covered_absences applies for refunds.
+    # An explicit substitute (covers_absence_id) always pairs with that
+    # absence regardless of order, exactly as covered_absences does.
+    absences_by_game: dict[int, list[tuple[int, str]]] = defaultdict(list)
     for absence, player in (
         db.query(AbsenceRow, PlayerRow)
         .join(PlayerRow, AbsenceRow.player_id == PlayerRow.id)
-        .filter(AbsenceRow.game_id.in_(game_ids))
+        .filter(AbsenceRow.game_id.in_(game_ids), AbsenceRow.cancelled_at.is_(None))
         .order_by(AbsenceRow.recorded_at)
         .all()
     ):
-        absences_by_game[absence.game_id].append(player.name)
+        absences_by_game[absence.game_id].append((absence.id, player.name))
 
-    drop_ins_by_game: dict[int, list[tuple[int, str]]] = defaultdict(list)
+    drop_ins_by_game: dict[int, list[tuple[int, str, Gender | None, int | None]]] = (
+        defaultdict(list)
+    )
     for drop_in, player in (
         db.query(DropInRow, PlayerRow)
         .join(PlayerRow, DropInRow.player_id == PlayerRow.id)
@@ -368,7 +459,9 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
         .order_by(DropInRow.signed_up_at)
         .all()
     ):
-        drop_ins_by_game[drop_in.game_id].append((drop_in.id, player.name))
+        drop_ins_by_game[drop_in.game_id].append(
+            (drop_in.id, player.name, _gender(player.gender), drop_in.covers_absence_id)
+        )
 
     waitlist_by_game: dict[int, list[DropInSummary]] = defaultdict(list)
     for entry, player in (
@@ -379,32 +472,68 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
         .all()
     ):
         waitlist_by_game[entry.game_id].append(
-            DropInSummary(id=entry.id, player_name=player.name)
+            DropInSummary(
+                id=entry.id, player_name=player.name, gender=_gender(player.gender)
+            )
         )
 
     games = []
     for game in game_rows:
-        absent_names = absences_by_game[game.id]
+        # (absence_id, name) pairs, FIFO order
+        absences_list = absences_by_game[game.id]
+        # (drop_in_id, name, gender, covers_absence_id) tuples
         drop_ins = drop_ins_by_game[game.id]
+
+        # Explicit substitutes claim their absence first; the remaining
+        # (unclaimed) absences pair FIFO with the remaining drop-ins —
+        # same two-pass rule as settlement.covered_absences, just
+        # producing a name-to-name display instead of a refund count.
+        absence_name_by_id = dict(absences_list)
+        covered_by_name: dict[str, str] = {}
+        covering_name: dict[int, str] = {}
+        claimed_absence_ids: set[int] = set()
+        for drop_in_id, name, _drop_in_gender, covers_absence_id in drop_ins:
+            if covers_absence_id in absence_name_by_id:
+                absence_name = absence_name_by_id[covers_absence_id]
+                covered_by_name[absence_name] = name
+                covering_name[drop_in_id] = absence_name
+                claimed_absence_ids.add(covers_absence_id)
+
+        fifo_absences = [
+            (aid, name) for aid, name in absences_list if aid not in claimed_absence_ids
+        ]
+        fifo_drop_ins = [
+            (drop_in_id, name)
+            for drop_in_id, name, _drop_in_gender, covers_absence_id in drop_ins
+            if covers_absence_id is None
+        ]
+        for i, (_aid, absence_name) in enumerate(fifo_absences):
+            if i < len(fifo_drop_ins):
+                covered_by_name[absence_name] = fifo_drop_ins[i][1]
+        for i, (drop_in_id, _name) in enumerate(fifo_drop_ins):
+            if i < len(fifo_absences):
+                covering_name[drop_in_id] = fifo_absences[i][1]
+
         games.append(
             GameDetailOut(
                 id=game.id,
                 date=game.date,
                 status=game.status,
+                locked=not _within_change_deadline(game, season_row),
                 absences=[
                     AbsenceDetailOut(
-                        player_name=name,
-                        covered_by=drop_ins[i][1] if i < len(drop_ins) else None,
+                        player_name=name, covered_by=covered_by_name.get(name)
                     )
-                    for i, name in enumerate(absent_names)
+                    for _aid, name in absences_list
                 ],
                 confirmed_drop_ins=[
                     DropInDetailOut(
                         id=drop_in_id,
                         player_name=name,
-                        covering=(absent_names[i] if i < len(absent_names) else None),
+                        gender=gender,
+                        covering=covering_name.get(drop_in_id),
                     )
-                    for i, (drop_in_id, name) in enumerate(drop_ins)
+                    for drop_in_id, name, gender, _covers in drop_ins
                 ],
                 waitlist_entries=waitlist_by_game[game.id],
             )
@@ -418,11 +547,15 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
         game_start_time=season_row.game_start_time,
         game_end_time=season_row.game_end_time,
         location=season_row.location,
+        change_deadline_days=season_row.change_deadline_days,
         share_per_game=share_per_game(
             season_row.total_venue_cost, len(game_rows), len(member_rows)
         ),
         settled_at=season_row.settled_at,
-        members=[MemberOut(id=m.id, name=m.name) for m in member_rows],
+        members=[
+            MemberOut(id=m.id, name=m.name, gender=_gender(m.gender))
+            for m in member_rows
+        ],
         games=games,
     )
 
@@ -432,6 +565,9 @@ def record_absence(payload: AbsenceCreate, db: Session = Depends(get_db)) -> Abs
     player = _get_player_by_name(db, payload.player_name)
     game = _get_game_or_404(db, payload.game_id)
     _require_season_member(db, game.season_id, player.id)
+    season = db.get(SeasonRow, game.season_id)
+    assert season is not None
+    _require_within_change_deadline(game, season)
 
     absence = AbsenceRow(player_id=player.id, game_id=game.id, recorded_at=_now())
     db.add(absence)
@@ -450,12 +586,99 @@ def record_absence(payload: AbsenceCreate, db: Session = Depends(get_db)) -> Abs
     )
 
 
+@router.post("/absences/{absence_id}/cancel", response_model=AbsenceCancelOut)
+def cancel_absence(absence_id: int, db: Session = Depends(get_db)) -> AbsenceCancelOut:
+    """The member is attending after all. Only allowed while nothing is
+    covering this absence yet (see _is_absence_covered) — undoing it out
+    from under someone who already committed to cover needs the
+    organizer, not a silent auto-fix.
+    """
+    absence = db.get(AbsenceRow, absence_id)
+    if absence is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"No absence with id {absence_id}"
+        )
+    if absence.cancelled_at is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Already cancelled")
+
+    game = _get_game_or_404(db, absence.game_id)
+    season = db.get(SeasonRow, game.season_id)
+    assert season is not None
+    _require_within_change_deadline(game, season)
+
+    if _is_absence_covered(db, absence):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Someone is already covering this absence — ask the organizer",
+        )
+
+    absence.cancelled_at = _now()
+    db.commit()
+    db.refresh(absence)
+
+    return AbsenceCancelOut(id=absence.id, cancelled_at=absence.cancelled_at)
+
+
+@router.post("/absences/{absence_id}/substitute", response_model=DropInOut)
+def create_substitute(
+    absence_id: int, payload: SubstituteCreate, db: Session = Depends(get_db)
+) -> DropInOut:
+    """A member (or the organizer) personally arranging someone to fill
+    their own vacated slot — a "代打". Always confirmed, never queued:
+    filling your own slot with someone you picked isn't competing with
+    the waitlist for open capacity. See attendance.DropIn.covers.
+    """
+    absence = db.get(AbsenceRow, absence_id)
+    if absence is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"No absence with id {absence_id}"
+        )
+    if absence.cancelled_at is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This absence was cancelled")
+
+    game = _get_game_or_404(db, absence.game_id)
+    season = db.get(SeasonRow, game.season_id)
+    assert season is not None
+    _require_within_change_deadline(game, season)
+
+    existing = (
+        db.query(DropInRow)
+        .filter(
+            DropInRow.covers_absence_id == absence_id,
+            DropInRow.cancelled_at.is_(None),
+        )
+        .first()
+    )
+    if existing is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Already has a substitute")
+
+    player = _get_or_create_player(db, payload.player_name)
+    if player.gender is None and payload.gender is not None:
+        player.gender = payload.gender
+
+    drop_in = DropInRow(
+        player_id=player.id,
+        game_id=game.id,
+        signed_up_at=_now(),
+        covers_absence_id=absence_id,
+    )
+    db.add(drop_in)
+    _record_drop_in_charge(db, drop_in, season, reverse=False)
+    db.commit()
+    db.refresh(drop_in)
+
+    return DropInOut(
+        status="confirmed", id=drop_in.id, player_id=player.id, game_id=game.id
+    )
+
+
 @router.post("/drop-ins", response_model=DropInOut)
 def sign_up(payload: DropInCreate, db: Session = Depends(get_db)) -> DropInOut:
     player = _get_or_create_player(db, payload.player_name)
     game = _get_game_or_404(db, payload.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
+    _require_within_change_deadline(game, season)
 
     if _has_open_slot(db, game, season):
         drop_in = DropInRow(player_id=player.id, game_id=game.id, signed_up_at=_now())
@@ -489,6 +712,7 @@ def cancel_drop_in(drop_in_id: int, db: Session = Depends(get_db)) -> DropInCanc
     game = _get_game_or_404(db, drop_in.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
+    _require_within_change_deadline(game, season)
 
     drop_in.cancelled_at = _now()
     _record_drop_in_charge(db, drop_in, season, reverse=True)
@@ -558,6 +782,20 @@ def settle_season(season_id: int, db: Session = Depends(get_db)) -> SeasonSettle
         settled_at=now,
         members=[_member_settlement_out(ms) for ms in settlements],
     )
+
+
+@router.put("/players/{player_id}/gender", response_model=MemberOut)
+def set_player_gender(
+    player_id: int, payload: GenderUpdate, db: Session = Depends(get_db)
+) -> MemberOut:
+    """Self-reported by the player — never billing-relevant, only shown
+    on the roster so a game's expected male/female split is visible.
+    """
+    player = _get_player_or_404(db, player_id)
+    player.gender = payload.gender
+    db.commit()
+    db.refresh(player)
+    return MemberOut(id=player.id, name=player.name, gender=_gender(player.gender))
 
 
 @router.post("/players/{player_id}/payments", response_model=LedgerEntryOut)

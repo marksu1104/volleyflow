@@ -15,6 +15,7 @@ def start_season(
     game_start_time: str | None = None,
     game_end_time: str | None = None,
     location: str | None = None,
+    change_deadline_days: int | None = None,
 ) -> dict[str, Any]:
     response = client.post(
         "/seasons",
@@ -27,6 +28,7 @@ def start_season(
             "game_start_time": game_start_time,
             "game_end_time": game_end_time,
             "location": location,
+            "change_deadline_days": change_deadline_days,
         },
     )
     assert response.status_code == 200

@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 from volleyflow.ledger import EntryType
 from volleyflow.schedule import GameStatus
 
+Gender = Literal["male", "female"]
+
 
 class SeasonCreate(BaseModel):
     total_venue_cost: Decimal
@@ -24,6 +26,7 @@ class SeasonCreate(BaseModel):
     game_start_time: time | None = None
     game_end_time: time | None = None
     location: str | None = None
+    change_deadline_days: int | None = None
 
 
 class GameOut(BaseModel):
@@ -40,6 +43,7 @@ class SeasonOut(BaseModel):
     game_start_time: time | None
     game_end_time: time | None
     location: str | None
+    change_deadline_days: int | None
     games: list[GameOut]
     member_ids: list[int]
 
@@ -68,6 +72,16 @@ class AbsenceOut(BaseModel):
     recorded_at: datetime
     promoted_from_waitlist: int | None = None
     """Player id pulled off the waitlist to fill this slot, if any."""
+
+
+class AbsenceCancelOut(BaseModel):
+    id: int
+    cancelled_at: datetime
+
+
+class SubstituteCreate(BaseModel):
+    player_name: str
+    gender: Gender | None = None
 
 
 class DropInCreate(BaseModel):
@@ -106,12 +120,18 @@ class SettlementOut(BaseModel):
 class MemberOut(BaseModel):
     id: int
     name: str
+    gender: Gender | None = None
+
+
+class GenderUpdate(BaseModel):
+    gender: Gender
 
 
 class DropInSummary(BaseModel):
     id: int
     """The drop-in or waitlist entry id — pass this to the cancel endpoint."""
     player_name: str
+    gender: Gender | None = None
 
 
 class AbsenceDetailOut(BaseModel):
@@ -124,6 +144,7 @@ class AbsenceDetailOut(BaseModel):
 class DropInDetailOut(BaseModel):
     id: int
     player_name: str
+    gender: Gender | None = None
     covering: str | None
     """The absent member's name this drop-in is filling in for, or None
     if they're just filling an already-open slot."""
@@ -133,6 +154,9 @@ class GameDetailOut(BaseModel):
     id: int
     date: date
     status: GameStatus
+    locked: bool
+    """Past the season's change deadline — absences, signups, and their
+    cancellations are all rejected once this is true."""
     absences: list[AbsenceDetailOut]
     confirmed_drop_ins: list[DropInDetailOut]
     waitlist_entries: list[DropInSummary]
@@ -146,6 +170,7 @@ class SeasonDetailOut(BaseModel):
     game_start_time: time | None
     game_end_time: time | None
     location: str | None
+    change_deadline_days: int | None
     share_per_game: Decimal
     """Each member or drop-in's cost for one game — the number everything
     else in billing is a multiple of. Computed here, not on the frontend:
