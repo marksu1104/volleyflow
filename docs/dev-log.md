@@ -588,5 +588,17 @@ same name didn't inherit it. `github.com/settings/installations` →
 Render → Configure showed `marksu1104/volleyflow` still listed, which
 turned out to be exactly the stale reference — removing it and
 re-adding it forced GitHub to re-resolve the name against the current
-repo ID. This line is the real test of whether that's what actually
-fixed it.
+repo ID. It didn't fix it either — still needed a manual deploy to
+reach that commit.
+
+Gave up on the native integration and made deploys explicit instead:
+Render's dashboard exposes a per-service Deploy Hook (a private URL
+that triggers a deploy on request, independent of any GitHub webhook).
+Added it as a repo secret and a step at the end of `ci.yml` that
+`curl`s it after the Postgres tests pass, gated to pushes on `main`
+only. This is more robust than the thing it replaces anyway — a
+webhook is one more implicit, unobservable dependency; a CI step is
+visible in the run log and fails loudly (and blocks nothing else)
+if the hook URL is ever wrong. Verified end to end: pushed, watched
+the new "Deploy to Render" step succeed in the Actions log, watched a
+new deploy appear in Render's dashboard within the minute.
