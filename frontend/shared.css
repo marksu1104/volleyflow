@@ -119,3 +119,47 @@ button:disabled { opacity: .6; cursor: default; }
 .gdetail-mystatus.absent { color: var(--bad); }
 .gdetail-mystatus.confirmed { color: var(--good); }
 .gdetail-mystatus.waitlisted { color: var(--warn); }
+
+.gdetail-count { font-size: .86rem; margin-top: 8px; }
+.gdetail-count strong { font-variant-numeric: tabular-nums; }
+.gdetail-locked { font-size: .78rem; color: var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 6px 10px; margin-top: 8px; }
+
+/* roster stays collapsed until asked for — picking a day shouldn't
+   dump the whole member list on screen immediately */
+.gdetail-toggle {
+  display: block; width: 100%; margin-top: 12px; padding: 8px; border: 1px solid var(--rule);
+  border-radius: 8px; background: var(--paper); color: var(--ink-soft); font-size: .82rem;
+  font-weight: 600; cursor: pointer;
+}
+.gdetail-roster-wrap { margin-top: 10px; }
+
+.gender-tag { font-size: .68rem; margin-left: 4px; opacity: .7; }
+.gender-tag.male { color: var(--accent); }
+.gender-tag.female { color: #b0468a; }
+
+/* 代打 (substitute) inline controls on an uncovered absence row */
+.mini-action {
+  border: none; background: none; color: var(--accent); font-size: .74rem;
+  font-weight: 600; cursor: pointer; padding: 0 0 0 8px; text-decoration: underline;
+}
+.sub-form {
+  display: flex; gap: 6px; align-items: center; padding: 6px 8px 10px;
+  flex-wrap: wrap;
+}
+.sub-form input, .sub-form select {
+  padding: 5px 7px; border: 1px solid var(--rule); border-radius: 6px; font-size: .82rem;
+}
+.sub-form input { flex: 1; min-width: 90px; }
+.sub-form button {
+  padding: 5px 10px; border: none; border-radius: 6px; background: var(--accent-soft);
+  color: var(--accent); font-size: .8rem; font-weight: 600; cursor: pointer;
+}
+
+/* member.html's self-service gender picker */
+.gender-row { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.gender-label { font-size: .8rem; color: var(--ink-soft); }
+.gender-btn {
+  padding: 5px 14px; border: 1px solid var(--rule); border-radius: 20px; background: var(--surface);
+  color: var(--ink-soft); font-size: .82rem; cursor: pointer;
+}
+.gender-btn.selected { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 600; }
