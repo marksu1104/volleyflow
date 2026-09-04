@@ -509,3 +509,34 @@ flat list.
   eval, sharing its scope) instead of poking module state from outside.
 
 84 tests (2 postgres-only), 99% coverage.
+
+## 2026-09-04 (cont'd) — Game detail as a bottom sheet
+
+The inline detail panel from the previous stage had two problems in
+real use: tapping a calendar day didn't visibly react (the panel
+updated below the fold, off-screen, with no scroll), and the always-
+present month grid ate space the user wanted for the detail once
+they'd actually picked a day.
+
+Switched to a bottom sheet: tapping a day now slides the detail up
+over the page instead of updating a block that stays put. Closing it
+(✕ button or tapping the backdrop) returns to exactly the same
+calendar, which never moves or resizes regardless of whether a sheet
+is open. `openGameSheet`/`closeGameSheet` just toggle the backdrop's
+`hidden` attribute; content rendering (`renderSelectedGameDetail`) is
+unchanged and stays decoupled from visibility, so a season reload
+mid-session (e.g. right after recording an absence) updates the sheet
+in place if it's already open, without needing to know or care whether
+it's currently shown.
+
+Tested with a fake DOM driving the real `selectGame`/`loadSeason`
+functions (not poking internal state — see the eval-scope lesson from
+the previous stage): open-on-select, close-on-✕, close-on-backdrop-
+click, no-close-on-content-click, and that a season reload doesn't
+silently reopen a closed sheet. All passed against real season data
+from the live API.
+
+No test count change — this is markup/CSS/event-wiring, nothing in
+`tests/` exercises it directly (frontend still has no dedicated test
+runner; verification here is the same eval-and-inspect approach used
+throughout this project's frontend work).
