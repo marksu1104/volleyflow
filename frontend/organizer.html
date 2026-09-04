@@ -54,9 +54,6 @@
 
   <div id="month-cal" class="mcal"></div>
 
-  <h2>場次詳情</h2>
-  <div id="game-detail" class="gdetail"></div>
-
   <h2>結算與收款</h2>
   <div class="tbl-scroll">
     <table>
@@ -77,6 +74,13 @@
   <div class="settle-row">
     <span id="settle-note" class="settle-note"></span>
     <button id="settle-btn" class="settle-btn" onclick="settleSeason()">結算此季</button>
+  </div>
+</div>
+
+<div id="game-sheet-backdrop" class="gsheet-backdrop" hidden>
+  <div class="gsheet">
+    <button class="gsheet-close" aria-label="關閉">✕</button>
+    <div id="game-detail"></div>
   </div>
 </div>
 
@@ -162,6 +166,7 @@
   function selectGame(gameId) {
     selectedGameId = gameId;
     renderSelectedGameDetail();
+    openGameSheet();
   }
 
   function renderSelectedGameDetail() {
@@ -176,6 +181,20 @@
       : `<div class="gdetail-mystatus absent">${statusLabel(game.status)}</div>`;
     renderGameDetail(el, currentSeason, game, statusHtml);
   }
+
+  function openGameSheet() {
+    document.getElementById("game-sheet-backdrop").hidden = false;
+  }
+
+  function closeGameSheet() {
+    document.getElementById("game-sheet-backdrop").hidden = true;
+  }
+
+  const gameSheetBackdrop = document.getElementById("game-sheet-backdrop");
+  gameSheetBackdrop.addEventListener("click", (e) => {
+    if (e.target === gameSheetBackdrop) closeGameSheet();
+  });
+  document.querySelector(".gsheet-close").addEventListener("click", closeGameSheet);
 
   function statusLabel(status) {
     if (status === "cancelled_unrefunded") return "取消・場地費不退";
