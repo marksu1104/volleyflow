@@ -658,3 +658,160 @@ def test_cancel_drop_in_rejected_past_the_change_deadline(
     response = client.post(f"/drop-ins/{drop_in.id}/cancel")
 
     assert response.status_code == 400
+
+
+# --- editing season settings -----------------------------------------------
+
+
+def test_update_season_changes_only_the_given_fields(client: TestClient) -> None:
+    season = _start_season(
+        client, total_venue_cost="10000", member_names=["Alice"], capacity=18
+    )
+
+    response = client.patch(f"/seasons/{season['id']}", json={"capacity": 20})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["capacity"] == 20
+    assert body["total_venue_cost"] == "10000"  # untouched
+
+
+def test_update_season_can_clear_a_nullable_field_back_to_null(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["Alice"], location="啪排郎")
+
+    response = client.patch(f"/seasons/{season['id']}", json={"location": None})
+
+    assert response.status_code == 200
+    assert response.json()["location"] is None
+
+
+def test_update_season_rejects_venue_cost_change_once_settled(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    client.post(f"/seasons/{season['id']}/settle")
+
+    response = client.patch(
+        f"/seasons/{season['id']}", json={"total_venue_cost": "20000"}
+    )
+
+    assert response.status_code == 400
+
+
+def test_update_season_allows_non_cost_changes_once_settled(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    client.post(f"/seasons/{season['id']}/settle")
+
+    response = client.patch(f"/seasons/{season['id']}", json={"location": "新場地"})
+
+    assert response.status_code == 200
+    assert response.json()["location"] == "新場地"
+
+
+def test_update_season_for_an_unknown_season_returns_404(client: TestClient) -> None:
+    response = client.patch("/seasons/999999", json={"capacity": 20})
+
+    assert response.status_code == 404
+
+
+# --- member management -------------------------------------------------
+
+
+def test_add_member_joins_the_season(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+
+    response = client.post(
+        f"/seasons/{season['id']}/members", json={"player_name": "Bob"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Bob"
+    body = client.get(f"/seasons/{season['id']}").json()
+    assert {m["name"] for m in body["members"]} == {"Alice", "Bob"}
+
+
+def test_add_member_reuses_an_existing_player_by_name(client: TestClient) -> None:
+    first_season = _start_season(client, member_names=["Alice"])
+    second_season = _start_season(client, member_names=["Carol"])
+
+    response = client.post(
+        f"/seasons/{second_season['id']}/members", json={"player_name": "Alice"}
+    )
+
+    assert response.json()["id"] == first_season["member_ids"][0]
+
+
+def test_add_member_rejects_a_duplicate(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+
+    response = client.post(
+        f"/seasons/{season['id']}/members", json={"player_name": "Alice"}
+    )
+
+    assert response.status_code == 400
+
+
+def test_add_member_rejects_once_settled(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    client.post(f"/seasons/{season['id']}/settle")
+
+    response = client.post(
+        f"/seasons/{season['id']}/members", json={"player_name": "Bob"}
+    )
+
+    assert response.status_code == 400
+
+
+def test_add_member_for_an_unknown_season_returns_404(client: TestClient) -> None:
+    response = client.post("/seasons/999999/members", json={"player_name": "Bob"})
+
+    assert response.status_code == 404
+
+
+def test_remove_member_leaves_the_season(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice", "Bob"])
+    bob_id = next(
+        m["id"]
+        for m in client.get(f"/seasons/{season['id']}").json()["members"]
+        if m["name"] == "Bob"
+    )
+
+    response = client.delete(f"/seasons/{season['id']}/members/{bob_id}")
+
+    assert response.status_code == 204
+    body = client.get(f"/seasons/{season['id']}").json()
+    assert {m["name"] for m in body["members"]} == {"Alice"}
+
+
+def test_remove_member_rejects_once_settled(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice", "Bob"])
+    bob_id = next(
+        m["id"]
+        for m in client.get(f"/seasons/{season['id']}").json()["members"]
+        if m["name"] == "Bob"
+    )
+    client.post(f"/seasons/{season['id']}/settle")
+
+    response = client.delete(f"/seasons/{season['id']}/members/{bob_id}")
+
+    assert response.status_code == 400
+
+
+def test_remove_member_not_in_the_season_returns_404(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    other_season = _start_season(client, member_names=["Carol"])
+    carol_id = other_season["member_ids"][0]
+
+    response = client.delete(f"/seasons/{season['id']}/members/{carol_id}")
+
+    assert response.status_code == 404
+
+
+def test_remove_member_for_an_unknown_season_returns_404(client: TestClient) -> None:
+    response = client.delete("/seasons/999999/members/1")
+
+    assert response.status_code == 404

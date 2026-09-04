@@ -32,6 +32,7 @@ from volleyflow.api.schemas import (
     Gender,
     GenderUpdate,
     LedgerEntryOut,
+    MemberAdd,
     MemberOut,
     MemberSettlementOut,
     PaymentCreate,
@@ -41,6 +42,7 @@ from volleyflow.api.schemas import (
     SeasonOut,
     SeasonSettleOut,
     SeasonSummaryOut,
+    SeasonUpdate,
     SettlementOut,
     SubstituteCreate,
 )
@@ -413,6 +415,111 @@ def start_season(payload: SeasonCreate, db: Session = Depends(get_db)) -> Season
         games=[GameOut(id=g.id, date=g.date, status=g.status) for g in games],
         member_ids=member_ids,
     )
+
+
+def _season_out(db: Session, season: SeasonRow) -> SeasonOut:
+    games = db.query(GameRow).filter(GameRow.season_id == season.id).all()
+    member_ids = [
+        row.player_id
+        for row in db.query(SeasonMemberRow)
+        .filter(SeasonMemberRow.season_id == season.id)
+        .all()
+    ]
+    return SeasonOut(
+        id=season.id,
+        total_venue_cost=season.total_venue_cost,
+        capacity=season.capacity,
+        minimum_roster=season.minimum_roster,
+        game_start_time=season.game_start_time,
+        game_end_time=season.game_end_time,
+        location=season.location,
+        change_deadline_days=season.change_deadline_days,
+        games=[GameOut(id=g.id, date=g.date, status=g.status) for g in games],
+        member_ids=member_ids,
+    )
+
+
+@router.patch("/seasons/{season_id}", response_model=SeasonOut)
+def update_season(
+    season_id: int, payload: SeasonUpdate, db: Session = Depends(get_db)
+) -> SeasonOut:
+    """A partial update — only fields the client actually sent are
+    touched (see SeasonUpdate). Changing `total_venue_cost` changes
+    every member's per-game share for the whole season (past games
+    included, since there's one season-wide split, not a per-period
+    one) — the frontend warns about this before calling in; once
+    settled, the ledger already reflects the old cost, so it's locked.
+    """
+    season = db.get(SeasonRow, season_id)
+    if season is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "total_venue_cost" in updates and season.settled_at is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Season is already settled — venue cost can't change now",
+        )
+
+    for field, value in updates.items():
+        setattr(season, field, value)
+
+    db.commit()
+    db.refresh(season)
+    return _season_out(db, season)
+
+
+@router.post("/seasons/{season_id}/members", response_model=MemberOut)
+def add_member(
+    season_id: int, payload: MemberAdd, db: Session = Depends(get_db)
+) -> MemberOut:
+    """Adding a member changes everyone's per-game share for the whole
+    season, same reasoning as changing the venue cost — the frontend
+    warns before calling this. Blocked once settled: the ledger already
+    reflects the season fee computed from the roster at that time.
+    """
+    season = db.get(SeasonRow, season_id)
+    if season is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    if season.settled_at is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is already settled")
+
+    player = _get_or_create_player(db, payload.player_name)
+    existing = db.get(SeasonMemberRow, {"season_id": season_id, "player_id": player.id})
+    if existing is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Already a member of this season"
+        )
+
+    db.add(SeasonMemberRow(season_id=season_id, player_id=player.id))
+    db.commit()
+    db.refresh(player)
+    return MemberOut(id=player.id, name=player.name, gender=_gender(player.gender))
+
+
+@router.delete("/seasons/{season_id}/members/{player_id}", status_code=204)
+def remove_member(
+    season_id: int, player_id: int, db: Session = Depends(get_db)
+) -> None:
+    """Same retroactive-share caveat as adding one. Doesn't touch this
+    player's past absence/drop-in rows for this season — they simply
+    stop counting toward anyone's settlement once removed, since that
+    only ever iterates the current member list.
+    """
+    season = db.get(SeasonRow, season_id)
+    if season is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    if season.settled_at is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is already settled")
+
+    membership = db.get(
+        SeasonMemberRow, {"season_id": season_id, "player_id": player_id}
+    )
+    if membership is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not a member of this season")
+
+    db.delete(membership)
+    db.commit()
 
 
 @router.get("/seasons/{season_id}", response_model=SeasonDetailOut)

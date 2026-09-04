@@ -29,6 +29,26 @@ class SeasonCreate(BaseModel):
     change_deadline_days: int | None = None
 
 
+class SeasonUpdate(BaseModel):
+    """A partial update — only fields actually present in the request
+    body are touched (see routes.update_season's use of
+    `exclude_unset`), so e.g. clearing `location` back to null and
+    leaving it alone are distinguishable requests.
+    """
+
+    total_venue_cost: Decimal | None = None
+    capacity: int | None = None
+    minimum_roster: int | None = None
+    game_start_time: time | None = None
+    game_end_time: time | None = None
+    location: str | None = None
+    change_deadline_days: int | None = None
+
+
+class MemberAdd(BaseModel):
+    player_name: str
+
+
 class GameOut(BaseModel):
     id: int
     date: date
