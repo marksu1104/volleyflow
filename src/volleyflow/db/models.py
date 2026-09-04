@@ -44,6 +44,9 @@ class SeasonRow(Base):
     """The season's fixed weekly time slot, e.g. 18:30-22:00. Optional —
     billing and attendance never depend on it, it's only shown to people
     and included in reminder messages."""
+    location: Mapped[str | None] = mapped_column(default=None)
+    """The venue name, e.g. "啪排郎". Same reasoning as the time slot:
+    display-only, optional."""
 
 
 class SeasonMemberRow(Base):

@@ -266,7 +266,7 @@ def test_get_season_lists_games_and_members(client: TestClient) -> None:
     body = response.json()
     assert {m["name"] for m in body["members"]} == {"Alice", "Bob"}
     assert len(body["games"]) == 2
-    assert body["games"][0]["absent_player_names"] == []
+    assert body["games"][0]["absences"] == []
     assert body["games"][0]["confirmed_drop_ins"] == []
     assert body["games"][0]["waitlist_entries"] == []
 
@@ -287,9 +287,9 @@ def test_get_season_reflects_absences_signups_and_waitlist(
     response = client.get(f"/seasons/{season['id']}")
 
     game = next(g for g in response.json()["games"] if g["id"] == game_id)
-    assert game["absent_player_names"] == ["Alice"]
+    assert game["absences"] == [{"player_name": "Alice", "covered_by": "Bob"}]
     assert game["confirmed_drop_ins"] == [
-        {"id": bob_signup.json()["id"], "player_name": "Bob"}
+        {"id": bob_signup.json()["id"], "player_name": "Bob", "covering": "Alice"}
     ]
     assert game["waitlist_entries"] == [
         {"id": carol_signup.json()["id"], "player_name": "Carol"}

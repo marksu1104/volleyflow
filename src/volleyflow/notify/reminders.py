@@ -62,9 +62,10 @@ def send_game_reminder(session: Session, game: GameRow) -> None:
                 f"（{season.game_start_time.strftime('%H:%M')}"
                 f"-{season.game_end_time.strftime('%H:%M')}）"
             )
+        location = f"・{season.location}" if season.location else ""
         roster_text = "、".join(roster) if roster else "目前沒有人"
         message = (
-            f"{game.date} 球局提醒{time_range}\n"
+            f"{game.date} 球局提醒{time_range}{location}\n"
             f"預計出席（{len(roster)} 人）：{roster_text}"
         )
         push_to_group(group_id, message)
