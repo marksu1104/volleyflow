@@ -522,9 +522,9 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
                 locked=not _within_change_deadline(game, season_row),
                 absences=[
                     AbsenceDetailOut(
-                        player_name=name, covered_by=covered_by_name.get(name)
+                        id=aid, player_name=name, covered_by=covered_by_name.get(name)
                     )
-                    for _aid, name in absences_list
+                    for aid, name in absences_list
                 ],
                 confirmed_drop_ins=[
                     DropInDetailOut(

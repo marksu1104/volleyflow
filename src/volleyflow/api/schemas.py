@@ -135,6 +135,8 @@ class DropInSummary(BaseModel):
 
 
 class AbsenceDetailOut(BaseModel):
+    id: int
+    """Pass this to /absences/{id}/cancel or /absences/{id}/substitute."""
     player_name: str
     covered_by: str | None
     """The drop-in player_name filling this slot, if any — FIFO by

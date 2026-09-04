@@ -280,7 +280,9 @@ def test_get_season_reflects_absences_signups_and_waitlist(
 ) -> None:
     season = _start_season(client, member_names=["Alice"], capacity=1)
     game_id = season["games"][0]["id"]
-    client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
+    alice_absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
     bob_signup = client.post(
         "/drop-ins", json={"player_name": "Bob", "game_id": game_id}
     )
@@ -291,7 +293,9 @@ def test_get_season_reflects_absences_signups_and_waitlist(
     response = client.get(f"/seasons/{season['id']}")
 
     game = next(g for g in response.json()["games"] if g["id"] == game_id)
-    assert game["absences"] == [{"player_name": "Alice", "covered_by": "Bob"}]
+    assert game["absences"] == [
+        {"id": alice_absence["id"], "player_name": "Alice", "covered_by": "Bob"}
+    ]
     assert game["confirmed_drop_ins"] == [
         {
             "id": bob_signup.json()["id"],
