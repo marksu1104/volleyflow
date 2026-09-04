@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VolleyFlow 季別設定</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .settings-form { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+  .field-row { display: flex; flex-direction: column; gap: 4px; }
+  .field-row label { font-size: .8rem; color: var(--ink-soft); font-weight: 600; }
+  .field-row input {
+    padding: 9px 12px; border: 1px solid var(--rule); border-radius: 8px; font-size: .9rem;
+    background: var(--surface); color: var(--ink);
+  }
+  .field-row input:disabled { background: var(--paper); color: var(--ink-soft); }
+  .field-pair { display: flex; gap: 10px; }
+  .field-pair .field-row { flex: 1; }
+  .field-hint { font-size: .74rem; color: var(--ink-soft); }
+  .warn-note {
+    font-size: .78rem; color: var(--warn); background: var(--warn-soft);
+    border-radius: 8px; padding: 8px 10px;
+  }
+  .save-row { margin-top: 8px; }
+  .save-btn {
+    padding: 10px 20px; border: none; border-radius: 8px; background: var(--ink); color: white;
+    font-size: .88rem; font-weight: 600; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div class="wrap wide">
+  <h1>季別設定</h1>
+  <p class="sub">場地費、人數、時間、地點、更動期限</p>
+
+  <nav class="org-nav">
+    <a href="organizer.html" class="org-nav-link">總覽</a>
+    <a href="organizer-ledger.html" class="org-nav-link">帳務管理</a>
+    <a href="organizer-members.html" class="org-nav-link">成員管理</a>
+    <a href="organizer-settings.html" class="org-nav-link active">設定</a>
+  </nav>
+
+  <select id="season-picker" class="season-picker"></select>
+  <div id="error"></div>
+
+  <div class="settings-form">
+    <div class="field-row">
+      <label for="f-cost">場地費總額</label>
+      <input id="f-cost" type="number" step="1" min="0">
+      <span id="cost-locked-note" class="field-hint" hidden>這一季已結算，場地費不能再改。</span>
+      <span id="cost-warn-note" class="warn-note" hidden>改場地費會重新計算整季每人每場的金額，包含已經打過的場次。</span>
+    </div>
+
+    <div class="field-pair">
+      <div class="field-row">
+        <label for="f-capacity">人數上限</label>
+        <input id="f-capacity" type="number" step="1" min="1">
+      </div>
+      <div class="field-row">
+        <label for="f-min-roster">最低人數門檻</label>
+        <input id="f-min-roster" type="number" step="1" min="0">
+      </div>
+    </div>
+
+    <div class="field-pair">
+      <div class="field-row">
+        <label for="f-start-time">開始時間</label>
+        <input id="f-start-time" type="time">
+      </div>
+      <div class="field-row">
+        <label for="f-end-time">結束時間</label>
+        <input id="f-end-time" type="time">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <label for="f-location">地點</label>
+      <input id="f-location" type="text" placeholder="例如：啪排郎">
+    </div>
+
+    <div class="field-row">
+      <label for="f-deadline">更動期限（賽前幾天截止，留空表示沒有期限）</label>
+      <input id="f-deadline" type="number" step="1" min="0" placeholder="例如：1">
+    </div>
+
+    <div class="save-row">
+      <button type="button" class="save-btn" onclick="saveSettings()">儲存設定</button>
+    </div>
+  </div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+  const API_BASE = "https://volleyflow.onrender.com";
+  let currentSeasonId = null;
+  let originalVenueCost = null;
+
+  initSeasonPicker(API_BASE, document.getElementById("season-picker"), "vf_org_season", (id) => {
+    if (id) loadSettings(id);
+  });
+
+  async function loadSettings(seasonId) {
+    currentSeasonId = seasonId;
+    const errorEl = document.getElementById("error");
+    errorEl.textContent = "";
+    try {
+      const res = await fetch(`${API_BASE}/seasons/${seasonId}`);
+      if (!res.ok) {
+        errorEl.textContent = "找不到這一季";
+        return;
+      }
+      const season = await res.json();
+      fillForm(season);
+    } catch (e) {
+      errorEl.textContent = "連不上伺服器：" + e.message;
+    }
+  }
+
+  function fillForm(season) {
+    const settled = season.settled_at !== null;
+    originalVenueCost = season.total_venue_cost;
+
+    const costInput = document.getElementById("f-cost");
+    costInput.value = season.total_venue_cost;
+    costInput.disabled = settled;
+    document.getElementById("cost-locked-note").hidden = !settled;
+    document.getElementById("cost-warn-note").hidden = settled;
+
+    document.getElementById("f-capacity").value = season.capacity;
+    document.getElementById("f-min-roster").value = season.minimum_roster;
+    document.getElementById("f-start-time").value = season.game_start_time
+      ? season.game_start_time.slice(0, 5)
+      : "";
+    document.getElementById("f-end-time").value = season.game_end_time
+      ? season.game_end_time.slice(0, 5)
+      : "";
+    document.getElementById("f-location").value = season.location || "";
+    document.getElementById("f-deadline").value =
+      season.change_deadline_days === null ? "" : season.change_deadline_days;
+  }
+
+  async function saveSettings() {
+    const costInput = document.getElementById("f-cost");
+    if (!costInput.disabled) {
+      const newCost = costInput.value.trim();
+      if (newCost !== String(originalVenueCost)) {
+        if (
+          !confirm(
+            "場地費變更會重新計算整季每人每場的金額，包含已經打過的場次，確定要儲存嗎？"
+          )
+        ) {
+          return;
+        }
+      }
+    }
+
+    const deadlineValue = document.getElementById("f-deadline").value;
+    const payload = {
+      capacity: Number(document.getElementById("f-capacity").value),
+      minimum_roster: Number(document.getElementById("f-min-roster").value),
+      game_start_time: document.getElementById("f-start-time").value || null,
+      game_end_time: document.getElementById("f-end-time").value || null,
+      location: document.getElementById("f-location").value.trim() || null,
+      change_deadline_days: deadlineValue === "" ? null : Number(deadlineValue),
+    };
+    if (!costInput.disabled) {
+      payload.total_venue_cost = costInput.value.trim();
+    }
+
+    try {
+      await postJson(API_BASE, `/seasons/${currentSeasonId}`, payload, "PATCH");
+      alert("設定已儲存");
+      loadSettings(currentSeasonId);
+    } catch (e) {
+      alert("儲存失敗：" + e.message);
+    }
+  }
+</script>
+</body>
+</html>

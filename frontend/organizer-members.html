@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VolleyFlow 成員管理</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .warn-note {
+    font-size: .78rem; color: var(--warn); background: var(--warn-soft);
+    border-radius: 8px; padding: 8px 10px; margin: 12px 0;
+  }
+  .add-member-row { display: flex; gap: 6px; margin: 12px 0; }
+  .add-member-row input {
+    flex: 1; padding: 9px 12px; border: 1px solid var(--rule); border-radius: 8px; font-size: .9rem;
+  }
+  .add-member-row button {
+    padding: 9px 16px; border: none; border-radius: 8px; background: var(--ink); color: white;
+    font-size: .86rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .member-list { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+  .member-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
+  }
+  .member-remove {
+    border: none; background: var(--bad-soft); color: var(--bad); font-size: .78rem;
+    font-weight: 600; padding: 5px 10px; border-radius: 6px; cursor: pointer;
+  }
+  .settled-note { font-size: .82rem; color: var(--ink-soft); padding: 16px 0; }
+  .empty { color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap wide">
+  <h1>成員管理</h1>
+  <p class="sub">這一季的固定成員名單</p>
+
+  <nav class="org-nav">
+    <a href="organizer.html" class="org-nav-link">總覽</a>
+    <a href="organizer-ledger.html" class="org-nav-link">帳務管理</a>
+    <a href="organizer-members.html" class="org-nav-link active">成員管理</a>
+    <a href="organizer-settings.html" class="org-nav-link">設定</a>
+  </nav>
+
+  <select id="season-picker" class="season-picker"></select>
+  <div id="error"></div>
+
+  <div id="settled-note" class="settled-note" hidden>
+    這一季已經結算，成員名單不能再變動。
+  </div>
+
+  <div id="add-member-row" class="add-member-row">
+    <input id="new-member-name" type="text" placeholder="新成員姓名">
+    <button type="button" onclick="addMember()">新增成員</button>
+  </div>
+  <div id="warn-note" class="warn-note">
+    新增或移除成員會重新計算整季每人每場的金額，包含已經打過的場次。
+  </div>
+
+  <div id="member-list" class="member-list"></div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+  const API_BASE = "https://volleyflow.onrender.com";
+  let currentSeason = null;
+
+  initSeasonPicker(API_BASE, document.getElementById("season-picker"), "vf_org_season", (id) => {
+    if (id) loadMembers(id);
+  });
+
+  async function loadMembers(seasonId) {
+    const errorEl = document.getElementById("error");
+    errorEl.textContent = "";
+    try {
+      const res = await fetch(`${API_BASE}/seasons/${seasonId}`);
+      if (!res.ok) {
+        errorEl.textContent = "找不到這一季";
+        return;
+      }
+      currentSeason = await res.json();
+      renderMembers(currentSeason);
+    } catch (e) {
+      errorEl.textContent = "連不上伺服器：" + e.message;
+    }
+  }
+
+  function genderLabel(g) {
+    if (g === "male") return '<span class="gender-tag male">男</span>';
+    if (g === "female") return '<span class="gender-tag female">女</span>';
+    return "";
+  }
+
+  function renderMembers(season) {
+    const settled = season.settled_at !== null;
+    document.getElementById("settled-note").hidden = !settled;
+    document.getElementById("add-member-row").hidden = settled;
+    document.getElementById("warn-note").hidden = settled;
+
+    const list = document.getElementById("member-list");
+    if (season.members.length === 0) {
+      list.innerHTML = '<div class="empty">還沒有成員</div>';
+      return;
+    }
+    list.innerHTML = season.members
+      .map(
+        (m) => `
+          <div class="member-row">
+            <span>${m.name}${genderLabel(m.gender)}</span>
+            ${settled ? "" : `<button type="button" class="member-remove" onclick="removeMember(${m.id})">移除</button>`}
+          </div>
+        `
+      )
+      .join("");
+  }
+
+  async function addMember() {
+    const input = document.getElementById("new-member-name");
+    const name = input.value.trim();
+    if (!name) return;
+    if (
+      !confirm(
+        `新增「${name}」會重新計算整季每人每場的金額，包含已經打過的場次，確定要新增嗎？`
+      )
+    ) {
+      return;
+    }
+    try {
+      await postJson(API_BASE, `/seasons/${currentSeason.id}/members`, {
+        player_name: name,
+      });
+      input.value = "";
+      loadMembers(currentSeason.id);
+    } catch (e) {
+      alert("新增失敗：" + e.message);
+    }
+  }
+
+  async function removeMember(playerId) {
+    const member = currentSeason.members.find((m) => m.id === playerId);
+    if (
+      !member ||
+      !confirm(
+        `移除「${member.name}」會重新計算整季每人每場的金額，包含已經打過的場次，確定要移除嗎？`
+      )
+    ) {
+      return;
+    }
+    const res = await fetch(
+      `${API_BASE}/seasons/${currentSeason.id}/members/${playerId}`,
+      { method: "DELETE" }
+    );
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert("移除失敗：" + (data.detail || res.statusText));
+      return;
+    }
+    loadMembers(currentSeason.id);
+  }
+</script>
+</body>
+</html>
