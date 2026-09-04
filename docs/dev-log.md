@@ -579,5 +579,14 @@ a fresh re-auth.
 That first push after reconnecting didn't trigger an auto-deploy, so
 Render still needed a manual re-select through Settings → Build →
 Source → Edit, then a Manual Deploy to actually reach the new repo's
-tip. This line is the second, real test of whether that fixed the
-auto-deploy hook going forward.
+tip. That push didn't trigger one either — the actual cause turned out
+to be one level up, in GitHub itself: Render connects via a GitHub App
+with "Only select repositories" access, and that access list is scoped
+to specific repo IDs. Deleting the old repo didn't just take the repo
+with it, it silently invalidated that entry; the new repo sharing the
+same name didn't inherit it. `github.com/settings/installations` →
+Render → Configure showed `marksu1104/volleyflow` still listed, which
+turned out to be exactly the stale reference — removing it and
+re-adding it forced GitHub to re-resolve the name against the current
+repo ID. This line is the real test of whether that's what actually
+fixed it.
