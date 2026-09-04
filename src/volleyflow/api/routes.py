@@ -18,9 +18,11 @@ from volleyflow.api.conversion import (
 from volleyflow.api.dependencies import get_db
 from volleyflow.api.schemas import (
     AbsenceCreate,
+    AbsenceDetailOut,
     AbsenceOut,
     DropInCancelOut,
     DropInCreate,
+    DropInDetailOut,
     DropInOut,
     DropInSummary,
     GameDetailOut,
@@ -295,6 +297,7 @@ def start_season(payload: SeasonCreate, db: Session = Depends(get_db)) -> Season
         minimum_roster=payload.minimum_roster,
         game_start_time=payload.game_start_time,
         game_end_time=payload.game_end_time,
+        location=payload.location,
     )
     db.add(season)
     db.flush()
@@ -319,6 +322,7 @@ def start_season(payload: SeasonCreate, db: Session = Depends(get_db)) -> Season
         minimum_roster=season.minimum_roster,
         game_start_time=season.game_start_time,
         game_end_time=season.game_end_time,
+        location=season.location,
         games=[GameOut(id=g.id, date=g.date, status=g.status) for g in games],
         member_ids=member_ids,
     )
@@ -343,25 +347,28 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
     # game — looping a query per game (3 * N round trips to Neon for N
     # games) is the classic N+1 problem and was most of why this
     # endpoint felt slow. Group the results by game_id in Python instead.
+    # Absences and drop-ins are each ordered earliest-first per game so
+    # they can be paired off FIFO below — same rule, applied here purely
+    # for display, as settlement._covered_absences applies for refunds.
     absences_by_game: dict[int, list[str]] = defaultdict(list)
     for absence, player in (
         db.query(AbsenceRow, PlayerRow)
         .join(PlayerRow, AbsenceRow.player_id == PlayerRow.id)
         .filter(AbsenceRow.game_id.in_(game_ids))
+        .order_by(AbsenceRow.recorded_at)
         .all()
     ):
         absences_by_game[absence.game_id].append(player.name)
 
-    confirmed_by_game: dict[int, list[DropInSummary]] = defaultdict(list)
+    drop_ins_by_game: dict[int, list[tuple[int, str]]] = defaultdict(list)
     for drop_in, player in (
         db.query(DropInRow, PlayerRow)
         .join(PlayerRow, DropInRow.player_id == PlayerRow.id)
         .filter(DropInRow.game_id.in_(game_ids), DropInRow.cancelled_at.is_(None))
+        .order_by(DropInRow.signed_up_at)
         .all()
     ):
-        confirmed_by_game[drop_in.game_id].append(
-            DropInSummary(id=drop_in.id, player_name=player.name)
-        )
+        drop_ins_by_game[drop_in.game_id].append((drop_in.id, player.name))
 
     waitlist_by_game: dict[int, list[DropInSummary]] = defaultdict(list)
     for entry, player in (
@@ -375,17 +382,33 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
             DropInSummary(id=entry.id, player_name=player.name)
         )
 
-    games = [
-        GameDetailOut(
-            id=game.id,
-            date=game.date,
-            status=game.status,
-            absent_player_names=absences_by_game[game.id],
-            confirmed_drop_ins=confirmed_by_game[game.id],
-            waitlist_entries=waitlist_by_game[game.id],
+    games = []
+    for game in game_rows:
+        absent_names = absences_by_game[game.id]
+        drop_ins = drop_ins_by_game[game.id]
+        games.append(
+            GameDetailOut(
+                id=game.id,
+                date=game.date,
+                status=game.status,
+                absences=[
+                    AbsenceDetailOut(
+                        player_name=name,
+                        covered_by=drop_ins[i][1] if i < len(drop_ins) else None,
+                    )
+                    for i, name in enumerate(absent_names)
+                ],
+                confirmed_drop_ins=[
+                    DropInDetailOut(
+                        id=drop_in_id,
+                        player_name=name,
+                        covering=(absent_names[i] if i < len(absent_names) else None),
+                    )
+                    for i, (drop_in_id, name) in enumerate(drop_ins)
+                ],
+                waitlist_entries=waitlist_by_game[game.id],
+            )
         )
-        for game in game_rows
-    ]
 
     return SeasonDetailOut(
         id=season_row.id,
@@ -394,6 +417,10 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
         minimum_roster=season_row.minimum_roster,
         game_start_time=season_row.game_start_time,
         game_end_time=season_row.game_end_time,
+        location=season_row.location,
+        share_per_game=share_per_game(
+            season_row.total_venue_cost, len(game_rows), len(member_rows)
+        ),
         settled_at=season_row.settled_at,
         members=[MemberOut(id=m.id, name=m.name) for m in member_rows],
         games=games,

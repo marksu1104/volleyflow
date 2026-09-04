@@ -23,6 +23,7 @@ class SeasonCreate(BaseModel):
     minimum_roster: int = 12
     game_start_time: time | None = None
     game_end_time: time | None = None
+    location: str | None = None
 
 
 class GameOut(BaseModel):
@@ -38,6 +39,7 @@ class SeasonOut(BaseModel):
     minimum_roster: int
     game_start_time: time | None
     game_end_time: time | None
+    location: str | None
     games: list[GameOut]
     member_ids: list[int]
 
@@ -112,12 +114,27 @@ class DropInSummary(BaseModel):
     player_name: str
 
 
+class AbsenceDetailOut(BaseModel):
+    player_name: str
+    covered_by: str | None
+    """The drop-in player_name filling this slot, if any — FIFO by
+    signup order, same rule as the refund calculation in settlement.py."""
+
+
+class DropInDetailOut(BaseModel):
+    id: int
+    player_name: str
+    covering: str | None
+    """The absent member's name this drop-in is filling in for, or None
+    if they're just filling an already-open slot."""
+
+
 class GameDetailOut(BaseModel):
     id: int
     date: date
     status: GameStatus
-    absent_player_names: list[str]
-    confirmed_drop_ins: list[DropInSummary]
+    absences: list[AbsenceDetailOut]
+    confirmed_drop_ins: list[DropInDetailOut]
     waitlist_entries: list[DropInSummary]
 
 
@@ -128,6 +145,11 @@ class SeasonDetailOut(BaseModel):
     minimum_roster: int
     game_start_time: time | None
     game_end_time: time | None
+    location: str | None
+    share_per_game: Decimal
+    """Each member or drop-in's cost for one game — the number everything
+    else in billing is a multiple of. Computed here, not on the frontend:
+    rounding happens in exactly one place (pricing.share_per_game)."""
     settled_at: datetime | None
     members: list[MemberOut]
     games: list[GameDetailOut]
