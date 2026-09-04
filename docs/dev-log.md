@@ -575,3 +575,9 @@ webhook subscription survived). This commit doubles as the test: if it
 shows up in Render's Deploys list without a manual trigger, the
 reconnect held; if not, the "Edit" next to the connected source needs
 a fresh re-auth.
+
+That first push after reconnecting didn't trigger an auto-deploy, so
+Render still needed a manual re-select through Settings → Build →
+Source → Edit, then a Manual Deploy to actually reach the new repo's
+tip. This line is the second, real test of whether that fixed the
+auto-deploy hook going forward.
