@@ -45,17 +45,26 @@ def absence_from_row(
         player=players_by_id[row.player_id],
         game=games_by_id[row.game_id],
         recorded_at=row.recorded_at,
+        cancelled_at=row.cancelled_at,
     )
 
 
 def drop_in_from_row(
-    row: DropInRow, players_by_id: dict[int, Player], games_by_id: dict[int, Game]
+    row: DropInRow,
+    players_by_id: dict[int, Player],
+    games_by_id: dict[int, Game],
+    absences_by_id: dict[int, Absence],
 ) -> DropIn:
     return DropIn(
         player=players_by_id[row.player_id],
         game=games_by_id[row.game_id],
         signed_up_at=row.signed_up_at,
         cancelled_at=row.cancelled_at,
+        covers=(
+            absences_by_id[row.covers_absence_id]
+            if row.covers_absence_id is not None
+            else None
+        ),
     )
 
 

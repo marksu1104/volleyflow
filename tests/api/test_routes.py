@@ -1,10 +1,14 @@
 """Tests for the API routes."""
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from tests.api.factories import start_season as _start_season
+from volleyflow.api.routes import _today_in_taiwan
+from volleyflow.db.models import AbsenceRow, DropInRow, PlayerRow
 
 
 def test_list_seasons_summarizes_each_season(client: TestClient) -> None:
@@ -289,10 +293,15 @@ def test_get_season_reflects_absences_signups_and_waitlist(
     game = next(g for g in response.json()["games"] if g["id"] == game_id)
     assert game["absences"] == [{"player_name": "Alice", "covered_by": "Bob"}]
     assert game["confirmed_drop_ins"] == [
-        {"id": bob_signup.json()["id"], "player_name": "Bob", "covering": "Alice"}
+        {
+            "id": bob_signup.json()["id"],
+            "player_name": "Bob",
+            "gender": None,
+            "covering": "Alice",
+        }
     ]
     assert game["waitlist_entries"] == [
-        {"id": carol_signup.json()["id"], "player_name": "Carol"}
+        {"id": carol_signup.json()["id"], "player_name": "Carol", "gender": None}
     ]
 
 
@@ -307,3 +316,341 @@ def test_health_check_returns_ok(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+# --- cancelling an absence -------------------------------------------------
+
+
+def test_cancel_absence_succeeds_when_uncovered(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+
+    response = client.post(f"/absences/{absence['id']}/cancel")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == absence["id"]
+    body = client.get(f"/seasons/{season['id']}").json()
+    game = next(g for g in body["games"] if g["id"] == game_id)
+    assert game["absences"] == []
+
+
+def test_cancel_absence_rejects_already_cancelled(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    client.post(f"/absences/{absence['id']}/cancel")
+
+    response = client.post(f"/absences/{absence['id']}/cancel")
+
+    assert response.status_code == 400
+
+
+def test_cancel_absence_rejects_when_covered_by_a_drop_in(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"], capacity=1)
+    game_id = season["games"][0]["id"]
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    client.post("/drop-ins", json={"player_name": "Bob", "game_id": game_id})
+
+    response = client.post(f"/absences/{absence['id']}/cancel")
+
+    assert response.status_code == 400
+
+
+def test_cancel_absence_for_unknown_id_returns_404(client: TestClient) -> None:
+    response = client.post("/absences/999999/cancel")
+
+    assert response.status_code == 404
+
+
+# --- 代打: a member's own named substitute ----------------------------------
+
+
+def test_create_substitute_confirms_and_charges_the_fee(client: TestClient) -> None:
+    season = _start_season(client, total_venue_cost="10000", member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+
+    response = client.post(
+        f"/absences/{absence['id']}/substitute",
+        json={"player_name": "Dave", "gender": "male"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "confirmed"
+    ledger = client.get(f"/players/{body['player_id']}/ledger").json()
+    assert ledger["balance"] == "-5000"  # 10000 / 2 games / 1 member, one game's worth
+
+
+def test_create_substitute_covers_its_specific_absence_not_fifo(
+    client: TestClient,
+) -> None:
+    """Bob's absence is recorded first — plain FIFO would refund him —
+    but Alice arranged her own substitute, so her absence is the one
+    settlement refunds, not Bob's.
+    """
+    season = _start_season(
+        client, total_venue_cost="10000", member_names=["Alice", "Bob"], capacity=2
+    )
+    game_id = season["games"][0]["id"]
+    client.post("/absences", json={"player_name": "Bob", "game_id": game_id})
+    alice_absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    client.post(
+        f"/absences/{alice_absence['id']}/substitute", json={"player_name": "Dave"}
+    )
+
+    settlement = client.get(f"/seasons/{season['id']}/settlement").json()
+    alice = next(m for m in settlement["members"] if m["player_name"] == "Alice")
+    bob = next(m for m in settlement["members"] if m["player_name"] == "Bob")
+
+    assert alice["refund"] == "2500"
+    assert bob["refund"] == "0"
+
+
+def test_create_substitute_rejects_a_second_substitute(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    client.post(f"/absences/{absence['id']}/substitute", json={"player_name": "Dave"})
+
+    response = client.post(
+        f"/absences/{absence['id']}/substitute", json={"player_name": "Eve"}
+    )
+
+    assert response.status_code == 400
+
+
+def test_create_substitute_rejects_a_cancelled_absence(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    client.post(f"/absences/{absence['id']}/cancel")
+
+    response = client.post(
+        f"/absences/{absence['id']}/substitute", json={"player_name": "Dave"}
+    )
+
+    assert response.status_code == 400
+
+
+def test_create_substitute_for_unknown_absence_returns_404(client: TestClient) -> None:
+    response = client.post("/absences/999999/substitute", json={"player_name": "Dave"})
+
+    assert response.status_code == 404
+
+
+def test_create_substitute_sets_gender_for_a_new_player(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+
+    client.post(
+        f"/absences/{absence['id']}/substitute",
+        json={"player_name": "Dave", "gender": "male"},
+    )
+
+    body = client.get(f"/seasons/{season['id']}").json()
+    game = next(g for g in body["games"] if g["id"] == game_id)
+    dave = next(d for d in game["confirmed_drop_ins"] if d["player_name"] == "Dave")
+    assert dave["gender"] == "male"
+
+
+def test_create_substitute_does_not_overwrite_an_existing_gender(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    first_signup = client.post(
+        "/drop-ins", json={"player_name": "Dave", "game_id": game_id}
+    ).json()
+    client.put(f"/players/{first_signup['player_id']}/gender", json={"gender": "male"})
+    client.post(f"/drop-ins/{first_signup['id']}/cancel")
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+
+    client.post(
+        f"/absences/{absence['id']}/substitute",
+        json={"player_name": "Dave", "gender": "female"},
+    )
+
+    body = client.get(f"/seasons/{season['id']}").json()
+    game = next(g for g in body["games"] if g["id"] == game_id)
+    dave = next(d for d in game["confirmed_drop_ins"] if d["player_name"] == "Dave")
+    assert dave["gender"] == "male"
+
+
+# --- player gender -----------------------------------------------------
+
+
+def test_set_player_gender_updates_it(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    player_id = season["member_ids"][0]
+
+    response = client.put(f"/players/{player_id}/gender", json={"gender": "female"})
+
+    assert response.status_code == 200
+    assert response.json()["gender"] == "female"
+
+
+def test_set_player_gender_for_unknown_player_returns_404(client: TestClient) -> None:
+    response = client.put("/players/999999/gender", json={"gender": "male"})
+
+    assert response.status_code == 404
+
+
+def test_set_player_gender_rejects_an_invalid_value(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    player_id = season["member_ids"][0]
+
+    response = client.put(f"/players/{player_id}/gender", json={"gender": "other"})
+
+    assert response.status_code == 422
+
+
+# --- change deadline -----------------------------------------------------
+
+
+def test_record_absence_rejected_past_the_change_deadline(client: TestClient) -> None:
+    today = _today_in_taiwan().isoformat()
+    season = _start_season(
+        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+    )
+    game_id = season["games"][0]["id"]
+
+    response = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    )
+
+    assert response.status_code == 400
+
+
+def test_record_absence_allowed_within_the_change_deadline(client: TestClient) -> None:
+    future = (_today_in_taiwan() + timedelta(days=10)).isoformat()
+    season = _start_season(
+        client, member_names=["Alice"], game_dates=[future], change_deadline_days=1
+    )
+    game_id = season["games"][0]["id"]
+
+    response = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    )
+
+    assert response.status_code == 200
+
+
+def test_sign_up_rejected_past_the_change_deadline(client: TestClient) -> None:
+    today = _today_in_taiwan().isoformat()
+    season = _start_season(
+        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+    )
+    game_id = season["games"][0]["id"]
+
+    response = client.post("/drop-ins", json={"player_name": "Bob", "game_id": game_id})
+
+    assert response.status_code == 400
+
+
+def test_game_detail_locked_reflects_the_change_deadline(client: TestClient) -> None:
+    today = _today_in_taiwan().isoformat()
+    future = (_today_in_taiwan() + timedelta(days=10)).isoformat()
+    season = _start_season(
+        client,
+        member_names=["Alice"],
+        game_dates=[today, future],
+        change_deadline_days=1,
+    )
+
+    body = client.get(f"/seasons/{season['id']}").json()
+
+    locked_by_date = {g["date"]: g["locked"] for g in body["games"]}
+    assert locked_by_date[today] is True
+    assert locked_by_date[future] is False
+
+
+def test_cancel_absence_rejected_past_the_change_deadline(
+    client: TestClient, db_session: Session
+) -> None:
+    today = _today_in_taiwan().isoformat()
+    season = _start_season(
+        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+    )
+    game_id = season["games"][0]["id"]
+    absence = AbsenceRow(
+        player_id=season["member_ids"][0],
+        game_id=game_id,
+        recorded_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    db_session.add(absence)
+    db_session.commit()
+    db_session.refresh(absence)
+
+    response = client.post(f"/absences/{absence.id}/cancel")
+
+    assert response.status_code == 400
+
+
+def test_create_substitute_rejected_past_the_change_deadline(
+    client: TestClient, db_session: Session
+) -> None:
+    today = _today_in_taiwan().isoformat()
+    season = _start_season(
+        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+    )
+    game_id = season["games"][0]["id"]
+    absence = AbsenceRow(
+        player_id=season["member_ids"][0],
+        game_id=game_id,
+        recorded_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    db_session.add(absence)
+    db_session.commit()
+    db_session.refresh(absence)
+
+    response = client.post(
+        f"/absences/{absence.id}/substitute", json={"player_name": "Dave"}
+    )
+
+    assert response.status_code == 400
+
+
+def test_cancel_drop_in_rejected_past_the_change_deadline(
+    client: TestClient, db_session: Session
+) -> None:
+    today = _today_in_taiwan().isoformat()
+    season = _start_season(
+        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+    )
+    game_id = season["games"][0]["id"]
+    bob = PlayerRow(name="Bob")
+    db_session.add(bob)
+    db_session.flush()
+    drop_in = DropInRow(
+        player_id=bob.id,
+        game_id=game_id,
+        signed_up_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    db_session.add(drop_in)
+    db_session.commit()
+    db_session.refresh(drop_in)
+
+    response = client.post(f"/drop-ins/{drop_in.id}/cancel")
+
+    assert response.status_code == 400

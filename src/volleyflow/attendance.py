@@ -1,8 +1,11 @@
 """Absence, DropIn, and WaitlistEntry: who's in, who's out, who's next.
 
-Which drop-in "covers" which absence is not stored here — it's computed at
-settlement time by pairing both lists in timestamp order. See settlement.py
-and docs/billing-rules.md "FIFO when coverage falls short".
+Most drop-ins aren't tied to any particular absence — which one "covers"
+which is computed at settlement time by pairing both lists in timestamp
+order. See settlement.py and docs/billing-rules.md "FIFO when coverage
+falls short". A drop-in can also be *directly* nominated as a member's
+own substitute (a "代打") instead of coming from that FIFO pool — see
+`DropIn.covers`.
 """
 
 from collections.abc import Sequence
@@ -20,6 +23,11 @@ class Absence:
     player: Player
     game: Game
     recorded_at: datetime
+    cancelled_at: datetime | None = None
+
+    @property
+    def is_active(self) -> bool:
+        return self.cancelled_at is None
 
 
 @dataclass(frozen=True)
@@ -30,6 +38,12 @@ class DropIn:
     game: Game
     signed_up_at: datetime
     cancelled_at: datetime | None = None
+    covers: Absence | None = None
+    """Set when a member personally arranged this drop-in as their own
+    substitute for a specific absence, instead of it coming from the
+    general FIFO waitlist pool. Filling your own vacated slot with
+    someone you picked isn't competing with strangers queued for open
+    capacity, so this bypasses the waitlist rather than jumping it."""
 
     @property
     def is_active(self) -> bool:

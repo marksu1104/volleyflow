@@ -166,3 +166,61 @@ def test_settle_member_does_not_count_a_cancelled_drop_in_as_coverage():
     result = settle_member(ALICE, season, absences, drop_ins)
 
     assert result.refund == Decimal("0")
+
+
+def test_settle_member_does_not_refund_a_cancelled_absence():
+    season = _season()
+    absences = [
+        Absence(
+            ALICE,
+            GAME1,
+            recorded_at=datetime(2026, 8, 1),
+            cancelled_at=datetime(2026, 8, 2),
+        )
+    ]
+    drop_ins = [DropIn(CAROL, GAME1, signed_up_at=datetime(2026, 8, 2))]
+
+    result = settle_member(ALICE, season, absences, drop_ins)
+
+    assert result.refund == Decimal("0")
+
+
+def test_settle_member_refunds_a_substitute_regardless_of_fifo_order():
+    """Bob's absence is recorded first, so plain FIFO would refund him —
+    but Alice arranged her own named substitute, so her later absence is
+    the one that gets refunded, not Bob's.
+    """
+    season = _season()
+    alice_absence = Absence(ALICE, GAME1, recorded_at=datetime(2026, 8, 2))
+    bob_absence = Absence(BOB, GAME1, recorded_at=datetime(2026, 8, 1))
+    absences = [alice_absence, bob_absence]
+    drop_ins = [
+        DropIn(CAROL, GAME1, signed_up_at=datetime(2026, 8, 3), covers=alice_absence)
+    ]
+
+    alice_result = settle_member(ALICE, season, absences, drop_ins)
+    bob_result = settle_member(BOB, season, absences, drop_ins)
+
+    assert alice_result.refund == Decimal("250")
+    assert bob_result.refund == Decimal("0")
+
+
+def test_settle_member_substitute_does_not_consume_a_fifo_slot():
+    """Alice's substitute is a separate arrangement from the general
+    waitlist pool — Bob's uncovered absence still gets FIFO-matched to
+    the one general drop-in, unaffected by Alice's substitute existing.
+    """
+    season = _season()
+    alice_absence = Absence(ALICE, GAME1, recorded_at=datetime(2026, 8, 1))
+    bob_absence = Absence(BOB, GAME1, recorded_at=datetime(2026, 8, 2))
+    absences = [alice_absence, bob_absence]
+    drop_ins = [
+        DropIn(CAROL, GAME1, signed_up_at=datetime(2026, 8, 3), covers=alice_absence),
+        DropIn(Player(id=7, name="Grace"), GAME1, signed_up_at=datetime(2026, 8, 4)),
+    ]
+
+    alice_result = settle_member(ALICE, season, absences, drop_ins)
+    bob_result = settle_member(BOB, season, absences, drop_ins)
+
+    assert alice_result.refund == Decimal("250")
+    assert bob_result.refund == Decimal("250")
