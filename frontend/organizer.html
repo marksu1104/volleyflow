@@ -14,17 +14,6 @@
   .pill strong { color: var(--ink); font-weight: 600; }
   .pill.settled { background: var(--good-soft); color: var(--good); border-color: transparent; }
 
-  .card {
-    background: var(--surface); border-radius: 12px; padding: 14px 16px;
-    margin-bottom: 8px; border: 1px solid var(--rule); scroll-margin-top: 12px;
-  }
-  .card.today { border-color: var(--accent); }
-  .card-top { display: flex; justify-content: space-between; align-items: baseline; }
-  .card-date { font-weight: 600; font-size: .95rem; }
-  .card-when { font-size: .72rem; color: var(--ink-soft); margin-left: 6px; }
-  .card-status { font-size: .74rem; color: var(--ink-soft); }
-  .roster-line { font-size: .82rem; color: var(--ink-soft); margin-top: 6px; }
-
   .tbl-scroll { overflow-x: auto; border-radius: 12px; border: 1px solid var(--rule); }
   table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: .86rem; }
   th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
@@ -65,8 +54,8 @@
 
   <div id="month-cal" class="mcal"></div>
 
-  <h2>每場出席狀況</h2>
-  <div id="attendance-list"></div>
+  <h2>場次詳情</h2>
+  <div id="game-detail" class="gdetail"></div>
 
   <h2>結算與收款</h2>
   <div class="tbl-scroll">
@@ -95,6 +84,7 @@
 <script>
   const API_BASE = "https://volleyflow.onrender.com";
   let currentSeason = null;
+  let selectedGameId = null;
 
   initSeasonPicker(API_BASE, document.getElementById("season-picker"), "vf_org_season", (id) => {
     if (id) loadDashboard(id);
@@ -114,14 +104,19 @@
       }
       const season = await seasonRes.json();
       const settlement = await settlementRes.json();
+      const isNewSeason = !currentSeason || currentSeason.id !== season.id;
       currentSeason = season;
+      // Keep whatever game was selected across a reload — only reset to
+      // the next upcoming game when switching seasons, or on first load.
+      if (isNewSeason || !season.games.some((g) => g.id === selectedGameId)) {
+        const upcoming = season.games.find((g) => !describeDate(g.date).isPast) || season.games[season.games.length - 1];
+        selectedGameId = upcoming ? upcoming.id : null;
+      }
 
       renderMeta(season);
       renderGlance(season);
-      renderMonthCalendar(document.getElementById("month-cal"), season.games, (gameId) => {
-        document.getElementById(`game-${gameId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
-      renderAttendance(season);
+      renderMonthCalendar(document.getElementById("month-cal"), season.games, selectGame);
+      renderSelectedGameDetail();
       await renderSettlement(season, settlement);
     } catch (e) {
       errorEl.textContent = "連不上伺服器：" + e.message;
@@ -131,10 +126,18 @@
   function renderMeta(season) {
     const el = document.getElementById("season-meta");
     const settled = season.settled_at !== null;
+    const timePill = season.game_start_time && season.game_end_time
+      ? `<span class="pill">球局時間 <strong>${season.game_start_time.slice(0, 5)}-${season.game_end_time.slice(0, 5)}</strong></span>`
+      : "";
+    const locationPill = season.location
+      ? `<span class="pill">地點 <strong>${season.location}</strong></span>`
+      : "";
     el.innerHTML = `
       <span class="pill">場地費 <strong>$${season.total_venue_cost}</strong></span>
       <span class="pill">人數上限 <strong>${season.capacity}</strong></span>
       <span class="pill">最低人數門檻 <strong>${season.minimum_roster}</strong></span>
+      ${timePill}
+      ${locationPill}
       <span class="pill ${settled ? "settled" : ""}">${settled ? "已結算" : "尚未結算"}</span>
     `;
     document.getElementById("settle-btn").disabled = settled;
@@ -149,45 +152,32 @@
     if (!upcoming) { box.style.display = "none"; return; }
     const info = describeDate(upcoming.date);
     document.getElementById("glance-main").textContent = `${info.label}${info.relative ? "・" + info.relative : ""}`;
-    const expected = season.members.length - upcoming.absent_player_names.length + upcoming.confirmed_drop_ins.length;
+    const expected = expectedAttendance(season, upcoming);
     document.getElementById("glance-sub").textContent =
       `預計出席 ${expected} 人${upcoming.waitlist_entries.length ? `・候補 ${upcoming.waitlist_entries.length} 人` : ""}` +
       (expected < season.minimum_roster ? "・低於人數門檻" : "");
     box.style.display = "block";
   }
 
-  function renderAttendance(season) {
-    const list = document.getElementById("attendance-list");
-    list.innerHTML = "";
-    if (season.games.length === 0) {
-      list.innerHTML = '<div class="empty">這一季還沒有場次</div>';
+  function selectGame(gameId) {
+    selectedGameId = gameId;
+    renderSelectedGameDetail();
+  }
+
+  function renderSelectedGameDetail() {
+    const el = document.getElementById("game-detail");
+    const game = currentSeason && currentSeason.games.find((g) => g.id === selectedGameId);
+    if (!currentSeason || !game) {
+      el.innerHTML = '<div class="empty">這一季還沒有場次</div>';
       return;
     }
-    for (const game of season.games) {
-      const info = describeDate(game.date);
-      const div = document.createElement("div");
-      div.className = "card" + (info.isToday ? " today" : "");
-      div.id = `game-${game.id}`;
-      const absentTags = game.absent_player_names.map((n) => `<span class="tag absent">${n}</span>`).join("");
-      const confirmedTags = game.confirmed_drop_ins.map((d) => `<span class="tag confirmed">${d.player_name}</span>`).join("");
-      const waitlistTags = game.waitlist_entries.map((d) => `<span class="tag waitlist">${d.player_name}</span>`).join("");
-      const expected = expectedAttendance(season, game);
-      div.innerHTML = `
-        <div class="card-top">
-          <span><span class="card-date">${info.label}</span><span class="card-when">${info.relative}</span></span>
-          <span class="card-status">${statusLabel(game.status)}</span>
-        </div>
-        <div class="roster-line"><span class="fraction">${expected}<span class="of">/${season.capacity} 已報名</span></span></div>
-        ${absentTags || confirmedTags || waitlistTags
-          ? `<div class="roster-line">${absentTags}${confirmedTags}${waitlistTags}</div>`
-          : '<div class="roster-line">尚無請假或臨打報名</div>'}
-      `;
-      list.appendChild(div);
-    }
+    const statusHtml = game.status === "scheduled"
+      ? ""
+      : `<div class="gdetail-mystatus absent">${statusLabel(game.status)}</div>`;
+    renderGameDetail(el, currentSeason, game, statusHtml);
   }
 
   function statusLabel(status) {
-    if (status === "scheduled") return "如期舉行";
     if (status === "cancelled_unrefunded") return "取消・場地費不退";
     if (status === "cancelled_refunded") return "取消・場地費已退";
     return status;
