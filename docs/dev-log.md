@@ -678,3 +678,61 @@ CLAUDE.md 2.3).
   unlocking that game in the synthetic fixture.
 
 108 tests (2 postgres-only), 99% coverage.
+
+## 2026-09-05 (cont'd) — Season settings editing, member management, organizer page split
+
+Finished the two organizer features deferred from the earlier frontend
+pass (成員管理, 設定), which needed real backend work first, and used
+that as the excuse to finally split the organizer dashboard into
+separate pages instead of one page accumulating every feature.
+
+- `PATCH /seasons/{id}` — a genuine partial update: built on
+  `payload.model_dump(exclude_unset=True)`, not "skip None fields",
+  because several of these fields (`location`, `game_start_time`,
+  `change_deadline_days`, ...) are legitimately nullable — a client
+  needs to be able to say "clear this back to empty" and have that
+  behave differently from "I didn't mention this field." Only
+  `total_venue_cost` is blocked once the season is settled, since
+  that's the only field with retroactive billing consequences the
+  ledger has already locked in.
+- `POST /seasons/{id}/members` / `DELETE .../members/{player_id}` —
+  add/remove, both blocked once settled for the same reason. Flagged a
+  real domain consequence before writing any code: `share_per_game` is
+  `total_venue_cost / (total_games × member_count)`, one number for
+  the whole season, not tracked per period — so adding or removing a
+  member (or changing the venue cost) recalculates everyone's per-game
+  share retroactively, past games included. Rather than building
+  time-sliced billing to avoid that (a much bigger change, and not
+  what CLAUDE.md 2.2's "a fixed set of games, a fixed member list"
+  season model implies anyway), confirmed with the user that the
+  simple season-wide split staying as the one rule is fine as long as
+  the organizer is warned — so the warning lives in the frontend
+  confirm dialogs, not a backend behavior change.
+- Split `organizer.html` into four pages (總覽 / 帳務管理 / 成員管理 /
+  設定) sharing one `.org-nav` bar and the same `vf_org_season`
+  localStorage key, rather than one page accumulating tabs — matches
+  the plain-HTML-no-build-step approach already used throughout: each
+  page stays small and independently loadable, and a shared key in the
+  same localStorage is enough to keep "which season am I looking at"
+  in sync across page loads without wiring a URL parameter through
+  everything.
+- Looked at four existing Taiwanese volleyball/court-booking sites for
+  reference before designing these; three were pure client-rendered
+  SPA shells WebFetch couldn't see into and one blocked outright, but
+  the one that did render (Longshot) confirmed the same pattern
+  already in use here — a top nav across sections, modal/sheet-style
+  dialogs for single actions — so this wasn't a redesign, just
+  validation of the existing direction.
+- Testing this surfaced a real lesson about the fake-DOM test harness
+  itself, not the app: `saveSettings()` fires its post-save
+  `loadSettings()` refresh without awaiting it (correct for the real
+  UI — nothing needs to block on that refresh finishing). But a test
+  that calls `saveSettings()` twice in a row without letting that
+  fire-and-forget refresh land first can have the second call's setup
+  clobbered by the first call's still-pending reload. Two early
+  assertions failed for exactly this reason and looked like real bugs
+  until traced back — fixed by flushing a macrotask tick
+  (`setTimeout(r, 0)`) between test steps that follow a save, not by
+  changing the app code, which was correct the whole time.
+
+120 tests (2 postgres-only), 99% coverage.
