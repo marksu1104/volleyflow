@@ -602,3 +602,79 @@ visible in the run log and fails loudly (and blocks nothing else)
 if the hook URL is ever wrong. Verified end to end: pushed, watched
 the new "Deploy to Render" step succeed in the Actions log, watched a
 new deploy appear in Render's dashboard within the minute.
+
+## 2026-09-05 — Named substitutes, gender, absence cancellation, change deadline
+
+Four user-requested changes landed together since they all touch the
+same attendance/roster surface: a member (or the organizer) can name a
+specific substitute for an absence instead of relying on FIFO waitlist
+matching; players self-report gender, shown on the roster; a member can
+undo their own absence; and a season can require changes to land a
+configurable number of days before the game (default: none, per
+CLAUDE.md 2.3).
+
+- `attendance.DropIn` gained `covers: Absence | None` — a substitute
+  arranged for a specific absence, distinct from the general FIFO pool.
+  `settlement.covered_absences` (renamed from the private
+  `_covered_absences`, now used outside the module too) pairs explicit
+  substitutes to their absence first, then FIFO-pairs whatever's left —
+  covered by new tests proving a substitute refunds *that* absence
+  regardless of recording order, and that it doesn't consume a FIFO
+  slot meant for someone else's plain absence.
+- `attendance.Absence` gained `cancelled_at`, mirroring `DropIn`'s
+  existing pattern — an append-only "undo," not a delete.
+  `POST /absences/{id}/cancel` only succeeds while nothing (FIFO or
+  explicit) is covering it yet; otherwise it's a 400 telling the caller
+  to ask the organizer, rather than silently bumping whoever already
+  committed to cover. The same coverage check now needed at the API
+  layer got its own helper (`_is_absence_covered`) built by converting
+  one game's rows to domain objects and calling `covered_absences` —
+  reusing the real rule instead of a third reimplementation of it.
+- `POST /absences/{id}/substitute` creates the named substitute
+  directly (no waitlist, no capacity check — it's refilling the slot
+  the absence itself opened, not claiming a new one) and charges them
+  the standard per-game share. A new player's gender is set from the
+  payload; an existing player's is left alone if already set — the
+  request is a convenience for someone the system may not have met
+  yet, not a way to overwrite what someone already told it about
+  themselves.
+- `Player.gender` (nullable, "male"/"female", self-reported) and
+  `Season.change_deadline_days` (nullable, no default deadline) are the
+  only new stored fields; both are display/policy only and never enter
+  a billing calculation.
+- Found a real timezone bug writing the deadline check: `_now().date()`
+  is UTC, and the group is in Taiwan (UTC+8) — for the ~8 hours between
+  UTC midnight and Taiwan midnight, UTC's calendar date is a day behind
+  Taiwan's, which would have opened or closed the deadline window at
+  the wrong wall-clock moment every night. Caught by actually computing
+  both and comparing rather than assuming; fixed with a dedicated
+  `_today_in_taiwan()` used only for this calendar-day comparison —
+  `_now()` itself stays UTC, which is correct for FIFO timestamp
+  ordering, just not for "what day is it for the people using this."
+  Tests import the same function to compute their "today"/"future"
+  dates, so they can't drift out of sync with the server or flake based
+  on what time of day CI happens to run.
+- Frontend: `renderGameDetail`'s roster is no longer dumped open by
+  default — time/location/price/expected-headcount show first, the
+  full roster sits behind a "出席名單" toggle. Each uncovered absence
+  gets an inline, itself-collapsed "設定代打" form (name + gender)
+  wired through an `onAssignSubstitute` callback the two pages supply
+  differently: organizer.html allows it for anyone, member.html gates
+  it to the viewer's own row via a `canAssignSubstitute` predicate.
+  member.html also gained a one-time gender picker (shown once the
+  LIFF/typed name matches a season member) and a 取消請假 button on an
+  uncovered absence — the actual gap the user was pointing at when they
+  asked why there wasn't one. `postJson` moved from a per-page copy
+  into shared.js (now takes an explicit method, defaulting to POST, so
+  the PUT to `/players/{id}/gender` didn't need its own helper).
+- Tested the same way as the bottom-sheet stage: a hand-rolled fake DOM
+  driving the real render/handler functions with real season data plus
+  synthetic edge cases (substitute control hidden once covered or
+  locked, `canAssignSubstitute` gating per-row, cancel button only
+  appearing on an uncovered absence). One test-authoring mistake caught
+  along the way — an early assertion used a real past (and therefore
+  locked) game from live data to test unrelated behavior, so the
+  locked-state branch silently won every time; fixed by explicitly
+  unlocking that game in the synthetic fixture.
+
+108 tests (2 postgres-only), 99% coverage.
