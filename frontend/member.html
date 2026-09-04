@@ -57,9 +57,13 @@
   </div>
 
   <div id="month-cal" class="mcal"></div>
+</div>
 
-  <h2>場次詳情</h2>
-  <div id="game-detail" class="gdetail"></div>
+<div id="game-sheet-backdrop" class="gsheet-backdrop" hidden>
+  <div class="gsheet">
+    <button class="gsheet-close" aria-label="關閉">✕</button>
+    <div id="game-detail"></div>
+  </div>
 </div>
 
 <script src="shared.js"></script>
@@ -136,6 +140,7 @@
   function selectGame(gameId) {
     selectedGameId = gameId;
     renderSelectedGameDetail();
+    openGameSheet();
   }
 
   function renderSelectedGameDetail() {
@@ -147,6 +152,20 @@
     }
     renderGameDetail(el, currentSeason, game, buildMyActionHtml(currentSeason, game));
   }
+
+  function openGameSheet() {
+    document.getElementById("game-sheet-backdrop").hidden = false;
+  }
+
+  function closeGameSheet() {
+    document.getElementById("game-sheet-backdrop").hidden = true;
+  }
+
+  const gameSheetBackdrop = document.getElementById("game-sheet-backdrop");
+  gameSheetBackdrop.addEventListener("click", (e) => {
+    if (e.target === gameSheetBackdrop) closeGameSheet();
+  });
+  document.querySelector(".gsheet-close").addEventListener("click", closeGameSheet);
 
   function buildMyActionHtml(season, game) {
     const playerName = document.getElementById("player-name").value.trim();

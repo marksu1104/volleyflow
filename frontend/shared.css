@@ -79,13 +79,31 @@ button:disabled { opacity: .6; cursor: default; }
 .glance-main { font-size: 1rem; font-weight: 600; }
 .glance-sub { font-size: .8rem; color: var(--ink-soft); margin-top: 2px; }
 
-/* one game's full detail: time / location / price / roster, in place of
-   an always-expanded per-game card list — the calendar picks the day */
-.gdetail {
-  background: var(--surface); border: 1px solid var(--rule); border-radius: 12px;
-  padding: 14px 16px; margin: 4px 0 6px; animation: fadeIn .18s ease both;
+/* bottom sheet a tapped calendar day opens into — the calendar keeps
+   its own space either way, the sheet floats on top of it and closes
+   back to exactly the same calendar rather than pushing it around */
+.gsheet-backdrop {
+  position: fixed; inset: 0; background: rgba(20, 22, 28, .45);
+  display: flex; align-items: flex-end; justify-content: center;
+  z-index: 50; animation: fadeIn .15s ease both;
 }
-.gdetail-head { display: flex; justify-content: space-between; align-items: baseline; }
+.gsheet-backdrop[hidden] { display: none; }
+.gsheet {
+  background: var(--surface); width: 100%; max-width: 560px;
+  max-height: 82vh; overflow-y: auto; border-radius: 16px 16px 0 0;
+  padding: 18px 16px 24px; position: relative;
+  animation: slideUp .2s ease both;
+}
+.gsheet-close {
+  position: absolute; top: 10px; right: 12px; width: 30px; height: 30px;
+  border: none; border-radius: 50%; background: var(--paper);
+  color: var(--ink-soft); font-size: 1rem; line-height: 1; cursor: pointer;
+}
+@keyframes slideUp { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* one game's full detail: time / location / price / roster — the
+   content that lives inside the sheet above */
+.gdetail-head { display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px; }
 .gdetail-date { font-weight: 700; font-size: 1rem; }
 .gdetail-when { font-size: .78rem; color: var(--ink-soft); }
 .gdetail-meta { font-size: .8rem; color: var(--ink-soft); margin-top: 2px; }
