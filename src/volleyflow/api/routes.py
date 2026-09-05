@@ -726,14 +726,24 @@ def cancel_absence(absence_id: int, db: Session = Depends(get_db)) -> AbsenceCan
     return AbsenceCancelOut(id=absence.id, cancelled_at=absence.cancelled_at)
 
 
-@router.post("/absences/{absence_id}/substitute", response_model=DropInOut)
-def create_substitute(
+@router.put("/absences/{absence_id}/substitute", response_model=DropInOut)
+def set_substitute(
     absence_id: int, payload: SubstituteCreate, db: Session = Depends(get_db)
 ) -> DropInOut:
-    """A member (or the organizer) personally arranging someone to fill
-    their own vacated slot — a "代打". Always confirmed, never queued:
-    filling your own slot with someone you picked isn't competing with
-    the waitlist for open capacity. See attendance.DropIn.covers.
+    """A member (or the organizer) personally arranging — or later
+    changing — who covers a specific absence, a "代打". Always
+    confirmed, never queued: filling your own slot with someone you
+    picked isn't competing with the waitlist for open capacity. See
+    attendance.DropIn.covers.
+
+    No change-deadline check here, on purpose: swapping who's covering
+    doesn't create the understaffed-at-the-last-minute risk the
+    deadline protects against, since a body still fills the slot
+    either way. Idempotent by design — call this again with a new name
+    to replace whoever's currently covering; the previous substitute's
+    charge is refunded first. Actually removing coverage (leaving the
+    absence uncovered) still goes through the ordinary
+    /drop-ins/{id}/cancel, which does check the deadline.
     """
     absence = db.get(AbsenceRow, absence_id)
     if absence is None:
@@ -746,7 +756,6 @@ def create_substitute(
     game = _get_game_or_404(db, absence.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
-    _require_within_change_deadline(game, season)
 
     existing = (
         db.query(DropInRow)
@@ -757,7 +766,8 @@ def create_substitute(
         .first()
     )
     if existing is not None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Already has a substitute")
+        existing.cancelled_at = _now()
+        _record_drop_in_charge(db, existing, season, reverse=True)
 
     player = _get_or_create_player(db, payload.player_name)
     if player.gender is None and payload.gender is not None:
