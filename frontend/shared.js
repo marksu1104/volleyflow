@@ -153,15 +153,24 @@ function renderMonthCalendar(container, games, onPick) {
  *   extraHtml — a page's own content (e.g. an action button), shown
  *     above the roster toggle.
  *   onAssignSubstitute(absenceId, name, gender) — if given, uncovered
- *     absences get a "設定代打" control that calls this.
- *   canAssignSubstitute(absence) — gates which absences get that
- *     control (default: all of them — an organizer can arrange anyone's
- *     substitute; member.html restricts this to the viewer's own row).
+ *     absent row gets a 設定代打/編輯代打 control that calls this —
+ *     available any time, even once the game is locked, since swapping
+ *     who covers a slot doesn't create the last-minute-understaffed
+ *     risk the change deadline protects against; a body still fills
+ *     it either way.
+ *   onCancelSubstitute(dropInId) — if given, a covered absence also
+ *     gets a 取消代打 control, but only before the change deadline —
+ *     removing coverage outright is exactly what that deadline guards.
+ *   canAssignSubstitute(absence) — gates both of the above controls
+ *     per absence (default: all of them — an organizer can arrange
+ *     anyone's substitute; member.html restricts this to the viewer's
+ *     own row).
  */
 function renderGameDetail(container, season, game, options) {
   const opts = options || {};
   const extraHtml = opts.extraHtml || "";
   const onAssignSubstitute = opts.onAssignSubstitute;
+  const onCancelSubstitute = opts.onCancelSubstitute;
   const canAssignSubstitute = opts.canAssignSubstitute || (() => true);
 
   const info = describeDate(game.date);
@@ -189,26 +198,41 @@ function renderGameDetail(container, season, game, options) {
       if (!absence) {
         return `<div class="roster-row present"><span>${m.name}${genderTag(m.gender)}</span></div>`;
       }
+
+      const allowed = canAssignSubstitute(absence);
+      const covering = game.confirmed_drop_ins.find((d) => d.covering === m.name);
       const note = absence.covered_by ? `已由 ${absence.covered_by} 遞補` : "尚無人遞補";
-      const offerSub = !absence.covered_by && !game.locked && onAssignSubstitute && canAssignSubstitute(absence);
-      const subControl = offerSub
-        ? `<button class="mini-action" data-toggle-sub="${absence.id}">設定代打</button>`
+
+      const offerAssign = !!onAssignSubstitute && allowed;
+      const assignLabel = absence.covered_by ? "編輯代打" : "設定代打";
+      const assignControl = offerAssign
+        ? `<button class="mini-action" data-toggle-sub="${absence.id}">${assignLabel}</button>`
         : "";
-      const subForm = offerSub
+
+      const offerCancel = !!absence.covered_by && !game.locked && !!onCancelSubstitute && allowed && covering;
+      const cancelControl = offerCancel
+        ? `<button class="mini-action danger" data-cancel-sub="${covering.id}">取消代打</button>`
+        : "";
+
+      const nameValue = absence.covered_by || "";
+      const maleSelected = covering && covering.gender === "male" ? " selected" : "";
+      const femaleSelected = covering && covering.gender === "female" ? " selected" : "";
+      const subForm = offerAssign
         ? `<div class="sub-form" data-sub-form="${absence.id}" hidden>
-             <input type="text" placeholder="代打姓名" data-sub-name="${absence.id}">
+             <input type="text" placeholder="代打姓名" data-sub-name="${absence.id}" value="${nameValue}">
              <select data-sub-gender="${absence.id}">
                <option value="">性別</option>
-               <option value="male">男</option>
-               <option value="female">女</option>
+               <option value="male"${maleSelected}>男</option>
+               <option value="female"${femaleSelected}>女</option>
              </select>
              <button data-confirm-sub="${absence.id}">確認</button>
            </div>`
         : "";
+
       return `
         <div class="roster-row absent">
           <span>${m.name}${genderTag(m.gender)}</span>
-          <span class="roster-note">${note}${subControl}</span>
+          <span class="roster-note">${note}${assignControl}${cancelControl}</span>
         </div>
         ${subForm}
       `;
@@ -274,6 +298,11 @@ function renderGameDetail(container, season, game, options) {
       const name = nameInput ? nameInput.value.trim() : "";
       if (!name) return;
       onAssignSubstitute(Number(id), name, (genderSelect && genderSelect.value) || null);
+      return;
+    }
+    const cancelSub = e.target.closest("[data-cancel-sub]");
+    if (cancelSub && onCancelSubstitute) {
+      onCancelSubstitute(Number(cancelSub.dataset.cancelSub), cancelSub);
     }
   };
 }

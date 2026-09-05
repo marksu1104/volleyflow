@@ -150,11 +150,12 @@ button:disabled { opacity: .6; cursor: default; }
 .gender-tag.male { color: var(--accent); }
 .gender-tag.female { color: #b0468a; }
 
-/* 代打 (substitute) inline controls on an uncovered absence row */
+/* 代打 (substitute) inline controls on an absence row */
 .mini-action {
   border: none; background: none; color: var(--accent); font-size: .74rem;
   font-weight: 600; cursor: pointer; padding: 0 0 0 8px; text-decoration: underline;
 }
+.mini-action.danger { color: var(--bad); }
 .sub-form {
   display: flex; gap: 6px; align-items: center; padding: 6px 8px 10px;
   flex-wrap: wrap;
