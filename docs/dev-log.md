@@ -736,3 +736,34 @@ separate pages instead of one page accumulating every feature.
   changing the app code, which was correct the whole time.
 
 120 tests (2 postgres-only), 99% coverage.
+
+## 2026-09-06 — A substitute can be re-edited anytime, still cancels by the deadline
+
+Real usage turned up a gap the same day: once a 代打 was assigned,
+there was no way to change who it was, or to remove them and leave the
+absence uncovered again.
+
+- `POST /absences/{id}/substitute` became `PUT` and is now an upsert:
+  calling it again with a different name replaces whoever's currently
+  covering (the old one is refunded, cancelled, and their charge
+  reversed; the new one is charged) instead of returning "already has
+  a substitute". No change-deadline check on this endpoint at all —
+  swapping who covers a slot doesn't create the last-minute-empty-slot
+  risk the deadline exists to prevent, since a body still shows up
+  either way.
+- Actually *removing* coverage needed no new endpoint: a substitute is
+  already just a `DropInRow` with `covers_absence_id` set, so the
+  existing `/drop-ins/{id}/cancel` — deadline check and waitlist
+  promotion included — already does exactly the right thing when
+  pointed at a substitute's drop-in id. Added a test confirming
+  cancelling one reverts the absence to uncovered and refunds it,
+  rather than writing a parallel "cancel substitute" endpoint that
+  would just be this one again.
+- Frontend: an absence's roster row now always offers 設定代打 /
+  編輯代打 (label depends on whether one's already assigned), pre-filled
+  with the current substitute's name and gender when editing — and
+  only when covered *and* still before the deadline, a separate
+  取消代打 button that reuses the same `cancelDropIn` function
+  member.html already had for cancelling its own +1 signups.
+
+121 tests (2 postgres-only), 99% coverage.
