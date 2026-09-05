@@ -137,6 +137,7 @@
     renderGameDetail(el, currentSeason, game, {
       extraHtml: statusHtml,
       onAssignSubstitute: (absenceId, name, gender) => assignSubstitute(absenceId, name, gender),
+      onCancelSubstitute: (dropInId, btn) => cancelSubstitute(dropInId, btn),
       // No canAssignSubstitute restriction — the organizer can arrange
       // a substitute for anyone's absence, not just their own.
     });
@@ -158,13 +159,26 @@
 
   async function assignSubstitute(absenceId, name, gender) {
     try {
-      await postJson(API_BASE, `/absences/${absenceId}/substitute`, {
-        player_name: name,
-        gender,
-      });
+      await postJson(
+        API_BASE,
+        `/absences/${absenceId}/substitute`,
+        { player_name: name, gender },
+        "PUT"
+      );
       loadDashboard(currentSeason.id);
     } catch (e) {
       alert("設定代打失敗：" + e.message);
+    }
+  }
+
+  async function cancelSubstitute(dropInId, btn) {
+    try {
+      await withButtonFeedback(btn, "取消中...", async () => {
+        await postJson(API_BASE, `/drop-ins/${dropInId}/cancel`, {});
+      });
+      loadDashboard(currentSeason.id);
+    } catch (e) {
+      alert("取消代打失敗：" + e.message);
     }
   }
 

@@ -161,6 +161,10 @@
       extraHtml: buildMyActionHtml(currentSeason, game),
       onAssignSubstitute: (absenceId, name, gender) =>
         assignSubstitute(absenceId, name, gender),
+      // Cancelling a substitute is just cancelling their drop-in — the
+      // same function member.html already uses to cancel its own +1
+      // signups, deadline check included.
+      onCancelSubstitute: (dropInId, btn) => cancelDropIn(dropInId, btn),
       canAssignSubstitute: (absence) => absence.player_name === playerName,
     });
   }
@@ -216,10 +220,12 @@
 
   async function assignSubstitute(absenceId, name, gender) {
     try {
-      await postJson(API_BASE, `/absences/${absenceId}/substitute`, {
-        player_name: name,
-        gender,
-      });
+      await postJson(
+        API_BASE,
+        `/absences/${absenceId}/substitute`,
+        { player_name: name, gender },
+        "PUT"
+      );
       loadSeason(currentSeasonId);
     } catch (e) {
       alert("設定代打失敗：" + e.message);
