@@ -4,6 +4,20 @@
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
+/** Escape a value for safe interpolation into innerHTML. Names shown on
+ * these pages can come straight from a LINE display name — attacker
+ * controlled once anyone can join via the LIFF link — so anywhere a
+ * name (or other free-text field) gets built into an HTML string
+ * instead of set via textContent, it must go through this first. */
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function dateKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }

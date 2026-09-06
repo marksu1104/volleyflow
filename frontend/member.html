@@ -83,6 +83,14 @@
   // wasn't opened through LIFF (e.g. testing directly in a desktop
   // browser), fall back to the manual name input — the API identifies
   // players by name either way, so nothing else changes.
+  //
+  // /players/identify is the source of truth for the name that goes in
+  // the input, not the raw LIFF profile: it resolves to whichever
+  // Player this line_user_id is (or should be) bound to — reusing an
+  // existing name-only record on first visit, or disambiguating if this
+  // LINE display name collides with someone else's. Every other name
+  // comparison in this file stays untouched because it now always sees
+  // that same resolved name, not a raw, possibly-changed LINE nickname.
   (async function initLiff() {
     const identityEl = document.getElementById("identity");
     try {
@@ -92,10 +100,15 @@
         return; // page reloads after LINE login redirects back
       }
       const profile = await liff.getProfile();
+      const identified = await postJson(API_BASE, "/players/identify", {
+        line_user_id: profile.userId,
+        display_name: profile.displayName,
+        picture_url: profile.pictureUrl,
+      });
       const nameInput = document.getElementById("player-name");
-      nameInput.value = profile.displayName;
+      nameInput.value = identified.name;
       nameInput.disabled = true;
-      identityEl.textContent = `已用 LINE 身分登入：${profile.displayName}`;
+      identityEl.textContent = `已用 LINE 身分登入：${identified.name}`;
       // liff.getProfile() and the season picker's own /seasons fetch race
       // each other on load. Setting .value here doesn't fire "change", so
       // if the season already rendered while the name was still blank,
@@ -103,7 +116,7 @@
       // that the real name is known, whichever order they resolved in.
       if (currentSeasonId) loadSeason(currentSeasonId);
     } catch (e) {
-      console.warn("LIFF unavailable, falling back to manual name entry:", e);
+      console.warn("LIFF/identify unavailable, falling back to manual name entry:", e);
       identityEl.textContent = "（非 LINE 環境，手動輸入名字測試）";
     }
   })();

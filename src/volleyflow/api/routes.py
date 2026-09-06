@@ -36,6 +36,8 @@ from volleyflow.api.schemas import (
     MemberOut,
     MemberSettlementOut,
     PaymentCreate,
+    PlayerIdentify,
+    PlayerIdentifyOut,
     PlayerLedgerOut,
     SeasonCreate,
     SeasonDetailOut,
@@ -78,6 +80,27 @@ def _get_or_create_player(db: Session, name: str) -> PlayerRow:
         db.add(player)
         db.flush()  # assigns player.id without ending the transaction
     return player
+
+
+def _unique_display_name(
+    db: Session, display_name: str, exclude_player_id: int | None = None
+) -> str:
+    """Two different LINE accounts can share a display name, but
+    players.name is unique (see the uq_players_name migration) — rather
+    than fail identify_player outright on a collision, disambiguate with
+    a numeric suffix. exclude_player_id lets a returning player keep
+    their own current name without tripping over themselves.
+    """
+    candidate = display_name
+    suffix = 2
+    while True:
+        query = db.query(PlayerRow).filter(PlayerRow.name == candidate)
+        if exclude_player_id is not None:
+            query = query.filter(PlayerRow.id != exclude_player_id)
+        if query.first() is None:
+            return candidate
+        candidate = f"{display_name} ({suffix})"
+        suffix += 1
 
 
 def _get_player_by_name(db: Session, name: str) -> PlayerRow:
@@ -494,7 +517,12 @@ def add_member(
     db.add(SeasonMemberRow(season_id=season_id, player_id=player.id))
     db.commit()
     db.refresh(player)
-    return MemberOut(id=player.id, name=player.name, gender=_gender(player.gender))
+    return MemberOut(
+        id=player.id,
+        name=player.name,
+        gender=_gender(player.gender),
+        avatar_url=player.avatar_url,
+    )
 
 
 @router.delete("/seasons/{season_id}/members/{player_id}", status_code=204)
@@ -520,6 +548,34 @@ def remove_member(
 
     db.delete(membership)
     db.commit()
+
+
+@router.get("/seasons/{season_id}/join-pool", response_model=list[MemberOut])
+def list_join_pool(season_id: int, db: Session = Depends(get_db)) -> list[MemberOut]:
+    """Players who've bound a LINE identity (via identify_player, i.e.
+    opened the member LIFF at least once) but aren't a fixed member of
+    this season yet — candidates for the organizer to promote with the
+    existing POST /seasons/{id}/members.
+    """
+    season = db.get(SeasonRow, season_id)
+    if season is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+
+    member_ids = db.query(SeasonMemberRow.player_id).filter(
+        SeasonMemberRow.season_id == season_id
+    )
+    pool = (
+        db.query(PlayerRow)
+        .filter(PlayerRow.line_user_id.is_not(None), ~PlayerRow.id.in_(member_ids))
+        .order_by(PlayerRow.id)
+        .all()
+    )
+    return [
+        MemberOut(
+            id=p.id, name=p.name, gender=_gender(p.gender), avatar_url=p.avatar_url
+        )
+        for p in pool
+    ]
 
 
 @router.get("/seasons/{season_id}", response_model=SeasonDetailOut)
@@ -660,7 +716,9 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
         ),
         settled_at=season_row.settled_at,
         members=[
-            MemberOut(id=m.id, name=m.name, gender=_gender(m.gender))
+            MemberOut(
+                id=m.id, name=m.name, gender=_gender(m.gender), avatar_url=m.avatar_url
+            )
             for m in member_rows
         ],
         games=games,
@@ -970,6 +1028,79 @@ def settle_season(season_id: int, db: Session = Depends(get_db)) -> SeasonSettle
     )
 
 
+@router.post("/players/identify", response_model=PlayerIdentifyOut)
+def identify_player(
+    payload: PlayerIdentify, db: Session = Depends(get_db)
+) -> PlayerIdentifyOut:
+    """Called once per LIFF page load, right after liff.getProfile()
+    resolves. Three cases:
+
+    1. This line_user_id has been seen before — this is a returning
+       player. Sync their display name/avatar (LINE names can change).
+    2. Never seen before, but there's exactly one existing Player with
+       this exact name who has never bound a LINE identity — almost
+       certainly one of the legacy members entered by name from a
+       screenshot before this endpoint existed. Claim that row so their
+       ledger/membership history carries forward, rather than starting
+       them over as a stranger.
+    3. Neither of the above — a genuinely new person. Create them; they
+       exist but aren't a fixed member of any season until the organizer
+       promotes them from a season's join-pool (see list_join_pool).
+    """
+    player = (
+        db.query(PlayerRow)
+        .filter(PlayerRow.line_user_id == payload.line_user_id)
+        .first()
+    )
+    if player is not None:
+        if player.name != payload.display_name:
+            player.name = _unique_display_name(
+                db, payload.display_name, exclude_player_id=player.id
+            )
+        player.avatar_url = payload.picture_url
+        db.commit()
+        db.refresh(player)
+        return PlayerIdentifyOut(
+            id=player.id,
+            name=player.name,
+            avatar_url=player.avatar_url,
+            gender=_gender(player.gender),
+        )
+
+    unclaimed = (
+        db.query(PlayerRow)
+        .filter(
+            PlayerRow.line_user_id.is_(None), PlayerRow.name == payload.display_name
+        )
+        .first()
+    )
+    if unclaimed is not None:
+        unclaimed.line_user_id = payload.line_user_id
+        unclaimed.avatar_url = payload.picture_url
+        db.commit()
+        db.refresh(unclaimed)
+        return PlayerIdentifyOut(
+            id=unclaimed.id,
+            name=unclaimed.name,
+            avatar_url=unclaimed.avatar_url,
+            gender=_gender(unclaimed.gender),
+        )
+
+    name = _unique_display_name(db, payload.display_name)
+    new_player = PlayerRow(
+        name=name, line_user_id=payload.line_user_id, avatar_url=payload.picture_url
+    )
+    db.add(new_player)
+    db.commit()
+    db.refresh(new_player)
+    return PlayerIdentifyOut(
+        id=new_player.id,
+        name=new_player.name,
+        avatar_url=new_player.avatar_url,
+        gender=_gender(new_player.gender),
+    )
+
+
 @router.put("/players/{player_id}/gender", response_model=MemberOut)
 def set_player_gender(
     player_id: int, payload: GenderUpdate, db: Session = Depends(get_db)
@@ -981,7 +1112,12 @@ def set_player_gender(
     player.gender = payload.gender
     db.commit()
     db.refresh(player)
-    return MemberOut(id=player.id, name=player.name, gender=_gender(player.gender))
+    return MemberOut(
+        id=player.id,
+        name=player.name,
+        gender=_gender(player.gender),
+        avatar_url=player.avatar_url,
+    )
 
 
 @router.post("/players/{player_id}/payments", response_model=LedgerEntryOut)

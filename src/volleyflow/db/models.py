@@ -38,6 +38,11 @@ class PlayerRow(Base):
     # create two Players who never converge into one ledger history.
     __table_args__ = (
         UniqueConstraint("name", name="uq_players_name"),
+        # A plain (non-partial) unique constraint on a nullable column
+        # still allows any number of NULLs in Postgres — legacy members
+        # entered by name before LINE binding existed can all sit at
+        # NULL until their first visit claims a line_user_id.
+        UniqueConstraint("line_user_id", name="uq_players_line_user_id"),
         # NULL passes a SQL CHECK (it's neither true nor false), so this
         # still allows gender to be unset — it only rejects a bad string.
         CheckConstraint("gender IN ('male', 'female')", name="ck_players_gender"),
@@ -48,6 +53,14 @@ class PlayerRow(Base):
     gender: Mapped[str | None] = mapped_column(default=None)
     """"male" or "female", self-reported. Never used by billing — display
     only, e.g. counting how many of each are expected at a game."""
+    line_user_id: Mapped[str | None] = mapped_column(default=None)
+    """The stable LINE identity, set once this Player opens the LIFF at
+    least once (see routes.identify_player). None for a legacy member
+    entered by name only, until their first visit auto-claims this row —
+    see routes.identify_player's auto-claim-by-name matching."""
+    avatar_url: Mapped[str | None] = mapped_column(default=None)
+    """LINE profile picture URL, synced on every identify_player call.
+    Display only."""
 
 
 class SeasonRow(Base):
