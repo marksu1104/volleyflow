@@ -49,6 +49,7 @@
     <a href="organizer-settings.html" class="org-nav-link">設定</a>
   </nav>
 
+  <select id="club-picker" class="season-picker club-picker"></select>
   <select id="season-picker" class="season-picker"></select>
   <div id="error"></div>
   <div id="season-meta" class="season-meta"></div>
@@ -80,7 +81,7 @@
   const API_BASE = "https://volleyflow.onrender.com";
   let currentSeason = null;
 
-  initSeasonPicker(API_BASE, document.getElementById("season-picker"), "vf_org_season", (id) => {
+  initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
     if (id) loadLedger(id);
   });
 
@@ -137,7 +138,7 @@
     const ledgers = await Promise.all(
       rows.map(({ playerId }) =>
         settled && playerId
-          ? fetch(`${API_BASE}/players/${playerId}/ledger`).then((r) => r.json())
+          ? fetch(`${API_BASE}/clubs/${currentClubId()}/players/${playerId}/ledger`).then((r) => r.json())
           : Promise.resolve(null)
       )
     );
@@ -196,7 +197,7 @@
     if (!amount) return;
     let res;
     await withButtonFeedback(btn, "記錄中...", async () => {
-      res = await fetch(`${API_BASE}/players/${playerId}/payments`, {
+      res = await fetch(`${API_BASE}/clubs/${currentClubId()}/players/${playerId}/payments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

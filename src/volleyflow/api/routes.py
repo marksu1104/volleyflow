@@ -24,6 +24,7 @@ from volleyflow.api.schemas import (
     AbsenceOut,
     ClubCreate,
     ClubJoin,
+    ClubMemberOut,
     ClubOut,
     DropInCancelOut,
     DropInCreate,
@@ -441,6 +442,34 @@ def create_club(payload: ClubCreate, db: Session = Depends(get_db)) -> ClubOut:
 def list_clubs(db: Session = Depends(get_db)) -> list[ClubOut]:
     clubs = db.query(ClubRow).order_by(ClubRow.id).all()
     return [ClubOut(id=c.id, name=c.name) for c in clubs]
+
+
+@router.get("/clubs/{club_id}/members", response_model=list[ClubMemberOut])
+def list_club_members(
+    club_id: int, db: Session = Depends(get_db)
+) -> list[ClubMemberOut]:
+    """Everyone in the club and their role — distinct from a *season's*
+    fixed roster (GET /seasons/{id} returns that). The member page uses
+    this to tell whether the person looking has joined this club yet.
+    """
+    _get_club_or_404(db, club_id)
+    rows = (
+        db.query(PlayerRow, ClubMemberRow)
+        .join(ClubMemberRow, ClubMemberRow.player_id == PlayerRow.id)
+        .filter(ClubMemberRow.club_id == club_id)
+        .order_by(PlayerRow.id)
+        .all()
+    )
+    return [
+        ClubMemberOut(
+            id=player.id,
+            name=player.name,
+            gender=_gender(player.gender),
+            avatar_url=player.avatar_url,
+            role=membership.role,
+        )
+        for player, membership in rows
+    ]
 
 
 @router.post("/clubs/{club_id}/join", response_model=MemberOut)
