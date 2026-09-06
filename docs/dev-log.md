@@ -767,3 +767,84 @@ absence uncovered again.
   member.html already had for cancelling its own +1 signups.
 
 121 tests (2 postgres-only), 99% coverage.
+
+## 2026-09-06 — Data-integrity audit, then closing the gaps it found
+
+Asked for a critical audit against industry practice before piling on
+more features. Findings, ranked: no guard against duplicate
+absence/signup submissions (a double-tap could double-charge a refund
+or overbook a slot), zero database-level constraints anywhere (not
+even a unique constraint on `players.name`, which `_get_or_create_player`
+already treats as an identity key), no foreign-key indexes (Postgres
+doesn't auto-index them the way MySQL does), no auth at all, dev/CI
+sharing the production database, and zero HTML-escaping on the
+frontend — low-risk today, but a real problem once the join-pool work
+below makes player names attacker-controlled. Turned the top findings
+into two shipped stages:
+
+**Stage 1 — duplicate-submission guards and database constraints:**
+- `record_absence` / `sign_up` now reject a second active submission
+  for the same player+game instead of silently creating one; the real
+  guarantee is a partial unique index (`WHERE cancelled_at IS NULL`) on
+  `absences` and `drop_ins` — partial, not plain, because
+  cancel-then-resubmit is a legitimate flow that a plain unique
+  constraint would break.
+- Added `uq_players_name`, `uq_waitlist_player_game`, and check
+  constraints on gender and the season's numeric fields. Verified
+  production data was already clean before applying any of it.
+- Added the foreign-key indexes Postgres never creates on its own.
+- Found a real SQLAlchemy footgun while wiring this up: the unit of
+  work flushes pending INSERTs before UPDATEs regardless of the order
+  they were issued in, so `set_substitute`'s replace-then-add sequence
+  would insert the new drop-in before the old one was marked cancelled
+  — tripping the new unique index specifically when re-assigning the
+  *same* person as substitute. Fixed with an explicit `db.flush()`
+  between the two.
+- Created a Neon dev branch (its own copy-on-write clone of production,
+  not a git branch) so local dev and the `postgres`-marked tests stop
+  hitting the real database — that had been true since the very first
+  Neon setup and nobody had noticed. CI's `DATABASE_URL` secret and the
+  local `.env` now point at the dev branch; Render's still points at
+  production, confirmed by hand. Every migration from here on gets
+  applied to the dev branch and tested there first, then to production
+  separately by hand.
+
+**Stage 2 — LINE identity binding, before touching auth:** the
+developer's stated long-term goal includes other groups eventually
+using this system, which would mean real multi-tenancy — flagged that
+this contradicts CLAUDE.md's explicit single-tenant scope and the
+"explicitly out of scope" list, and confirmed with the developer to
+keep the current single-group design rather than start building toward
+it now. That decision shaped this stage: organizer/admin identity
+stays an env-var check, not a stored `role` column that would need to
+be group-scoped in a multi-tenant world anyway.
+
+- Added `players.line_user_id` (unique) and `players.avatar_url`.
+- New `POST /players/identify`, called once per LIFF load right after
+  `liff.getProfile()` resolves: returning `line_user_id` → sync
+  name/avatar; never seen, but exactly one existing unclaimed Player
+  has this exact name → auto-claim it (this is how the 18 historical
+  members entered from a screenshot pick up their real identity on
+  first visit, without losing their ledger history); otherwise create
+  a new "join pool" Player. `players.name` being unique (from stage 1)
+  turns a same-display-name collision into a real case to handle, not
+  a hypothetical — resolved with a numeric-suffix disambiguator
+  (`_unique_display_name`) rather than failing the request.
+- New `GET /seasons/{id}/join-pool`: LINE-identified players not yet a
+  fixed member of that season — organizer-members.html renders this as
+  a promote button that calls the *existing* add-member endpoint
+  unchanged, since name-uniqueness makes matching by name safe now.
+- `member.html`'s identity source of truth changed from the raw LIFF
+  display name to whatever `/players/identify` resolves to — every
+  other name-comparison in that file kept working untouched, since it
+  now always reads the same resolved name instead of a raw, possibly
+  since-changed LINE nickname.
+- Caught myself mid-implementation: the join-pool rendering interpolated
+  a LINE display name into `innerHTML` unescaped — exactly the
+  XSS gap the audit flagged, and this is the specific feature that
+  makes it exploitable (anyone can land in the pool via the join link).
+  Added `escapeHtml` to `shared.js` and used it here; the rest of the
+  frontend's unescaped `innerHTML` usage is unchanged and still a known
+  gap to close before this ships more broadly.
+
+137 tests (2 postgres-only), 99% coverage.
