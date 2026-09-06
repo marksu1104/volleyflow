@@ -56,8 +56,9 @@ class PlayerRow(Base):
     line_user_id: Mapped[str | None] = mapped_column(default=None)
     """The stable LINE identity, set once this Player opens the LIFF at
     least once (see routes.identify_player). None for a legacy member
-    entered by name only, until their first visit auto-claims this row —
-    see routes.identify_player's auto-claim-by-name matching."""
+    entered by name only who has never opened the LIFF — identify_player
+    never auto-links such a row to a new LINE identity by name; that
+    reconciliation is a manual, organizer-driven action."""
     avatar_url: Mapped[str | None] = mapped_column(default=None)
     """LINE profile picture URL, synced on every identify_player call.
     Display only."""
