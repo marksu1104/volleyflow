@@ -26,24 +26,31 @@ depending on whether they currently pay a season fee — `Membership` is a
 relationship, not a kind of person. This matters because a drop-in today may
 become a member next season, and their ledger history must carry over.
 
+A `Player` is global, not owned by a `Club`: the same real person joining two
+clubs is one `Player` with one LINE identity, related to each club through a
+separate `ClubMembership`. What is scoped to a club is the relationship and
+the money, never the person.
+
 | Term | Meaning |
 |---|---|
-| `Player` | One real person. Tied to a LINE user id. Exists once, forever. |
+| `Club` | One volleyball group with its own organizer, members, seasons, and books. The tenant boundary. |
+| `ClubMembership` | A `Player`'s relationship to a `Club`, and their role in it (`organizer` or `member`). |
+| `Player` | One real person. Tied to a LINE user id. Exists once, forever, across all clubs. |
 | `Membership` | A `Player`'s fixed-member relationship to a specific `Season`. |
 | `DropIn` | A non-member who signs up and pays for a single `Game`. |
-| `Season` | A billing period: a fixed set of games, a total venue cost, a fixed member list. |
+| `Season` | A billing period within one `Club`: a fixed set of games, a total venue cost, a fixed member list. |
 | `Game` | One scheduled occurrence within a `Season`. |
 | `Absence` | A member skipping a `Game` they're otherwise expected to attend. |
 | `cover` | A `DropIn` filling the slot an `Absence` opened up. |
 | `WaitlistEntry` | A `DropIn` signup that didn't get a slot yet, in order. |
 | `Settlement` | The end-of-season reckoning of who is owed what. |
-| `Ledger` / `LedgerEntry` | A `Player`'s append-only history of charges and refunds. |
-| `Organizer` | The person running the group and marking payments received. |
+| `Ledger` / `LedgerEntry` | A `Player`'s append-only history of charges and refunds, scoped to one `Club`. |
+| `Organizer` | The person running a `Club` and marking payments received. One role on a `ClubMembership`, not a global identity. |
 
 ### 2.2 How a game runs
 
-- One game per week, fixed time (usually Tuesday), capacity capped at 18 (configurable).
-- Group of 20–30 people: fixed members plus drop-ins.
+- One game per week, fixed time (usually Tuesday), capacity capped at 18 (configurable per club).
+- A club is typically 20–30 people: fixed members plus drop-ins.
 - A season is configurable: pay-per-use, monthly, or a full season block. When starting a season, the organizer enters: rental mode, the fixed weekday, an explicit list of dates (individually editable), the total venue cost, and the fixed member list. The system generates all games from that.
 
 ### 2.3 Signup and waitlist
@@ -66,7 +73,9 @@ become a member next season, and their ledger history must carry over.
 
 ### 2.5 Design principles
 
-- Every rule (capacity, rates, cancellation deadlines, waitlist behavior) is a configurable parameter — not hardcoded — but the system serves exactly one group. No multi-tenancy.
+- Every rule (capacity, rates, cancellation deadlines, waitlist behavior) is a configurable parameter — not hardcoded — and configured per `Club`.
+- The system is multi-tenant: a `Club` is the tenant boundary. Anyone can create a club and becomes its organizer; clubs never see each other's members, seasons, or books. Decided 2026-09-06, reversing this file's original "exactly one group, no multi-tenancy" scope — the product shape the developer actually wants ("someone signs in, starts a club, becomes its organizer, then gathers members") is native to a multi-tenant model and was only awkward because it was being forced into a single-tenant one.
+- Tenant scoping lives on `Season` and `LedgerEntry` only. Everything else (`Game`, `Absence`, `DropIn`, `WaitlistEntry`, season membership) derives its club through existing foreign keys — never denormalize a `club_id` onto a row that can already reach one.
 - Billing is a **deterministic rules engine**. Never use an LLM to compute an amount.
 - Every data change is append-only and auditable: who, when, what changed.
 
@@ -124,9 +133,21 @@ Deliverables:
 - Run it for a real week, fix what breaks.
 - README: architecture diagram + the reasoning behind each design decision (this is the resume-facing artifact).
 
+### Milestone 6 (from 9/6): multi-tenancy and access control
+Added after milestone 5's launch, when the developer settled on the product
+shape described in 2.5. Strictly ordered, same as the others:
+1. `Club` / `ClubMembership` models, migration, and moving all existing data
+   into one club. Highest-risk migration in the project so far — it touches
+   live billing data, so it gets verified on the Neon dev branch first.
+2. Club scoping on every endpoint.
+3. Access control: LIFF ID token verification for members; club role
+   (`organizer`) for management endpoints; a system-administrator surface for
+   the developer.
+4. Frontend club context: create a club, switch between clubs.
+
 ### Stretch goal (after 9/5, only once everything above is done)
 - LLM agent: parse free-form multi-intent messages from the group (e.g. "I'm out next Tuesday, carry my balance to next season, and sign up my friend as a drop-in") and call the existing API via function calling. The LLM is an interface only, never the calculation engine. Needs PII masking and prompt-injection testing.
-- **Explicitly out of scope**: RAG (not enough data to justify it), payment gateway integration, multi-tenancy, monthly reports.
+- **Explicitly out of scope**: RAG (not enough data to justify it), payment gateway integration, monthly reports.
 
 ## 5. Working agreement with Claude Code
 
@@ -174,6 +195,14 @@ yet — milestone 1 has nothing to layer against. When milestone 2 introduces
 SQLAlchemy, billing logic must not import it; that boundary will be enforced
 with `import-linter` at that point, and only then is a `domain/` split worth
 its cost.
+
+`Club` deliberately has no module here. Billing never reasons about clubs:
+settlement runs per season (which belongs to exactly one club already), and
+`ledger.balance()` sums whatever entries it's handed — deciding *which*
+entries, i.e. which club's, is the caller's job. Club scoping is a
+persistence and API-layer concern, so `Club`/`ClubMembership` live only in
+`db/models.py`. Don't add a pure-Python `Club` class that nothing computes
+with.
 
 ### Testing
 - pytest. One test file per source file: `tests/test_pricing.py` ↔ `src/volleyflow/pricing.py`.
