@@ -602,6 +602,168 @@ def test_set_player_gender_rejects_an_invalid_value(client: TestClient) -> None:
     assert response.status_code == 422
 
 
+# --- LINE identity binding -------------------------------------------------
+
+
+def test_identify_creates_a_new_player_for_an_unknown_line_user_id(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        "/players/identify",
+        json={
+            "line_user_id": "U1",
+            "display_name": "Carol",
+            "picture_url": "https://example.com/carol.jpg",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "Carol"
+    assert body["avatar_url"] == "https://example.com/carol.jpg"
+
+
+def test_identify_returns_the_same_player_on_a_second_call(
+    client: TestClient,
+) -> None:
+    first = client.post(
+        "/players/identify",
+        json={"line_user_id": "U1", "display_name": "Carol"},
+    ).json()
+
+    second = client.post(
+        "/players/identify",
+        json={"line_user_id": "U1", "display_name": "Carol"},
+    ).json()
+
+    assert second["id"] == first["id"]
+
+
+def test_identify_auto_claims_an_existing_unclaimed_player_by_name(
+    client: TestClient,
+) -> None:
+    """Alice was entered by name only (e.g. from a screenshot) before
+    she ever opened the LIFF — her first identify call should claim
+    that existing row, not create a stranger next to her.
+    """
+    season = _start_season(client, member_names=["Alice"])
+    alice_id = season["member_ids"][0]
+
+    response = client.post(
+        "/players/identify",
+        json={"line_user_id": "U1", "display_name": "Alice"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == alice_id
+
+
+def test_identify_does_not_reclaim_an_already_claimed_player(
+    client: TestClient,
+) -> None:
+    """A different real person can happen to share a LINE display name
+    with someone already bound — this must not silently hand them
+    someone else's identity and ledger history.
+    """
+    season = _start_season(client, member_names=["Alice"])
+    alice_id = season["member_ids"][0]
+    client.post(
+        "/players/identify", json={"line_user_id": "U1", "display_name": "Alice"}
+    )
+
+    response = client.post(
+        "/players/identify", json={"line_user_id": "U2", "display_name": "Alice"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] != alice_id
+    assert body["name"] == "Alice (2)"
+
+
+def test_identify_disambiguates_a_name_collision_on_create(
+    client: TestClient,
+) -> None:
+    first = client.post(
+        "/players/identify", json={"line_user_id": "U1", "display_name": "Bob"}
+    ).json()
+
+    second = client.post(
+        "/players/identify", json={"line_user_id": "U2", "display_name": "Bob"}
+    ).json()
+
+    assert first["name"] == "Bob"
+    assert second["name"] == "Bob (2)"
+    assert second["id"] != first["id"]
+
+
+def test_identify_syncs_display_name_and_avatar_on_return_visit(
+    client: TestClient,
+) -> None:
+    first = client.post(
+        "/players/identify",
+        json={"line_user_id": "U1", "display_name": "Carol", "picture_url": "old.jpg"},
+    ).json()
+
+    response = client.post(
+        "/players/identify",
+        json={
+            "line_user_id": "U1",
+            "display_name": "Caroline",
+            "picture_url": "new.jpg",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == first["id"]
+    assert body["name"] == "Caroline"
+    assert body["avatar_url"] == "new.jpg"
+
+
+def test_join_pool_lists_identified_non_members(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    client.post(
+        "/players/identify", json={"line_user_id": "U1", "display_name": "Carol"}
+    )
+
+    response = client.get(f"/seasons/{season['id']}/join-pool")
+
+    assert response.status_code == 200
+    names = [p["name"] for p in response.json()]
+    assert names == ["Carol"]
+
+
+def test_join_pool_excludes_players_without_a_line_user_id(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    game_id = season["games"][0]["id"]
+    client.post("/drop-ins", json={"player_name": "Dave", "game_id": game_id})
+
+    response = client.get(f"/seasons/{season['id']}/join-pool")
+
+    assert response.json() == []
+
+
+def test_join_pool_excludes_players_already_promoted(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    client.post(
+        "/players/identify", json={"line_user_id": "U1", "display_name": "Carol"}
+    )
+    client.post(f"/seasons/{season['id']}/members", json={"player_name": "Carol"})
+
+    response = client.get(f"/seasons/{season['id']}/join-pool")
+
+    assert response.json() == []
+
+
+def test_join_pool_for_unknown_season_returns_404(client: TestClient) -> None:
+    response = client.get("/seasons/999999/join-pool")
+
+    assert response.status_code == 404
+
+
 # --- change deadline -----------------------------------------------------
 
 

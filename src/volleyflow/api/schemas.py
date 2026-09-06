@@ -141,10 +141,29 @@ class MemberOut(BaseModel):
     id: int
     name: str
     gender: Gender | None = None
+    avatar_url: str | None = None
 
 
 class GenderUpdate(BaseModel):
     gender: Gender
+
+
+class PlayerIdentify(BaseModel):
+    """What the LIFF page sends right after liff.getProfile() resolves."""
+
+    line_user_id: str
+    display_name: str
+    picture_url: str | None = None
+
+
+class PlayerIdentifyOut(BaseModel):
+    id: int
+    name: str
+    """May differ from the display_name that was sent, if that name
+    collided with a different existing Player — see
+    routes._unique_display_name."""
+    avatar_url: str | None = None
+    gender: Gender | None = None
 
 
 class DropInSummary(BaseModel):
