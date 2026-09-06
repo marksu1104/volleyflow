@@ -27,6 +27,14 @@
     padding: 10px 20px; border: none; border-radius: 8px; background: var(--ink); color: white;
     font-size: .88rem; font-weight: 600; cursor: pointer;
   }
+  .field-row textarea {
+    padding: 9px 12px; border: 1px solid var(--rule); border-radius: 8px; font-size: .9rem;
+    background: var(--surface); color: var(--ink); font-family: inherit; resize: vertical;
+    min-height: 90px;
+  }
+  .empty-club-note {
+    color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center;
+  }
 </style>
 </head>
 <body>
@@ -46,7 +54,67 @@
   <select id="season-picker" class="season-picker"></select>
   <div id="error"></div>
 
-  <div class="settings-form">
+  <p id="no-club-note" class="empty-club-note" hidden>
+    還沒有加入任何球隊——請先到<a href="member.html">會員頁</a>用 LINE 開啟，建立或加入一個球隊。
+  </p>
+
+  <div id="create-season-form" class="settings-form" hidden>
+    <p class="empty-club-note">這個球隊還沒有任何一季，先建立第一季。</p>
+
+    <div class="field-row">
+      <label for="c-cost">場地費總額</label>
+      <input id="c-cost" type="number" step="1" min="0">
+    </div>
+
+    <div class="field-row">
+      <label for="c-dates">場次日期（一行一個，格式 YYYY-MM-DD）</label>
+      <textarea id="c-dates" placeholder="2026-07-07&#10;2026-07-14&#10;2026-07-21"></textarea>
+    </div>
+
+    <div class="field-row">
+      <label for="c-members">固定成員名單（一行一個名字）</label>
+      <textarea id="c-members" placeholder="蘇慬&#10;黃筌揚 Ricky"></textarea>
+      <span class="field-hint">先不加也可以，之後從「成員管理」的待加入名單升級即可。</span>
+    </div>
+
+    <div class="field-pair">
+      <div class="field-row">
+        <label for="c-capacity">人數上限</label>
+        <input id="c-capacity" type="number" step="1" min="1" value="18">
+      </div>
+      <div class="field-row">
+        <label for="c-min-roster">最低人數門檻</label>
+        <input id="c-min-roster" type="number" step="1" min="0" value="12">
+      </div>
+    </div>
+
+    <div class="field-pair">
+      <div class="field-row">
+        <label for="c-start-time">開始時間</label>
+        <input id="c-start-time" type="time">
+      </div>
+      <div class="field-row">
+        <label for="c-end-time">結束時間</label>
+        <input id="c-end-time" type="time">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <label for="c-location">地點</label>
+      <input id="c-location" type="text" placeholder="例如：啪排郎">
+    </div>
+
+    <div class="field-row">
+      <label for="c-deadline">更動期限（賽前幾天截止，留空表示沒有期限）</label>
+      <input id="c-deadline" type="number" step="1" min="0" placeholder="例如：1">
+    </div>
+
+    <div class="save-row">
+      <button type="button" class="save-btn" onclick="createSeason()">建立這一季</button>
+    </div>
+  </div>
+
+  <div id="settings-form" class="settings-form">
     <div class="field-row">
       <label for="f-cost">場地費總額</label>
       <input id="f-cost" type="number" step="1" min="0">
@@ -108,8 +176,59 @@
   })();
 
   initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
+    const hasClub = !!currentClubId();
+    document.getElementById("no-club-note").hidden = hasClub;
+    document.getElementById("create-season-form").hidden = !hasClub || !!id;
+    document.getElementById("settings-form").hidden = !id;
     if (id) loadSettings(id);
   });
+
+  async function createSeason() {
+    const gameDates = document
+      .getElementById("c-dates")
+      .value.split("\n")
+      .map((d) => d.trim())
+      .filter(Boolean);
+    const memberNames = document
+      .getElementById("c-members")
+      .value.split("\n")
+      .map((n) => n.trim())
+      .filter(Boolean);
+
+    if (gameDates.length === 0) {
+      alert("至少要輸入一個場次日期");
+      return;
+    }
+
+    const deadlineValue = document.getElementById("c-deadline").value;
+    const payload = {
+      total_venue_cost: document.getElementById("c-cost").value.trim() || "0",
+      game_dates: gameDates,
+      member_names: memberNames,
+      capacity: Number(document.getElementById("c-capacity").value) || 18,
+      minimum_roster: Number(document.getElementById("c-min-roster").value) || 0,
+      game_start_time: document.getElementById("c-start-time").value || null,
+      game_end_time: document.getElementById("c-end-time").value || null,
+      location: document.getElementById("c-location").value.trim() || null,
+      change_deadline_days: deadlineValue === "" ? null : Number(deadlineValue),
+    };
+
+    try {
+      const season = await postJson(
+        API_BASE,
+        `/clubs/${currentClubId()}/seasons`,
+        payload
+      );
+      // Reloading re-runs initClubAndSeasonPickers, which will now find
+      // this season and remember it — simpler than hand-updating the
+      // <select> and every piece of state loadSettings depends on.
+      localStorage.setItem("vf_org_season", String(season.id));
+      alert("已建立這一季");
+      location.reload();
+    } catch (e) {
+      alert("建立失敗：" + e.message);
+    }
+  }
 
   async function loadSettings(seasonId) {
     currentSeasonId = seasonId;
