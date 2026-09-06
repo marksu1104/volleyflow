@@ -676,6 +676,21 @@ def record_absence(payload: AbsenceCreate, db: Session = Depends(get_db)) -> Abs
     assert season is not None
     _require_within_change_deadline(game, season)
 
+    existing = (
+        db.query(AbsenceRow)
+        .filter(
+            AbsenceRow.player_id == player.id,
+            AbsenceRow.game_id == game.id,
+            AbsenceRow.cancelled_at.is_(None),
+        )
+        .first()
+    )
+    if existing is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This player already has an absence recorded for this game",
+        )
+
     absence = AbsenceRow(player_id=player.id, game_id=game.id, recorded_at=_now())
     db.add(absence)
 
@@ -768,10 +783,36 @@ def set_substitute(
     if existing is not None:
         existing.cancelled_at = _now()
         _record_drop_in_charge(db, existing, season, reverse=True)
+        # Flush now, before the new DropInRow below is added: SQLAlchemy's
+        # unit of work orders all pending INSERTs before UPDATEs regardless
+        # of the order they were issued in, so without this the new row
+        # (e.g. re-assigning the same person) would be inserted while the
+        # old one is still active, tripping the active-substitute unique
+        # index.
+        db.flush()
 
     player = _get_or_create_player(db, payload.player_name)
     if player.gender is None and payload.gender is not None:
         player.gender = payload.gender
+
+    # Any active drop-in still on file for this player+game at this point
+    # can't be the one that covered this absence — that one was just
+    # cancelled (and flushed) above, if it existed. So a match here is
+    # necessarily a different signup.
+    other_drop_in = (
+        db.query(DropInRow)
+        .filter(
+            DropInRow.player_id == player.id,
+            DropInRow.game_id == game.id,
+            DropInRow.cancelled_at.is_(None),
+        )
+        .first()
+    )
+    if other_drop_in is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "That player is already signed up for this game",
+        )
 
     drop_in = DropInRow(
         player_id=player.id,
@@ -796,6 +837,34 @@ def sign_up(payload: DropInCreate, db: Session = Depends(get_db)) -> DropInOut:
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
     _require_within_change_deadline(game, season)
+
+    already_signed_up = (
+        db.query(DropInRow)
+        .filter(
+            DropInRow.player_id == player.id,
+            DropInRow.game_id == game.id,
+            DropInRow.cancelled_at.is_(None),
+        )
+        .first()
+    )
+    if already_signed_up is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This player is already signed up for this game",
+        )
+    already_waitlisted = (
+        db.query(WaitlistEntryRow)
+        .filter(
+            WaitlistEntryRow.player_id == player.id,
+            WaitlistEntryRow.game_id == game.id,
+        )
+        .first()
+    )
+    if already_waitlisted is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This player is already on the waitlist for this game",
+        )
 
     if _has_open_slot(db, game, season):
         drop_in = DropInRow(player_id=player.id, game_id=game.id, signed_up_at=_now())
