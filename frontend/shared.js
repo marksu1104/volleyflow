@@ -439,10 +439,6 @@ async function initLiffIdentity(apiBase, liffId) {
     });
   } catch (e) {
     console.warn("LIFF/identify unavailable:", e);
-    // TEMPORARY diagnostic: exposes the real failure reason so a page
-    // can show it instead of a generic fallback message. Remove once
-    // the LIFF login issue (2026-09-07) is confirmed fixed.
-    window.__liffError = e;
     return null;
   }
 }
