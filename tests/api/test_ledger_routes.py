@@ -99,6 +99,8 @@ def test_settle_season_rejects_settling_twice(client: TestClient) -> None:
 
 
 def test_settle_unknown_season_returns_404(client: TestClient) -> None:
+    create_club(client)
+
     response = client.post("/seasons/999999/settle")
 
     assert response.status_code == 404

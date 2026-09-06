@@ -7,7 +7,6 @@
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <link rel="stylesheet" href="shared.css">
 <style>
-  .identity { font-size: .82rem; color: var(--ink-soft); margin-bottom: 14px; min-height: 1.2em; }
   .name-row { display: flex; gap: 8px; margin-bottom: 10px; }
   .name-row input {
     flex: 1; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 8px;
@@ -98,36 +97,25 @@
   // LINE display name collides with someone else's. Every other name
   // comparison in this file stays untouched because it now always sees
   // that same resolved name, not a raw, possibly-changed LINE nickname.
-  (async function initLiff() {
+  (async function initIdentity() {
     const identityEl = document.getElementById("identity");
-    try {
-      await liff.init({ liffId: LIFF_ID });
-      if (!liff.isLoggedIn()) {
-        liff.login();
-        return; // page reloads after LINE login redirects back
-      }
-      const profile = await liff.getProfile();
-      const identified = await postJson(API_BASE, "/players/identify", {
-        line_user_id: profile.userId,
-        display_name: profile.displayName,
-        picture_url: profile.pictureUrl,
-      });
-      myPlayerId = identified.id;
-      const nameInput = document.getElementById("player-name");
-      nameInput.value = identified.name;
-      nameInput.disabled = true;
-      identityEl.textContent = `已用 LINE 身分登入：${identified.name}`;
-      renderClubActions();
-      // liff.getProfile() and the season picker's own /seasons fetch race
-      // each other on load. Setting .value here doesn't fire "change", so
-      // if the season already rendered while the name was still blank,
-      // nothing would ever show this person as a member. Re-render now
-      // that the real name is known, whichever order they resolved in.
-      if (currentSeasonId) loadSeason(currentSeasonId);
-    } catch (e) {
-      console.warn("LIFF/identify unavailable, falling back to manual name entry:", e);
+    const identified = await initLiffIdentity(API_BASE, LIFF_ID);
+    if (!identified) {
       identityEl.textContent = "（非 LINE 環境，手動輸入名字測試）";
+      return;
     }
+    myPlayerId = identified.id;
+    const nameInput = document.getElementById("player-name");
+    nameInput.value = identified.name;
+    nameInput.disabled = true;
+    identityEl.textContent = `已用 LINE 身分登入：${identified.name}`;
+    renderClubActions();
+    // liff.getProfile() and the season picker's own fetch race each
+    // other on load. Setting .value here doesn't fire "change", so if
+    // the season already rendered while the name was still blank,
+    // nothing would ever show this person as a member. Re-render now
+    // that the real name is known, whichever order they resolved in.
+    if (currentSeasonId) loadSeason(currentSeasonId);
   })();
 
   document.getElementById("player-name").addEventListener("change", () => {
@@ -386,7 +374,10 @@
       card.classList.remove("show");
       return;
     }
-    const ledger = await fetch(`${API_BASE}/clubs/${currentClubId()}/players/${member.id}/ledger`).then((r) => r.json());
+    const ledger = await fetch(
+      `${API_BASE}/clubs/${currentClubId()}/players/${member.id}/ledger`,
+      { headers: authHeader() }
+    ).then((r) => r.json());
     const value = document.getElementById("balance-value");
     const n = Number(ledger.balance);
     value.textContent = n === 0 ? "$0（結清）" : n > 0 ? `你可以領回 $${ledger.balance}` : `你還欠 $${Math.abs(n)}`;

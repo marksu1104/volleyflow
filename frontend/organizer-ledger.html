@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VolleyFlow 帳務管理</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <link rel="stylesheet" href="shared.css">
 <style>
   .season-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
@@ -41,6 +42,7 @@
 <div class="wrap wide">
   <h1>帳務管理</h1>
   <p class="sub">結算、收款，跟出席狀況分開看</p>
+  <div id="identity" class="identity"></div>
 
   <nav class="org-nav">
     <a href="organizer.html" class="org-nav-link">總覽</a>
@@ -79,7 +81,16 @@
 <script src="shared.js"></script>
 <script>
   const API_BASE = "https://volleyflow.onrender.com";
+  const LIFF_ID = "2011156233-6CouG6VI";
   let currentSeason = null;
+
+  (async function initIdentity() {
+    const identityEl = document.getElementById("identity");
+    const identified = await initLiffIdentity(API_BASE, LIFF_ID);
+    identityEl.textContent = identified
+      ? `已用 LINE 身分登入：${identified.name}`
+      : "（非 LINE 環境，僅能瀏覽公開資訊）";
+  })();
 
   initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
     if (id) loadLedger(id);
@@ -91,7 +102,7 @@
     try {
       const [seasonRes, settlementRes] = await Promise.all([
         fetch(`${API_BASE}/seasons/${seasonId}`),
-        fetch(`${API_BASE}/seasons/${seasonId}/settlement`),
+        fetch(`${API_BASE}/seasons/${seasonId}/settlement`, { headers: authHeader() }),
       ]);
       if (!seasonRes.ok || !settlementRes.ok) {
         errorEl.textContent = "找不到這一季";
@@ -138,7 +149,9 @@
     const ledgers = await Promise.all(
       rows.map(({ playerId }) =>
         settled && playerId
-          ? fetch(`${API_BASE}/clubs/${currentClubId()}/players/${playerId}/ledger`).then((r) => r.json())
+          ? fetch(`${API_BASE}/clubs/${currentClubId()}/players/${playerId}/ledger`, {
+              headers: authHeader(),
+            }).then((r) => r.json())
           : Promise.resolve(null)
       )
     );
@@ -179,7 +192,10 @@
     const btn = document.getElementById("settle-btn");
     let res;
     await withButtonFeedback(btn, "結算中...", async () => {
-      res = await fetch(`${API_BASE}/seasons/${currentSeason.id}/settle`, { method: "POST" });
+      res = await fetch(`${API_BASE}/seasons/${currentSeason.id}/settle`, {
+        method: "POST",
+        headers: authHeader(),
+      });
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -199,7 +215,7 @@
     await withButtonFeedback(btn, "記錄中...", async () => {
       res = await fetch(`${API_BASE}/clubs/${currentClubId()}/players/${playerId}/payments`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeader() },
         body: JSON.stringify({
           amount,
           season_id: currentSeason ? currentSeason.id : null,

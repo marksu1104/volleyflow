@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VolleyFlow 主揪儀表板</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <link rel="stylesheet" href="shared.css">
 <style>
   .season-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
@@ -20,6 +21,7 @@
 <div class="wrap wide">
   <h1>主揪儀表板</h1>
   <p class="sub">出席狀況一頁看完，帳務與成員在上面分頁</p>
+  <div id="identity" class="identity"></div>
 
   <nav class="org-nav">
     <a href="organizer.html" class="org-nav-link active">總覽</a>
@@ -52,8 +54,21 @@
 <script src="shared.js"></script>
 <script>
   const API_BASE = "https://volleyflow.onrender.com";
+  const LIFF_ID = "2011156233-6CouG6VI";
   let currentSeason = null;
   let selectedGameId = null;
+
+  // Every organizer-only action here (settle, edit season settings,
+  // manage members) is enforced server-side against this identity —
+  // this just resolves it once so postJson's authHeader() has a LIFF
+  // session to read from.
+  (async function initIdentity() {
+    const identityEl = document.getElementById("identity");
+    const identified = await initLiffIdentity(API_BASE, LIFF_ID);
+    identityEl.textContent = identified
+      ? `已用 LINE 身分登入：${identified.name}`
+      : "（非 LINE 環境，僅能瀏覽公開資訊）";
+  })();
 
   initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
     if (id) loadDashboard(id);

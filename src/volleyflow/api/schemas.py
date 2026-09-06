@@ -19,20 +19,16 @@ Gender = Literal["male", "female"]
 
 class ClubCreate(BaseModel):
     name: str
-    player_id: int
     """Whoever creates the club becomes its organizer — see
-    routes.create_club. Resolved via /players/identify beforehand, not
-    a name here, since the caller already has a concrete identity by
-    this point."""
+    routes.create_club. Who "whoever" is comes from the caller's
+    verified LINE identity (routes._get_current_player), not a
+    client-supplied id: letting the body name an arbitrary player_id
+    would let anyone make anyone else the organizer of a new club."""
 
 
 class ClubOut(BaseModel):
     id: int
     name: str
-
-
-class ClubJoin(BaseModel):
-    player_id: int
 
 
 class ClubMemberOut(BaseModel):
@@ -176,9 +172,15 @@ class GenderUpdate(BaseModel):
 
 
 class PlayerIdentify(BaseModel):
-    """What the LIFF page sends right after liff.getProfile() resolves."""
+    """What the LIFF page sends right after LIFF resolves. id_token
+    (from liff.getIDToken()) is verified server-side — see
+    api.auth.verify_id_token — and is the only source of line_user_id;
+    display_name/picture_url stay client-reported, since spoofing your
+    own displayed name isn't an identity problem the way spoofing whose
+    account you become would be.
+    """
 
-    line_user_id: str
+    id_token: str
     display_name: str
     picture_url: str | None = None
 

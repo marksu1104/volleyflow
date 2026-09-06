@@ -394,10 +394,59 @@ async function withButtonFeedback(btn, busyLabel, action) {
 
 /** POST or PUT a JSON body, returning the parsed response or throwing
  * with the API's own error detail. */
+/** Authorization header for the current LIFF session, or {} if there
+ * isn't one — every request that might need identity spreads this in,
+ * and it's a no-op when LIFF was never initialized (identify_player and
+ * every write it gates would then just be rejected server-side, exactly
+ * as if the header were simply absent). A fresh token is fetched every
+ * call rather than cached: liff.getIDToken() already handles refreshing
+ * it, so caching here would just risk holding an expired one. */
+function authHeader() {
+  try {
+    if (typeof liff !== "undefined" && liff.isLoggedIn()) {
+      return { Authorization: `Bearer ${liff.getIDToken()}` };
+    }
+  } catch (e) {
+    console.warn("No LIFF identity available:", e);
+  }
+  return {};
+}
+
+/** Initializes LIFF — logging in via redirect if this isn't already a
+ * logged-in LIFF session — then resolves this device's real identity
+ * through /players/identify. Works the same whether opened inside the
+ * LINE app or in a plain desktop browser: liff.login() falls back to a
+ * LINE Login web redirect outside the app, so this one flow covers both
+ * member.html and the organizer pages.
+ *
+ * Returns the identified player ({id, name, avatar_url, gender}), or
+ * null if LIFF genuinely isn't available (login declined, or a real
+ * error) — callers should degrade to a read-only view in that case,
+ * since nothing requiring identity will succeed anyway.
+ */
+async function initLiffIdentity(apiBase, liffId) {
+  try {
+    await liff.init({ liffId });
+    if (!liff.isLoggedIn()) {
+      liff.login();
+      return null; // page reloads after LINE login redirects back
+    }
+    const profile = await liff.getProfile();
+    return await postJson(apiBase, "/players/identify", {
+      id_token: liff.getIDToken(),
+      display_name: profile.displayName,
+      picture_url: profile.pictureUrl,
+    });
+  } catch (e) {
+    console.warn("LIFF/identify unavailable:", e);
+    return null;
+  }
+}
+
 async function postJson(apiBase, path, body, method) {
   const res = await fetch(`${apiBase}${path}`, {
     method: method || "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeader() },
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
