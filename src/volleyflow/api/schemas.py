@@ -17,6 +17,24 @@ from volleyflow.schedule import GameStatus
 Gender = Literal["male", "female"]
 
 
+class ClubCreate(BaseModel):
+    name: str
+    player_id: int
+    """Whoever creates the club becomes its organizer — see
+    routes.create_club. Resolved via /players/identify beforehand, not
+    a name here, since the caller already has a concrete identity by
+    this point."""
+
+
+class ClubOut(BaseModel):
+    id: int
+    name: str
+
+
+class ClubJoin(BaseModel):
+    player_id: int
+
+
 class SeasonCreate(BaseModel):
     total_venue_cost: Decimal
     game_dates: list[date] = Field(min_length=1)

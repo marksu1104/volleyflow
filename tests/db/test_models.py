@@ -5,14 +5,14 @@ bottom is marked `postgres` and hits the real Neon database instead, to
 prove the schema actually works on Postgres, not just SQLite.
 """
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
 from sqlalchemy.orm import Session
 
 from volleyflow.db.engine import get_session
-from volleyflow.db.models import GameRow, PlayerRow, SeasonRow
+from volleyflow.db.models import ClubRow, GameRow, PlayerRow, SeasonRow
 from volleyflow.schedule import GameStatus
 
 
@@ -29,7 +29,8 @@ def test_player_round_trips_through_sqlite(db_session: Session) -> None:
 def test_season_stores_total_venue_cost_as_a_whole_number(
     db_session: Session,
 ) -> None:
-    db_session.add(SeasonRow(id=1, total_venue_cost=Decimal("10000")))
+    db_session.add(ClubRow(id=1, name="Test Club", created_at=datetime.now()))
+    db_session.add(SeasonRow(id=1, club_id=1, total_venue_cost=Decimal("10000")))
     db_session.commit()
 
     result = db_session.get(SeasonRow, 1)
@@ -39,7 +40,8 @@ def test_season_stores_total_venue_cost_as_a_whole_number(
 
 
 def test_game_stores_its_status(db_session: Session) -> None:
-    db_session.add(SeasonRow(id=1, total_venue_cost=Decimal("10000")))
+    db_session.add(ClubRow(id=1, name="Test Club", created_at=datetime.now()))
+    db_session.add(SeasonRow(id=1, club_id=1, total_venue_cost=Decimal("10000")))
     db_session.add(
         GameRow(
             id=1,

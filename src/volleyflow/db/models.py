@@ -29,15 +29,49 @@ class Base(DeclarativeBase):
     pass
 
 
+class ClubRow(Base):
+    """The tenant boundary — see CLAUDE.md 2.5. One volleyball group with
+    its own organizer, members, seasons, and books."""
+
+    __tablename__ = "clubs"
+
+    # Deliberately no uniqueness constraint on name: two unrelated clubs
+    # can reasonably pick the same name (id is the real identity), unlike
+    # a Player's name-within-a-club, which _get_or_create_player treats
+    # as an identity key.
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
+    name: Mapped[str]
+    created_at: Mapped[datetime]
+
+
+class ClubMemberRow(Base):
+    """A Player's relationship to a Club, and their role in it. Distinct
+    from SeasonMemberRow (a season's fixed member list): this is
+    club-wide — someone can be a club member, or its organizer, without
+    yet being on any particular season's roster.
+    """
+
+    __tablename__ = "club_members"
+
+    __table_args__ = (
+        CheckConstraint("role IN ('organizer', 'member')", name="ck_club_members_role"),
+        Index("ix_club_members_player_id", "player_id"),
+    )
+
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id"), primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), primary_key=True)
+    role: Mapped[str]
+    joined_at: Mapped[datetime]
+
+
 class PlayerRow(Base):
     __tablename__ = "players"
 
-    # A name is the only identity a Player has before line_user_id exists
-    # (see _get_or_create_player, which looks players up by name) — without
-    # this constraint, two concurrent requests naming the same person
-    # create two Players who never converge into one ledger history.
+    # line_user_id, not name, is the real identity once it's set (see
+    # identify_player). Two different clubs each having a member named
+    # "Alice" is expected and fine, so — unlike line_user_id — name has
+    # no uniqueness constraint of its own.
     __table_args__ = (
-        UniqueConstraint("name", name="uq_players_name"),
         # A plain (non-partial) unique constraint on a nullable column
         # still allows any number of NULLs in Postgres — legacy members
         # entered by name before LINE binding existed can all sit at
@@ -82,9 +116,15 @@ class SeasonRow(Base):
             "change_deadline_days >= 0",
             name="ck_seasons_change_deadline_non_negative",
         ),
+        Index("ix_seasons_club_id", "club_id"),
     )
 
     id: Mapped[int] = mapped_column(Identity(), primary_key=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id"))
+    """Which Club this season belongs to — see CLAUDE.md 2.5. Games,
+    absences, drop-ins, and season membership all derive their club
+    through this foreign key chain rather than storing their own
+    club_id."""
     total_venue_cost: Mapped[Decimal] = mapped_column(Numeric(10, 0))
     capacity: Mapped[int] = mapped_column(default=18)
     minimum_roster: Mapped[int] = mapped_column(default=12)
@@ -221,10 +261,16 @@ class LedgerEntryRow(Base):
     __table_args__ = (
         Index("ix_ledger_entries_player_id", "player_id"),
         Index("ix_ledger_entries_season_id", "season_id"),
+        Index("ix_ledger_entries_club_id", "club_id"),
     )
 
     id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id"))
+    """Stored directly rather than derived, unlike every other table:
+    season_id below is optional (a manual payment might not relate to
+    any one season), so there's no foreign-key chain to always reach a
+    club through — see CLAUDE.md 2.5."""
     entry_type: Mapped[EntryType] = mapped_column(Enum(EntryType, name="entry_type"))
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 0))
     """Signed from the player's point of view (see ledger.LedgerEntry):
