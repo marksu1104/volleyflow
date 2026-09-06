@@ -32,6 +32,10 @@
     font-weight: 600; cursor: pointer;
   }
   button.action.cancel { background: var(--bad-soft); color: var(--bad); }
+  button.action.ghost { background: var(--paper); color: var(--ink-soft); }
+
+  .club-actions { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .club-actions button.action { margin-top: 0; }
 </style>
 </head>
 <body>
@@ -47,6 +51,8 @@
     <button type="button" class="gender-btn" data-set-gender="male">男</button>
     <button type="button" class="gender-btn" data-set-gender="female">女</button>
   </div>
+  <select id="club-picker" class="season-picker club-picker"></select>
+  <div id="club-actions" class="club-actions"></div>
   <select id="season-picker" class="season-picker"></select>
   <div id="error"></div>
 
@@ -78,6 +84,7 @@
   let currentSeasonId = null;
   let currentSeason = null;
   let selectedGameId = null;
+  let myPlayerId = null;
 
   // Try to get the player's real LINE identity via LIFF. If this page
   // wasn't opened through LIFF (e.g. testing directly in a desktop
@@ -105,10 +112,12 @@
         display_name: profile.displayName,
         picture_url: profile.pictureUrl,
       });
+      myPlayerId = identified.id;
       const nameInput = document.getElementById("player-name");
       nameInput.value = identified.name;
       nameInput.disabled = true;
       identityEl.textContent = `已用 LINE 身分登入：${identified.name}`;
+      renderClubActions();
       // liff.getProfile() and the season picker's own /seasons fetch race
       // each other on load. Setting .value here doesn't fire "change", so
       // if the season already rendered while the name was still blank,
@@ -125,9 +134,67 @@
     if (currentSeasonId) loadSeason(currentSeasonId);
   });
 
-  initSeasonPicker(API_BASE, document.getElementById("season-picker"), "vf_season", (id) => {
+  initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_season", (id) => {
+    // Fires on club changes too (the season list reloads under a new
+    // club), which is exactly when the join/create offer has to be
+    // re-evaluated.
+    renderClubActions();
     if (id) loadSeason(id);
   });
+
+  /** 建立球隊 / 加入這個球隊 — only offered once LIFF has resolved a real
+   * identity, since both need a player id to attach the membership to. */
+  async function renderClubActions() {
+    const el = document.getElementById("club-actions");
+    if (!myPlayerId) {
+      el.innerHTML = "";
+      return;
+    }
+
+    const clubId = currentClubId();
+    let joined = false;
+    if (clubId) {
+      const res = await fetch(`${API_BASE}/clubs/${clubId}/members`);
+      if (res.ok) {
+        joined = (await res.json()).some((m) => m.id === myPlayerId);
+      }
+    }
+
+    el.innerHTML =
+      (clubId && !joined
+        ? '<button class="action" onclick="joinClub(this)">加入這個球隊</button>'
+        : "") +
+      '<button class="action ghost" onclick="createClub()">建立新球隊</button>';
+  }
+
+  async function joinClub(btn) {
+    try {
+      await withButtonFeedback(btn, "加入中...", async () => {
+        await postJson(API_BASE, `/clubs/${currentClubId()}/join`, {
+          player_id: myPlayerId,
+        });
+      });
+      location.reload();
+    } catch (e) {
+      alert("加入失敗：" + e.message);
+    }
+  }
+
+  async function createClub() {
+    const name = prompt("球隊名稱？");
+    if (!name || !name.trim()) return;
+    try {
+      const club = await postJson(API_BASE, "/clubs", {
+        name: name.trim(),
+        player_id: myPlayerId,
+      });
+      // Land on the club just created, not whichever one was remembered.
+      localStorage.setItem(CLUB_STORAGE_KEY, String(club.id));
+      location.reload();
+    } catch (e) {
+      alert("建立失敗：" + e.message);
+    }
+  }
 
   async function loadSeason(seasonId) {
     currentSeasonId = seasonId;
@@ -319,7 +386,7 @@
       card.classList.remove("show");
       return;
     }
-    const ledger = await fetch(`${API_BASE}/players/${member.id}/ledger`).then((r) => r.json());
+    const ledger = await fetch(`${API_BASE}/clubs/${currentClubId()}/players/${member.id}/ledger`).then((r) => r.json());
     const value = document.getElementById("balance-value");
     const n = Number(ledger.balance);
     value.textContent = n === 0 ? "$0（結清）" : n > 0 ? `你可以領回 $${ledger.balance}` : `你還欠 $${Math.abs(n)}`;

@@ -871,6 +871,27 @@ def test_list_clubs_returns_all_clubs(client: TestClient) -> None:
     assert {"id": club["id"], "name": "Tuesday Volleyball"} in response.json()
 
 
+def test_list_club_members_shows_roles(client: TestClient) -> None:
+    club = create_club(client)
+    carol = client.post(
+        "/players/identify", json={"line_user_id": "U1", "display_name": "Carol"}
+    ).json()
+    client.post(f"/clubs/{club['id']}/join", json={"player_id": carol["id"]})
+
+    response = client.get(f"/clubs/{club['id']}/members")
+
+    assert response.status_code == 200
+    roles = {m["name"]: m["role"] for m in response.json()}
+    assert roles["Test Organizer"] == "organizer"
+    assert roles["Carol"] == "member"
+
+
+def test_list_club_members_for_unknown_club_returns_404(client: TestClient) -> None:
+    response = client.get("/clubs/999999/members")
+
+    assert response.status_code == 404
+
+
 def test_join_club_adds_a_member(client: TestClient) -> None:
     club = create_club(client)
     player = client.post(

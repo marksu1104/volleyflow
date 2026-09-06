@@ -65,38 +65,92 @@ function formatSeasonLabel(season) {
   return `${fy}年${fm}月~${ly}年${lm}月`;
 }
 
-/**
- * Fills a <select> with every season, labeled by its real dates instead
- * of a bare id. Restores the last choice from localStorage and calls
- * onChange (also once immediately) whenever the selection changes.
- */
-async function initSeasonPicker(apiBase, selectEl, storageKey, onChange) {
-  const res = await fetch(`${apiBase}/seasons`);
-  const seasons = await res.json();
+const CLUB_STORAGE_KEY = "vf_club";
 
-  if (seasons.length === 0) {
-    selectEl.innerHTML = '<option value="">尚無任何季別</option>';
+/** The club the pickers currently have selected, or null. Anything that
+ * calls a club-scoped endpoint (ledgers, payments) reads it from here
+ * rather than threading it through every function. */
+function currentClubId() {
+  return localStorage.getItem(CLUB_STORAGE_KEY);
+}
+
+/**
+ * Wires the club <select> and season <select> together: picking a club
+ * reloads that club's seasons, picking a season calls onSeasonChange
+ * (also once immediately). Both remember their last choice in
+ * localStorage. onSeasonChange(null) means "nothing to show" — no clubs
+ * exist yet, or this club has no seasons.
+ *
+ * Seasons live under a club now (GET /clubs/{id}/seasons), so the two
+ * pickers can't be initialised independently: the season list is
+ * meaningless until a club is chosen.
+ */
+async function initClubAndSeasonPickers(
+  apiBase,
+  clubEl,
+  seasonEl,
+  seasonStorageKey,
+  onSeasonChange
+) {
+  const res = await fetch(`${apiBase}/clubs`);
+  const clubs = res.ok ? await res.json() : [];
+
+  if (clubs.length === 0) {
+    clubEl.innerHTML = '<option value="">尚無球隊</option>';
+    seasonEl.innerHTML = '<option value="">尚無任何季別</option>';
+    onSeasonChange(null);
     return;
   }
 
-  selectEl.innerHTML = seasons
-    .map((s) => {
-      const settledTag = s.settled ? " · 已結算" : "";
-      return `<option value="${s.id}">${formatSeasonLabel(s)}（${s.total_games} 場・${s.member_count} 人）${settledTag}</option>`;
-    })
+  clubEl.innerHTML = clubs
+    .map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
     .join("");
 
-  const remembered = localStorage.getItem(storageKey);
-  if (remembered && seasons.some((s) => String(s.id) === remembered)) {
-    selectEl.value = remembered;
+  const rememberedClub = localStorage.getItem(CLUB_STORAGE_KEY);
+  if (rememberedClub && clubs.some((c) => String(c.id) === rememberedClub)) {
+    clubEl.value = rememberedClub;
+  }
+  localStorage.setItem(CLUB_STORAGE_KEY, clubEl.value);
+
+  async function loadSeasons() {
+    const seasonRes = await fetch(`${apiBase}/clubs/${clubEl.value}/seasons`);
+    const seasons = seasonRes.ok ? await seasonRes.json() : [];
+
+    if (seasons.length === 0) {
+      seasonEl.innerHTML = '<option value="">尚無任何季別</option>';
+      onSeasonChange(null);
+      return;
+    }
+
+    seasonEl.innerHTML = seasons
+      .map((s) => {
+        const settledTag = s.settled ? " · 已結算" : "";
+        return `<option value="${s.id}">${formatSeasonLabel(s)}（${s.total_games} 場・${s.member_count} 人）${settledTag}</option>`;
+      })
+      .join("");
+
+    const remembered = localStorage.getItem(seasonStorageKey);
+    if (remembered && seasons.some((s) => String(s.id) === remembered)) {
+      seasonEl.value = remembered;
+    }
+
+    // Assignment rather than addEventListener: loadSeasons runs again on
+    // every club change, and addEventListener would stack one more
+    // handler each time.
+    seasonEl.onchange = () => {
+      localStorage.setItem(seasonStorageKey, seasonEl.value);
+      onSeasonChange(seasonEl.value);
+    };
+
+    onSeasonChange(seasonEl.value);
   }
 
-  selectEl.addEventListener("change", () => {
-    localStorage.setItem(storageKey, selectEl.value);
-    onChange(selectEl.value);
-  });
+  clubEl.onchange = () => {
+    localStorage.setItem(CLUB_STORAGE_KEY, clubEl.value);
+    loadSeasons();
+  };
 
-  onChange(selectEl.value);
+  await loadSeasons();
 }
 
 /**

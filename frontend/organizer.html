@@ -28,6 +28,7 @@
     <a href="organizer-settings.html" class="org-nav-link">設定</a>
   </nav>
 
+  <select id="club-picker" class="season-picker club-picker"></select>
   <select id="season-picker" class="season-picker"></select>
   <div id="error"></div>
   <div id="season-meta" class="season-meta"></div>
@@ -54,7 +55,7 @@
   let currentSeason = null;
   let selectedGameId = null;
 
-  initSeasonPicker(API_BASE, document.getElementById("season-picker"), "vf_org_season", (id) => {
+  initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
     if (id) loadDashboard(id);
   });
 

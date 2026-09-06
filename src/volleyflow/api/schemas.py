@@ -35,6 +35,15 @@ class ClubJoin(BaseModel):
     player_id: int
 
 
+class ClubMemberOut(BaseModel):
+    id: int
+    name: str
+    gender: Gender | None = None
+    avatar_url: str | None = None
+    role: str
+    """"organizer" or "member" — see ClubMemberRow."""
+
+
 class SeasonCreate(BaseModel):
     total_venue_cost: Decimal
     game_dates: list[date] = Field(min_length=1)
