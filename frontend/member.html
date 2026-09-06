@@ -31,9 +31,13 @@
     font-weight: 600; cursor: pointer;
   }
   button.action.cancel { background: var(--bad-soft); color: var(--bad); }
-  button.action.ghost { background: var(--paper); color: var(--ink-soft); }
+  button.action.ghost {
+    background: var(--surface); color: var(--ink-soft); border: 1px solid var(--rule);
+  }
 
   .club-actions { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .org-link { margin: 0 0 14px; font-size: .82rem; }
+  .org-link a { color: var(--accent); text-decoration: none; font-weight: 600; }
   .club-actions button.action { margin-top: 0; }
 </style>
 </head>
@@ -52,6 +56,7 @@
   </div>
   <select id="club-picker" class="season-picker club-picker"></select>
   <div id="club-actions" class="club-actions"></div>
+  <p class="org-link"><a href="organizer.html">前往主揪管理頁面 →</a></p>
   <select id="season-picker" class="season-picker"></select>
   <div id="error"></div>
 
@@ -101,11 +106,7 @@
     const identityEl = document.getElementById("identity");
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
     if (!identified) {
-      // TEMPORARY diagnostic: shows the real reason LIFF/identify
-      // failed, instead of hiding it behind one generic message.
-      // Remove once the 2026-09-07 LIFF login issue is confirmed fixed.
-      const detail = window.__liffError ? "：" + window.__liffError.message : "";
-      identityEl.textContent = "（非 LINE 環境，手動輸入名字測試）" + detail;
+      identityEl.textContent = "（非 LINE 環境，手動輸入名字測試）";
       return;
     }
     myPlayerId = identified.id;

@@ -173,6 +173,7 @@ button:disabled { opacity: .6; cursor: default; }
 
 /* member.html's self-service gender picker */
 .gender-row { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.gender-row[hidden] { display: none; }
 .gender-label { font-size: .8rem; color: var(--ink-soft); }
 .gender-btn {
   padding: 5px 14px; border: 1px solid var(--rule); border-radius: 20px; background: var(--surface);
