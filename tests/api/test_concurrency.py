@@ -26,7 +26,7 @@ pytestmark = pytest.mark.postgres
 _TEST_PLAYER_PREFIX = "ConcurrencyTest-"
 
 
-def _cleanup(season_id: int) -> None:
+def _cleanup(club_id: int, season_id: int) -> None:
     with get_session() as db:
         game_ids = [
             row[0]
@@ -56,6 +56,10 @@ def _cleanup(season_id: int) -> None:
         )
         db.execute(text("DELETE FROM seasons WHERE id = :sid"), {"sid": season_id})
         db.execute(
+            text("DELETE FROM club_members WHERE club_id = :cid"), {"cid": club_id}
+        )
+        db.execute(text("DELETE FROM clubs WHERE id = :cid"), {"cid": club_id})
+        db.execute(
             text("DELETE FROM players WHERE name LIKE :prefix"),
             {"prefix": f"{_TEST_PLAYER_PREFIX}%"},
         )
@@ -68,8 +72,21 @@ def test_concurrent_signups_never_exceed_capacity() -> None:
     open_slots = capacity - 1  # the one fixed member already fills one slot
     contenders = open_slots + 3  # more racers than slots, on purpose
 
+    organizer = client.post(
+        "/players/identify",
+        json={
+            "line_user_id": f"{_TEST_PLAYER_PREFIX}organizer",
+            "display_name": f"{_TEST_PLAYER_PREFIX}Organizer",
+        },
+    ).json()
+    club = client.post(
+        "/clubs",
+        json={"name": f"{_TEST_PLAYER_PREFIX}Club", "player_id": organizer["id"]},
+    ).json()
+    club_id = club["id"]
+
     create = client.post(
-        "/seasons",
+        f"/clubs/{club_id}/seasons",
         json={
             "total_venue_cost": "1000",
             "game_dates": ["2031-01-07"],
@@ -102,4 +119,4 @@ def test_concurrent_signups_never_exceed_capacity() -> None:
         assert results.count("confirmed") == open_slots
         assert results.count("waitlisted") == contenders - open_slots
     finally:
-        _cleanup(season_id)
+        _cleanup(club_id, season_id)

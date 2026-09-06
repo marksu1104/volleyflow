@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from volleyflow.db.models import (
     AbsenceRow,
+    ClubRow,
     DropInRow,
     GameRow,
     PlayerRow,
@@ -44,7 +45,11 @@ def _season(
     game_start_time: time | None = None,
     game_end_time: time | None = None,
 ) -> SeasonRow:
+    club = ClubRow(name="Test Club", created_at=datetime.now())
+    db_session.add(club)
+    db_session.flush()
     season = SeasonRow(
+        club_id=club.id,
         total_venue_cost=Decimal("1000"),
         capacity=18,
         minimum_roster=minimum_roster,

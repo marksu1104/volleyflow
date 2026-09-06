@@ -6,17 +6,18 @@ from typing import Any
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from tests.api.factories import create_club
 from tests.api.factories import start_season as _start_season
 from volleyflow.api.routes import _today_in_taiwan
 from volleyflow.db.models import AbsenceRow, DropInRow, PlayerRow
 
 
 def test_list_seasons_summarizes_each_season(client: TestClient) -> None:
-    _start_season(
+    season = _start_season(
         client, game_dates=["2026-08-18", "2026-08-25"], member_names=["Alice"]
     )
 
-    response = client.get("/seasons")
+    response = client.get(f"/clubs/{season['club_id']}/seasons")
 
     assert response.status_code == 200
     body = response.json()
@@ -32,15 +33,27 @@ def test_list_seasons_reflects_settled_status(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
     client.post(f"/seasons/{season['id']}/settle")
 
-    body = client.get("/seasons").json()
+    body = client.get(f"/clubs/{season['club_id']}/seasons").json()
 
     assert body[0]["settled"] is True
 
 
 def test_list_seasons_is_empty_with_no_seasons(client: TestClient) -> None:
-    response = client.get("/seasons")
+    club = create_club(client)
+
+    response = client.get(f"/clubs/{club['id']}/seasons")
 
     assert response.json() == []
+
+
+def test_list_seasons_only_shows_this_clubs_seasons(client: TestClient) -> None:
+    club_a_season = _start_season(client, member_names=["Alice"])
+    club_b = create_club(client)
+    _start_season(client, member_names=["Alice"], club_id=club_b["id"])
+
+    body = client.get(f"/clubs/{club_a_season['club_id']}/seasons").json()
+
+    assert [s["id"] for s in body] == [club_a_season["id"]]
 
 
 def test_start_season_creates_games_and_members(client: TestClient) -> None:
@@ -52,15 +65,27 @@ def test_start_season_creates_games_and_members(client: TestClient) -> None:
 
 
 def test_start_season_reuses_an_existing_player_by_name(client: TestClient) -> None:
-    first = _start_season(client, member_names=["Alice"])
-    second = _start_season(client, member_names=["Alice"])
+    club = create_club(client)
+    first = _start_season(client, member_names=["Alice"], club_id=club["id"])
+    second = _start_season(client, member_names=["Alice"], club_id=club["id"])
 
     assert first["member_ids"] == second["member_ids"]
 
 
+def test_start_season_treats_the_same_name_in_different_clubs_as_different_people(
+    client: TestClient,
+) -> None:
+    first = _start_season(client, member_names=["Alice"])
+    second = _start_season(client, member_names=["Alice"])
+
+    assert first["member_ids"] != second["member_ids"]
+
+
 def test_start_season_rejects_an_empty_game_list(client: TestClient) -> None:
+    club = create_club(client)
+
     response = client.post(
-        "/seasons",
+        f"/clubs/{club['id']}/seasons",
         json={
             "total_venue_cost": "10000",
             "game_dates": [],
@@ -107,15 +132,31 @@ def test_record_absence_for_an_unknown_player_returns_404(client: TestClient) ->
 
 
 def test_record_absence_for_a_non_member_returns_400(client: TestClient) -> None:
-    season = _start_season(client, member_names=["Alice"])
+    club = create_club(client)
+    season = _start_season(client, member_names=["Alice"], club_id=club["id"])
     game_id = season["games"][0]["id"]
-    _start_season(client, member_names=["Carol"])  # Carol exists, wrong season
+    # Carol is in the same club (via a different season), but not this one.
+    _start_season(client, member_names=["Carol"], club_id=club["id"])
 
     response = client.post(
         "/absences", json={"player_name": "Carol", "game_id": game_id}
     )
 
     assert response.status_code == 400
+
+
+def test_record_absence_for_a_player_in_a_different_club_returns_404(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    _start_season(client, member_names=["Carol"])  # a different club entirely
+
+    response = client.post(
+        "/absences", json={"player_name": "Carol", "game_id": game_id}
+    )
+
+    assert response.status_code == 404
 
 
 def test_sign_up_confirms_when_there_is_room(client: TestClient) -> None:
@@ -391,7 +432,9 @@ def test_set_substitute_confirms_and_charges_the_fee(client: TestClient) -> None
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "confirmed"
-    ledger = client.get(f"/players/{body['player_id']}/ledger").json()
+    ledger = client.get(
+        f"/clubs/{season['club_id']}/players/{body['player_id']}/ledger"
+    ).json()
     assert ledger["balance"] == "-5000"  # 10000 / 2 games / 1 member, one game's worth
 
 
@@ -442,8 +485,12 @@ def test_set_substitute_replaces_an_existing_one(client: TestClient) -> None:
 
     assert response.status_code == 200
     eve = response.json()
-    dave_ledger = client.get(f"/players/{dave['player_id']}/ledger").json()
-    eve_ledger = client.get(f"/players/{eve['player_id']}/ledger").json()
+    dave_ledger = client.get(
+        f"/clubs/{season['club_id']}/players/{dave['player_id']}/ledger"
+    ).json()
+    eve_ledger = client.get(
+        f"/clubs/{season['club_id']}/players/{eve['player_id']}/ledger"
+    ).json()
     assert dave_ledger["balance"] == "0"  # refunded once replaced
     assert eve_ledger["balance"] == "-5000"  # now charged instead
     body = client.get(f"/seasons/{season['id']}").json()
@@ -570,7 +617,9 @@ def test_cancelling_a_substitute_uncovers_the_absence_and_refunds_it(
     assert game["absences"] == [
         {"id": absence["id"], "player_name": "Alice", "covered_by": None}
     ]
-    dave_ledger = client.get(f"/players/{dave['player_id']}/ledger").json()
+    dave_ledger = client.get(
+        f"/clubs/{season['club_id']}/players/{dave['player_id']}/ledger"
+    ).json()
     assert dave_ledger["balance"] == "0"
 
 
@@ -727,45 +776,135 @@ def test_identify_syncs_display_name_and_avatar_on_return_visit(
     assert body["avatar_url"] == "new.jpg"
 
 
-def test_join_pool_lists_identified_non_members(client: TestClient) -> None:
+def test_join_pool_lists_club_members_not_on_the_season_roster(
+    client: TestClient,
+) -> None:
     season = _start_season(client, member_names=["Alice"])
-    client.post(
+    carol = client.post(
         "/players/identify", json={"line_user_id": "U1", "display_name": "Carol"}
-    )
+    ).json()
+    client.post(f"/clubs/{season['club_id']}/join", json={"player_id": carol["id"]})
 
     response = client.get(f"/seasons/{season['id']}/join-pool")
 
+    # The club's organizer is a club member too (see create_club), and
+    # never automatically a season member — so the pool always has at
+    # least them. Check membership, not an exact list, everywhere below.
     assert response.status_code == 200
     names = [p["name"] for p in response.json()]
-    assert names == ["Carol"]
+    assert "Carol" in names
 
 
-def test_join_pool_excludes_players_without_a_line_user_id(
-    client: TestClient,
-) -> None:
+def test_join_pool_includes_a_drop_in_signed_up_by_name(client: TestClient) -> None:
+    """Signing up by name makes someone a club member too (see
+    _get_or_create_player) — a past drop-in is just as valid a
+    promotion candidate as someone who joined through the LINE link.
+    """
     season = _start_season(client, member_names=["Alice"], capacity=18)
     game_id = season["games"][0]["id"]
     client.post("/drop-ins", json={"player_name": "Dave", "game_id": game_id})
 
     response = client.get(f"/seasons/{season['id']}/join-pool")
 
-    assert response.json() == []
+    names = [p["name"] for p in response.json()]
+    assert "Dave" in names
 
 
 def test_join_pool_excludes_players_already_promoted(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
-    client.post(
+    carol = client.post(
         "/players/identify", json={"line_user_id": "U1", "display_name": "Carol"}
-    )
+    ).json()
+    client.post(f"/clubs/{season['club_id']}/join", json={"player_id": carol["id"]})
     client.post(f"/seasons/{season['id']}/members", json={"player_name": "Carol"})
 
     response = client.get(f"/seasons/{season['id']}/join-pool")
 
-    assert response.json() == []
+    names = [p["name"] for p in response.json()]
+    assert "Carol" not in names
+
+
+def test_join_pool_only_shows_this_clubs_members(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    _start_season(client, member_names=["Carol"])  # a different club entirely
+
+    response = client.get(f"/seasons/{season['id']}/join-pool")
+
+    names = [p["name"] for p in response.json()]
+    assert "Carol" not in names
 
 
 def test_join_pool_for_unknown_season_returns_404(client: TestClient) -> None:
     response = client.get("/seasons/999999/join-pool")
+
+    assert response.status_code == 404
+
+
+# --- clubs ------------------------------------------------------------------
+
+
+def test_create_club_makes_the_creator_its_organizer(client: TestClient) -> None:
+    player = client.post(
+        "/players/identify", json={"line_user_id": "U1", "display_name": "Alice"}
+    ).json()
+
+    response = client.post(
+        "/clubs", json={"name": "Tuesday Volleyball", "player_id": player["id"]}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Tuesday Volleyball"
+
+
+def test_create_club_for_unknown_player_returns_404(client: TestClient) -> None:
+    response = client.post("/clubs", json={"name": "A Club", "player_id": 999999})
+
+    assert response.status_code == 404
+
+
+def test_list_clubs_returns_all_clubs(client: TestClient) -> None:
+    club = create_club(client, "Tuesday Volleyball")
+
+    response = client.get("/clubs")
+
+    assert response.status_code == 200
+    assert {"id": club["id"], "name": "Tuesday Volleyball"} in response.json()
+
+
+def test_join_club_adds_a_member(client: TestClient) -> None:
+    club = create_club(client)
+    player = client.post(
+        "/players/identify", json={"line_user_id": "U1", "display_name": "Carol"}
+    ).json()
+
+    response = client.post(
+        f"/clubs/{club['id']}/join", json={"player_id": player["id"]}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Carol"
+
+
+def test_join_club_rejects_a_duplicate(client: TestClient) -> None:
+    club = create_club(client)
+    player = client.post(
+        "/players/identify", json={"line_user_id": "U1", "display_name": "Carol"}
+    ).json()
+    client.post(f"/clubs/{club['id']}/join", json={"player_id": player["id"]})
+
+    response = client.post(
+        f"/clubs/{club['id']}/join", json={"player_id": player["id"]}
+    )
+
+    assert response.status_code == 400
+
+
+def test_join_unknown_club_returns_404(client: TestClient) -> None:
+    player = client.post(
+        "/players/identify", json={"line_user_id": "U1", "display_name": "Carol"}
+    ).json()
+
+    response = client.post("/clubs/999999/join", json={"player_id": player["id"]})
 
     assert response.status_code == 404
 
@@ -1048,6 +1187,20 @@ def test_add_member_joins_the_season(client: TestClient) -> None:
 
 
 def test_add_member_reuses_an_existing_player_by_name(client: TestClient) -> None:
+    club = create_club(client)
+    first_season = _start_season(client, member_names=["Alice"], club_id=club["id"])
+    second_season = _start_season(client, member_names=["Carol"], club_id=club["id"])
+
+    response = client.post(
+        f"/seasons/{second_season['id']}/members", json={"player_name": "Alice"}
+    )
+
+    assert response.json()["id"] == first_season["member_ids"][0]
+
+
+def test_add_member_creates_a_distinct_player_in_a_different_club(
+    client: TestClient,
+) -> None:
     first_season = _start_season(client, member_names=["Alice"])
     second_season = _start_season(client, member_names=["Carol"])
 
@@ -1055,7 +1208,7 @@ def test_add_member_reuses_an_existing_player_by_name(client: TestClient) -> Non
         f"/seasons/{second_season['id']}/members", json={"player_name": "Alice"}
     )
 
-    assert response.json()["id"] == first_season["member_ids"][0]
+    assert response.json()["id"] != first_season["member_ids"][0]
 
 
 def test_add_member_rejects_a_duplicate(client: TestClient) -> None:

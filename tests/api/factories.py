@@ -1,8 +1,27 @@
 """Shared test setup helpers for API tests."""
 
+import uuid
 from typing import Any
 
 from fastapi.testclient import TestClient
+
+
+def create_club(client: TestClient, name: str = "Test Club") -> dict[str, Any]:
+    """A fresh club with a fresh organizer — line_user_id is randomized
+    so tests that create several clubs never collide on it.
+    """
+    organizer = client.post(
+        "/players/identify",
+        json={
+            "line_user_id": f"test-{uuid.uuid4()}",
+            "display_name": "Test Organizer",
+        },
+    ).json()
+    response = client.post("/clubs", json={"name": name, "player_id": organizer["id"]})
+    assert response.status_code == 200
+    body: dict[str, Any] = response.json()
+    body["organizer_id"] = organizer["id"]
+    return body
 
 
 def start_season(
@@ -16,9 +35,13 @@ def start_season(
     game_end_time: str | None = None,
     location: str | None = None,
     change_deadline_days: int | None = None,
+    club_id: int | None = None,
 ) -> dict[str, Any]:
+    if club_id is None:
+        club_id = create_club(client)["id"]
+
     response = client.post(
-        "/seasons",
+        f"/clubs/{club_id}/seasons",
         json={
             "total_venue_cost": total_venue_cost,
             "game_dates": game_dates or ["2026-08-18", "2026-08-25"],
@@ -32,4 +55,6 @@ def start_season(
         },
     )
     assert response.status_code == 200
-    return response.json()  # type: ignore[no-any-return]
+    body: dict[str, Any] = response.json()
+    body["club_id"] = club_id
+    return body
