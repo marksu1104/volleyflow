@@ -921,3 +921,42 @@ scoping done; frontend club context (create/switch club) and access control
 surface) are the rest of milestone 6, not yet started.
 
 148 tests (2 postgres-only), 100% coverage on billing modules.
+
+## 2026-09-07 — Frontend club context (and the outage that made it urgent)
+
+Moving the season and ledger endpoints under `/clubs/{id}/...` broke the
+live site and I didn't notice at the time: GitHub Pages had happily
+deployed an unchanged frontend against a backend whose paths had moved.
+`GET /seasons` returned 404, and that's `initSeasonPicker` — shared by all
+five pages — so every page died at load. Caught it only when cross-checking
+the frontend's fetch calls against the deployed OpenAPI spec, which is now
+the obvious thing to do after any path change and wasn't part of the routine
+before.
+
+- `initSeasonPicker` became `initClubAndSeasonPickers`. The two pickers
+  can't be initialised independently any more — a season list is
+  meaningless until a club is chosen — so one helper owns both, and
+  picking a club reloads that club's seasons. Wires handlers with
+  `onchange =` rather than `addEventListener`, because the season picker
+  gets re-wired on every club change and listeners would stack.
+- Club creation lives on `member.html`, not the organizer pages. That
+  looked backwards at first, but it's the only page with a real identity:
+  `POST /clubs` needs a player id, and only the LIFF page has one. It also
+  happens to be exactly the intended flow — open the app in LINE, create a
+  club, become its organizer.
+- New `GET /clubs/{id}/members` (with role), so the member page can tell
+  whether the person looking has joined the club they're viewing.
+- No browser tooling here, so the picker logic — the piece the whole site
+  now depends on — got a Node harness with a stubbed DOM and fetch instead:
+  empty states, remembered and stale club ids, switching clubs, and name
+  escaping. Six of its checks failed on the first run and all six were the
+  stub, not the app: a real `<select>` resets `.value` to the first option
+  when you assign `innerHTML`, and an `onchange` handler is fire-and-forget
+  so the assertions ran before the reload finished. Same lesson as the
+  fake-DOM harness two stages ago — suspect the harness first.
+- Verified the fix end to end against live production afterwards: identify
+  → create club → creator comes back as `organizer` → create a season →
+  season appears under that club. Then deleted all of it, along with the
+  developer's own player record, so the first real run starts from nothing.
+
+150 tests (2 postgres-only), 100% coverage on billing modules.
