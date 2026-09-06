@@ -18,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from volleyflow.api import routes
 from volleyflow.api.main import app
 from volleyflow.db.engine import get_session
 
@@ -66,23 +67,31 @@ def _cleanup(club_id: int, season_id: int) -> None:
         db.commit()
 
 
-def test_concurrent_signups_never_exceed_capacity() -> None:
+def test_concurrent_signups_never_exceed_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Real ID token verification means a real call to LINE — not
+    # available here. Same fake as tests/api/conftest.py's client
+    # fixture, applied by hand since this test deliberately doesn't use
+    # that fixture (it needs a dependency-override-free TestClient to
+    # exercise real connection-pool concurrency).
+    monkeypatch.setattr(routes, "verify_id_token", lambda token: token)
+
     client = TestClient(app)
     capacity = 4
     open_slots = capacity - 1  # the one fixed member already fills one slot
     contenders = open_slots + 3  # more racers than slots, on purpose
 
-    organizer = client.post(
+    organizer_token = f"{_TEST_PLAYER_PREFIX}organizer"
+    client.post(
         "/players/identify",
         json={
-            "line_user_id": f"{_TEST_PLAYER_PREFIX}organizer",
+            "id_token": organizer_token,
             "display_name": f"{_TEST_PLAYER_PREFIX}Organizer",
         },
-    ).json()
-    club = client.post(
-        "/clubs",
-        json={"name": f"{_TEST_PLAYER_PREFIX}Club", "player_id": organizer["id"]},
-    ).json()
+    )
+    client.headers.update({"Authorization": f"Bearer {organizer_token}"})
+    club = client.post("/clubs", json={"name": f"{_TEST_PLAYER_PREFIX}Club"}).json()
     club_id = club["id"]
 
     create = client.post(
@@ -100,7 +109,11 @@ def test_concurrent_signups_never_exceed_capacity() -> None:
     game_id = body["games"][0]["id"]
 
     try:
-
+        # Every racer signs up under the organizer's identity — the
+        # concurrency being tested is about the game's capacity, not
+        # about who's allowed to sign someone up (see
+        # routes._require_self_or_organizer), so one authorized caller
+        # racing itself N times exercises the same lock.
         def sign_up(i: int) -> str:
             res = client.post(
                 "/drop-ins",
