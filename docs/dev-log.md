@@ -822,14 +822,21 @@ be group-scoped in a multi-tenant world anyway.
 - Added `players.line_user_id` (unique) and `players.avatar_url`.
 - New `POST /players/identify`, called once per LIFF load right after
   `liff.getProfile()` resolves: returning `line_user_id` → sync
-  name/avatar; never seen, but exactly one existing unclaimed Player
-  has this exact name → auto-claim it (this is how the 18 historical
-  members entered from a screenshot pick up their real identity on
-  first visit, without losing their ledger history); otherwise create
-  a new "join pool" Player. `players.name` being unique (from stage 1)
-  turns a same-display-name collision into a real case to handle, not
-  a hypothetical — resolved with a numeric-suffix disambiguator
-  (`_unique_display_name`) rather than failing the request.
+  name/avatar; never seen → create a new "join pool" Player.
+  `players.name` being unique (from stage 1) turns a same-display-name
+  collision into a real case to handle, not a hypothetical — resolved
+  with a numeric-suffix disambiguator (`_unique_display_name`) rather
+  than failing the request.
+- First version of this also auto-claimed an existing unclaimed Player
+  when its name matched the LIFF display name exactly, so the 18
+  historical members entered from a screenshot would pick up their real
+  identity (and ledger history) on first visit instead of starting over
+  as strangers. Removed the same day, before it ever ran against real
+  usage: a name-string match is a guess, and a wrong one silently hands
+  someone else's history to whoever happened to share a name. Now
+  identify_player never claims an existing row by name — reconciling a
+  pre-LIFF record with a real LINE identity is a manual, organizer-driven
+  action instead.
 - New `GET /seasons/{id}/join-pool`: LINE-identified players not yet a
   fixed member of that season — organizer-members.html renders this as
   a promote button that calls the *existing* add-member endpoint
