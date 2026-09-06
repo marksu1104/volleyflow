@@ -101,7 +101,11 @@
     const identityEl = document.getElementById("identity");
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
     if (!identified) {
-      identityEl.textContent = "（非 LINE 環境，手動輸入名字測試）";
+      // TEMPORARY diagnostic: shows the real reason LIFF/identify
+      // failed, instead of hiding it behind one generic message.
+      // Remove once the 2026-09-07 LIFF login issue is confirmed fixed.
+      const detail = window.__liffError ? "：" + window.__liffError.message : "";
+      identityEl.textContent = "（非 LINE 環境，手動輸入名字測試）" + detail;
       return;
     }
     myPlayerId = identified.id;
