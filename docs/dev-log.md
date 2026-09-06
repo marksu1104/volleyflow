@@ -960,3 +960,87 @@ before.
   developer's own player record, so the first real run starts from nothing.
 
 150 tests (2 postgres-only), 100% coverage on billing modules.
+
+## 2026-09-07 — Access control: verified identity, club-role authorization
+
+Multi-tenancy raised the stakes on the auth gap that had existed since
+day one: before, "no access control" meant one group's data was public;
+after, it meant any club could read or write any other club's roster,
+absences, and money. This closes it — the last piece of milestone 6.
+
+**Identity**: `POST /players/identify` used to trust a client-supplied
+`line_user_id` outright — anyone could claim to be anyone. New
+`api/auth.verify_id_token` sends the LIFF ID token to LINE's own verify
+endpoint (`api.line.me/oauth2/v2.1/verify`) and returns the `sub` claim
+instead of trusting the request body; display_name/picture_url stay
+client-reported since spoofing your own displayed name isn't the same
+class of problem as spoofing whose account you become. Chose LINE's
+verify endpoint over local JWKS/signature verification — one extra
+network call per request against not needing a JWT library or a
+public-key cache to keep correct, an easy trade at this traffic volume.
+
+**Authorization**: every mutating endpoint now depends on
+`get_current_player` (resolves the verified caller from an
+`Authorization: Bearer` header) and one of two checks — `_require_organizer`
+for club/season administration (starting a season, editing it,
+adding/removing members, settling, recording payments), or
+`_require_self_or_organizer` for a member's own attendance, signups, and
+substitutes, which also lets the organizer act on anyone's behalf,
+matching what CLAUDE.md 2.3/2.4 already described. `POST /clubs` and
+`POST /clubs/{id}/join` no longer take a `player_id` in the body at all —
+the actor is always the verified caller.
+
+One reordering bug caught by its own test: `set_player_gender` checked
+"is this the caller's own id" before checking "does this player exist,"
+which meant a nonexistent player_id always hit the ownership check first
+and could never actually reach the 404 — self-only authorization made
+that particular 404 test unreachable until existence was checked first.
+
+**Frontend**: `shared.js` gained `initLiffIdentity()` — the same
+`liff.init()` + login-redirect-fallback + `/players/identify` flow
+member.html already had, now shared — and `authHeader()`, which
+`postJson` attaches automatically. The 4 organizer pages had *no* LIFF
+integration before this; every organizer-only action they call would
+have 401'd with nothing to attach. Added it to each.
+
+**Testing this required faking LINE verification** — no real network
+call to LINE is available in tests. Same fakery pattern as
+push_to_group/push_to_user: `monkeypatch.setattr(routes, "verify_id_token",
+lambda token: token)`, patched on the importing module (`routes`), not
+where it's defined (`auth`) — `from ... import` binds a separate name in
+routes's own namespace that patching the origin wouldn't reach. This
+makes a test "token" *be* its own line_user_id.
+
+Rather than rewrite every existing test to carry a token, `factories.create_club`
+sets `client.headers["Authorization"]` as a side effect of creating a
+club — every request that `client` makes afterward acts as that club's
+organizer unless a test overrides the header. Since the organizer can
+act on anyone in their own club, this preserved the exact behavior
+existing domain tests cared about with almost no changes to them; only
+~30 of 172 needed touching, and those were mostly tests that legitimately
+needed a *different* identity (an unrelated club's organizer, or no
+identity at all) to keep testing what they originally tested. A separate,
+dedicated block of new tests covers the authorization logic itself:
+missing/invalid tokens, a non-organizer blocked from every organizer-only
+action, self-vs-someone-else for attendance and ledgers, and the
+join/create endpoints ignoring a body-supplied player_id.
+
+Verified against the real LINE API (deliberately, not mocked) that a
+garbage token is rejected cleanly — this is also how `LINE_LIFF_CHANNEL_ID`
+being correctly set on Render got confirmed after deploy: a missing env
+var would 500 (KeyError), not the clean 401 that actually came back.
+New frontend auth code got its own check since there's no browser here:
+`authHeader()`/`initLiffIdentity()` exercised against a stubbed `liff`
+global and `fetch` — empty-header cases, a real session, postJson
+auto-attaching the header, and the identify happy/login-redirect/
+init-failure/rejected-token paths, 15 checks.
+
+Milestone 6 is now done: multi-tenancy, club scoping, frontend club
+context, and access control. Not done in this stage, and worth naming
+so it doesn't quietly become assumed: `sqladmin` (a system-administrator
+surface, discussed but deferred), and a proper "someone signs a JWT
+themselves" session mechanism — every request currently re-verifies a
+fresh ID token against LINE, which is simple and correct but means every
+write costs one extra outbound call.
+
+174 tests (2 postgres-only), 100% coverage on billing modules.
