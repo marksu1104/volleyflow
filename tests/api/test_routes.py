@@ -709,6 +709,102 @@ def test_cancel_drop_in_rejected_past_the_change_deadline(
     assert response.status_code == 400
 
 
+# --- duplicate submission guards -------------------------------------------
+
+
+def test_record_absence_twice_for_the_same_game_returns_400(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
+
+    response = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    )
+
+    assert response.status_code == 400
+
+
+def test_record_absence_again_after_cancelling_succeeds(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    first = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    client.post(f"/absences/{first['id']}/cancel")
+
+    response = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    )
+
+    assert response.status_code == 200
+
+
+def test_sign_up_twice_for_the_same_game_returns_400(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    game_id = season["games"][0]["id"]
+    client.post("/drop-ins", json={"player_name": "Carol", "game_id": game_id})
+
+    response = client.post(
+        "/drop-ins", json={"player_name": "Carol", "game_id": game_id}
+    )
+
+    assert response.status_code == 400
+
+
+def test_sign_up_while_already_waitlisted_returns_400(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"], capacity=1)
+    game_id = season["games"][0]["id"]
+    client.post("/drop-ins", json={"player_name": "Carol", "game_id": game_id})
+
+    response = client.post(
+        "/drop-ins", json={"player_name": "Carol", "game_id": game_id}
+    )
+
+    assert response.status_code == 400
+
+
+def test_set_substitute_reassigning_the_same_player_succeeds(
+    client: TestClient,
+) -> None:
+    """Regression test for the SQLAlchemy flush-ordering bug: without an
+    explicit flush between cancelling the old substitute row and adding
+    the new one, the unit of work would insert the new row before the
+    old one is marked cancelled, tripping the active-substitute unique
+    index when both rows are for the same player and game.
+    """
+    season = _start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    client.put(f"/absences/{absence['id']}/substitute", json={"player_name": "Dave"})
+
+    response = client.put(
+        f"/absences/{absence['id']}/substitute", json={"player_name": "Dave"}
+    )
+
+    assert response.status_code == 200
+
+
+def test_set_substitute_rejects_someone_already_signed_up(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    game_id = season["games"][0]["id"]
+    client.post("/drop-ins", json={"player_name": "Dave", "game_id": game_id})
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+
+    response = client.put(
+        f"/absences/{absence['id']}/substitute", json={"player_name": "Dave"}
+    )
+
+    assert response.status_code == 400
+
+
 # --- editing season settings -----------------------------------------------
 
 
