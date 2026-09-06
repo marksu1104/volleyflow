@@ -855,3 +855,69 @@ be group-scoped in a multi-tenant world anyway.
   gap to close before this ships more broadly.
 
 137 tests (2 postgres-only), 99% coverage.
+
+## 2026-09-06/07 — Club is the tenant boundary; production data wiped and rebuilt
+
+The developer's actual product shape — "someone signs in, starts a club,
+becomes its organizer, then gathers members" — is native to a multi-tenant
+model. Every single-tenant workaround discussed for organizer setup (an
+env-var seed, a one-time SETUP_TOKEN claim) was a patch faking that flow.
+Confirmed the direction change with the developer and rewrote CLAUDE.md 2.5
+(previously "exactly one group, no multi-tenancy") before touching code —
+milestone 6 now exists to hold this and the access-control work still ahead.
+
+Before migrating, audited what production actually held: 41 players, but
+every absence/drop-in/ledger row was test data (drop-ins with names like
+"123", charges paired 1:1 with refunds netting to zero). Backed up season
+10's real config (dates, venue cost, the 18 real member names) to a local
+file outside the repo, then wiped both the Neon dev branch and production
+outright rather than writing a migration to move test data into a real
+tenant — the "move existing rows into a default club" migration this would
+otherwise have needed was the highest-risk step in the plan, and there was
+nothing worth that risk.
+
+- New `clubs` / `club_members` tables. `club_members.role` is `organizer` or
+  `member`; deliberately no separate pure-Python `Club` class — billing
+  never reasons about clubs (settlement runs per season, which already
+  belongs to exactly one club), so club scoping lives only in `db/models.py`
+  and the API layer.
+- `club_id` added to `seasons` and `ledger_entries` only. Games, absences,
+  drop-ins, waitlist entries, and season membership all derive their club
+  through existing foreign keys instead — CLAUDE.md 2.5 now states this
+  explicitly so nobody denormalizes a club_id onto a row that doesn't need
+  one.
+- `players.name`'s uniqueness constraint (added one stage ago) is gone: two
+  different clubs each having an "Alice" is normal now. `_get_or_create_player`
+  and `_get_player_by_name` became club-scoped — name-within-a-club is the
+  identity they resolve, not name globally. `line_user_id` stays the one
+  truly global identity, unchanged.
+- `POST /clubs` (creator becomes organizer), `GET /clubs`, `POST
+  /clubs/{id}/join`. Season/ledger endpoints moved under `/clubs/{id}/...`;
+  everything reachable through a season/game/absence id stayed where it was.
+- join-pool semantics changed from "anyone who's ever opened the LIFF" to
+  "a club member not yet on this season's roster" — which quietly means the
+  organizer themselves, and anyone who ever signed up as a plain-name
+  drop-in, now show up as promotion candidates too. Not a bug: club
+  membership is a lower bar than "came through the LINE link," and that's
+  the right bar for "is this someone the organizer might want on the roster."
+- Almost every existing test constructed a season without a club, so this
+  touched nearly the whole test suite. `tests/api/factories.create_club`
+  identifies a throwaway organizer and creates a club per call by default;
+  several tests that used to assert cross-season name reuse now assert the
+  opposite (different clubs, same name → different people) with a sibling
+  test added for same-club reuse.
+- Considered a uniqueness constraint on `clubs.name` by habit, then
+  reconsidered: two unrelated clubs picking the same display name is normal
+  and there's no identity reason to forbid it (id is the real key) — unlike
+  `players.name`-within-a-club, which `_get_or_create_player` actually
+  depends on. Left it unconstrained.
+
+Migration applied to the Neon dev branch first (postgres-marked concurrency
+test rewritten to create a club before racing signups against it, still
+passes), then to production, which was empty by this point so the apply was
+low-risk despite being the largest schema change so far. Backend and API
+scoping done; frontend club context (create/switch club) and access control
+(LIFF token verification, organizer role enforcement, a system-administrator
+surface) are the rest of milestone 6, not yet started.
+
+148 tests (2 postgres-only), 100% coverage on billing modules.
