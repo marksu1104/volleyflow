@@ -639,12 +639,14 @@ def test_identify_returns_the_same_player_on_a_second_call(
     assert second["id"] == first["id"]
 
 
-def test_identify_auto_claims_an_existing_unclaimed_player_by_name(
+def test_identify_never_auto_claims_an_existing_name_only_player(
     client: TestClient,
 ) -> None:
     """Alice was entered by name only (e.g. from a screenshot) before
-    she ever opened the LIFF — her first identify call should claim
-    that existing row, not create a stranger next to her.
+    she ever opened the LIFF. Her first identify call must not silently
+    guess that she's the same person and hand over that row's history —
+    it should create a distinct, disambiguated Player instead, leaving
+    reconciliation to the organizer.
     """
     season = _start_season(client, member_names=["Alice"])
     alice_id = season["member_ids"][0]
@@ -655,7 +657,9 @@ def test_identify_auto_claims_an_existing_unclaimed_player_by_name(
     )
 
     assert response.status_code == 200
-    assert response.json()["id"] == alice_id
+    body = response.json()
+    assert body["id"] != alice_id
+    assert body["name"] == "Alice (2)"
 
 
 def test_identify_does_not_reclaim_an_already_claimed_player(
@@ -663,13 +667,14 @@ def test_identify_does_not_reclaim_an_already_claimed_player(
 ) -> None:
     """A different real person can happen to share a LINE display name
     with someone already bound — this must not silently hand them
-    someone else's identity and ledger history.
+    someone else's identity and ledger history, and each collision gets
+    its own distinct disambiguated name.
     """
     season = _start_season(client, member_names=["Alice"])
     alice_id = season["member_ids"][0]
-    client.post(
+    first = client.post(
         "/players/identify", json={"line_user_id": "U1", "display_name": "Alice"}
-    )
+    ).json()
 
     response = client.post(
         "/players/identify", json={"line_user_id": "U2", "display_name": "Alice"}
@@ -677,8 +682,9 @@ def test_identify_does_not_reclaim_an_already_claimed_player(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["id"] != alice_id
-    assert body["name"] == "Alice (2)"
+    assert body["id"] not in (alice_id, first["id"])
+    assert first["name"] == "Alice (2)"
+    assert body["name"] == "Alice (3)"
 
 
 def test_identify_disambiguates_a_name_collision_on_create(

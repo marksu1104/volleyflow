@@ -1033,19 +1033,20 @@ def identify_player(
     payload: PlayerIdentify, db: Session = Depends(get_db)
 ) -> PlayerIdentifyOut:
     """Called once per LIFF page load, right after liff.getProfile()
-    resolves. Three cases:
+    resolves. Two cases:
 
     1. This line_user_id has been seen before — this is a returning
        player. Sync their display name/avatar (LINE names can change).
-    2. Never seen before, but there's exactly one existing Player with
-       this exact name who has never bound a LINE identity — almost
-       certainly one of the legacy members entered by name from a
-       screenshot before this endpoint existed. Claim that row so their
-       ledger/membership history carries forward, rather than starting
-       them over as a stranger.
-    3. Neither of the above — a genuinely new person. Create them; they
+    2. Never seen before — a genuinely new person. Create them; they
        exist but aren't a fixed member of any season until the organizer
        promotes them from a season's join-pool (see list_join_pool).
+
+    Deliberately does not try to auto-claim an existing name-only Player
+    by matching display_name — the organizer's own account of who's who
+    is more trustworthy than a name-string guess, and a wrong guess
+    would silently hand someone else's ledger history to a stranger.
+    Reconciling a real person's pre-LIFF record with their LINE identity
+    is a manual, organizer-driven action.
     """
     player = (
         db.query(PlayerRow)
@@ -1065,25 +1066,6 @@ def identify_player(
             name=player.name,
             avatar_url=player.avatar_url,
             gender=_gender(player.gender),
-        )
-
-    unclaimed = (
-        db.query(PlayerRow)
-        .filter(
-            PlayerRow.line_user_id.is_(None), PlayerRow.name == payload.display_name
-        )
-        .first()
-    )
-    if unclaimed is not None:
-        unclaimed.line_user_id = payload.line_user_id
-        unclaimed.avatar_url = payload.picture_url
-        db.commit()
-        db.refresh(unclaimed)
-        return PlayerIdentifyOut(
-            id=unclaimed.id,
-            name=unclaimed.name,
-            avatar_url=unclaimed.avatar_url,
-            gender=_gender(unclaimed.gender),
         )
 
     name = _unique_display_name(db, payload.display_name)
