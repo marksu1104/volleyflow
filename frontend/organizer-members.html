@@ -29,6 +29,20 @@
   }
   .settled-note { font-size: .82rem; color: var(--ink-soft); padding: 16px 0; }
   .empty { color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center; }
+
+  .pool-section { margin-bottom: 22px; }
+  .pool-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 10px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
+  }
+  .pool-who { display: flex; align-items: center; gap: 8px; }
+  .pool-avatar {
+    width: 26px; height: 26px; border-radius: 50%; object-fit: cover; background: var(--paper);
+  }
+  .pool-promote {
+    border: none; background: var(--good-soft); color: var(--good); font-size: .78rem;
+    font-weight: 600; padding: 5px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+  }
 </style>
 </head>
 <body>
@@ -48,6 +62,12 @@
 
   <div id="settled-note" class="settled-note" hidden>
     這一季已經結算，成員名單不能再變動。
+  </div>
+
+  <div id="pool-section" class="pool-section" hidden>
+    <h2>待加入名單</h2>
+    <p class="sub">已經用 LINE 開過會員頁、但還不是這一季固定成員的人</p>
+    <div id="pool-list" class="member-list"></div>
   </div>
 
   <div id="add-member-row" class="add-member-row">
@@ -81,8 +101,63 @@
       }
       currentSeason = await res.json();
       renderMembers(currentSeason);
+      await loadJoinPool(seasonId);
     } catch (e) {
       errorEl.textContent = "連不上伺服器：" + e.message;
+    }
+  }
+
+  let currentPool = [];
+
+  async function loadJoinPool(seasonId) {
+    const res = await fetch(`${API_BASE}/seasons/${seasonId}/join-pool`);
+    currentPool = res.ok ? await res.json() : [];
+    renderJoinPool();
+  }
+
+  function renderJoinPool() {
+    const section = document.getElementById("pool-section");
+    if (currentPool.length === 0 || currentSeason.settled_at !== null) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    // avatar_url is a plain <img src>, not interpolated as markup, so it
+    // doesn't need escaping the way name does — but the name (and
+    // gender label) do, since a LINE display name is attacker-supplied
+    // once anyone can land in this pool via the join link.
+    document.getElementById("pool-list").innerHTML = currentPool
+      .map(
+        (p) => `
+          <div class="pool-row">
+            <span class="pool-who">
+              ${p.avatar_url ? `<img class="pool-avatar" src="${escapeHtml(p.avatar_url)}" alt="">` : ""}
+              <span>${escapeHtml(p.name)}${genderLabel(p.gender)}</span>
+            </span>
+            <button type="button" class="pool-promote" onclick="promoteFromPool(${p.id})">加入固定名單</button>
+          </div>
+        `
+      )
+      .join("");
+  }
+
+  async function promoteFromPool(playerId) {
+    const player = currentPool.find((p) => p.id === playerId);
+    if (!player) return;
+    if (
+      !confirm(
+        `把「${player.name}」加入固定名單會重新計算整季每人每場的金額，包含已經打過的場次，確定要加入嗎？`
+      )
+    ) {
+      return;
+    }
+    try {
+      await postJson(API_BASE, `/seasons/${currentSeason.id}/members`, {
+        player_name: player.name,
+      });
+      loadMembers(currentSeason.id);
+    } catch (e) {
+      alert("加入失敗：" + e.message);
     }
   }
 
