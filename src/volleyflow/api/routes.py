@@ -22,6 +22,9 @@ from volleyflow.api.schemas import (
     AbsenceCreate,
     AbsenceDetailOut,
     AbsenceOut,
+    ClubCreate,
+    ClubJoin,
+    ClubOut,
     DropInCancelOut,
     DropInCreate,
     DropInDetailOut,
@@ -50,6 +53,8 @@ from volleyflow.api.schemas import (
 )
 from volleyflow.db.models import (
     AbsenceRow,
+    ClubMemberRow,
+    ClubRow,
     DropInRow,
     GameRow,
     LedgerEntryRow,
@@ -72,24 +77,43 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _get_or_create_player(db: Session, name: str) -> PlayerRow:
-    """One Player per name, for life — never create a duplicate."""
-    player = db.query(PlayerRow).filter(PlayerRow.name == name).first()
+def _get_or_create_player(db: Session, club_id: int, name: str) -> PlayerRow:
+    """One Player per name within a club, not globally — the same name
+    in two different clubs is two different people (see CLAUDE.md 2.5:
+    Player is global, but name has no uniqueness constraint of its own
+    any more; ClubMembership is what's scoped). Creates the
+    ClubMemberRow too when this is a brand new player, so this is the
+    one place a name-typed player both exists and belongs to the club
+    at the same time.
+    """
+    player = (
+        db.query(PlayerRow)
+        .join(ClubMemberRow, ClubMemberRow.player_id == PlayerRow.id)
+        .filter(ClubMemberRow.club_id == club_id, PlayerRow.name == name)
+        .first()
+    )
     if player is None:
         player = PlayerRow(name=name)
         db.add(player)
         db.flush()  # assigns player.id without ending the transaction
+        db.add(
+            ClubMemberRow(
+                club_id=club_id, player_id=player.id, role="member", joined_at=_now()
+            )
+        )
     return player
 
 
 def _unique_display_name(
     db: Session, display_name: str, exclude_player_id: int | None = None
 ) -> str:
-    """Two different LINE accounts can share a display name, but
-    players.name is unique (see the uq_players_name migration) — rather
-    than fail identify_player outright on a collision, disambiguate with
-    a numeric suffix. exclude_player_id lets a returning player keep
-    their own current name without tripping over themselves.
+    """Two different LINE accounts can share a display name — since
+    identify_player operates globally, not per club (a Player's LINE
+    identity isn't club-scoped), a collision here isn't even between two
+    people in the same club necessarily. Disambiguate with a numeric
+    suffix rather than fail the request. exclude_player_id lets a
+    returning player keep their own current name without tripping over
+    themselves.
     """
     candidate = display_name
     suffix = 2
@@ -103,10 +127,17 @@ def _unique_display_name(
         suffix += 1
 
 
-def _get_player_by_name(db: Session, name: str) -> PlayerRow:
-    player = db.query(PlayerRow).filter(PlayerRow.name == name).first()
+def _get_player_by_name(db: Session, club_id: int, name: str) -> PlayerRow:
+    player = (
+        db.query(PlayerRow)
+        .join(ClubMemberRow, ClubMemberRow.player_id == PlayerRow.id)
+        .filter(ClubMemberRow.club_id == club_id, PlayerRow.name == name)
+        .first()
+    )
     if player is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No player named {name!r}")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"No player named {name!r} in this club"
+        )
     return player
 
 
@@ -115,6 +146,21 @@ def _get_player_or_404(db: Session, player_id: int) -> PlayerRow:
     if player is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No player with id {player_id}")
     return player
+
+
+def _get_club_or_404(db: Session, club_id: int) -> ClubRow:
+    club = db.get(ClubRow, club_id)
+    if club is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No club with id {club_id}")
+    return club
+
+
+def _require_club_member(db: Session, club_id: int, player_id: int) -> None:
+    membership = db.get(ClubMemberRow, {"club_id": club_id, "player_id": player_id})
+    if membership is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Player is not a member of this club"
+        )
 
 
 def _get_game_or_404(db: Session, game_id: int) -> GameRow:
@@ -263,6 +309,7 @@ def _record_drop_in_charge(
     db.add(
         LedgerEntryRow(
             player_id=drop_in.player_id,
+            club_id=season_row.club_id,
             entry_type=EntryType.DROP_IN_FEE_CHARGED,
             amount=share if reverse else -share,
             recorded_at=_now(),
@@ -366,12 +413,75 @@ def _member_settlement_out(ms: MemberSettlement) -> MemberSettlementOut:
     )
 
 
-@router.get("/seasons", response_model=list[SeasonSummaryOut])
-def list_seasons(db: Session = Depends(get_db)) -> list[SeasonSummaryOut]:
+@router.post("/clubs", response_model=ClubOut)
+def create_club(payload: ClubCreate, db: Session = Depends(get_db)) -> ClubOut:
+    """Whoever creates a club becomes its organizer — see CLAUDE.md 2.5.
+    player_id must already exist (resolved via /players/identify by the
+    caller beforehand).
+    """
+    _get_player_or_404(db, payload.player_id)
+
+    club = ClubRow(name=payload.name, created_at=_now())
+    db.add(club)
+    db.flush()
+    db.add(
+        ClubMemberRow(
+            club_id=club.id,
+            player_id=payload.player_id,
+            role="organizer",
+            joined_at=_now(),
+        )
+    )
+    db.commit()
+    db.refresh(club)
+    return ClubOut(id=club.id, name=club.name)
+
+
+@router.get("/clubs", response_model=list[ClubOut])
+def list_clubs(db: Session = Depends(get_db)) -> list[ClubOut]:
+    clubs = db.query(ClubRow).order_by(ClubRow.id).all()
+    return [ClubOut(id=c.id, name=c.name) for c in clubs]
+
+
+@router.post("/clubs/{club_id}/join", response_model=MemberOut)
+def join_club(
+    club_id: int, payload: ClubJoin, db: Session = Depends(get_db)
+) -> MemberOut:
+    _get_club_or_404(db, club_id)
+    player = _get_player_or_404(db, payload.player_id)
+
+    existing = db.get(ClubMemberRow, {"club_id": club_id, "player_id": player.id})
+    if existing is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Already a member of this club"
+        )
+
+    db.add(
+        ClubMemberRow(
+            club_id=club_id, player_id=player.id, role="member", joined_at=_now()
+        )
+    )
+    db.commit()
+    return MemberOut(
+        id=player.id,
+        name=player.name,
+        gender=_gender(player.gender),
+        avatar_url=player.avatar_url,
+    )
+
+
+@router.get("/clubs/{club_id}/seasons", response_model=list[SeasonSummaryOut])
+def list_seasons(club_id: int, db: Session = Depends(get_db)) -> list[SeasonSummaryOut]:
     """Enough per season to label it in a picker — dates, not a bare id
     a human has no way to recognize.
     """
-    season_rows = db.query(SeasonRow).order_by(SeasonRow.id.desc()).all()
+    _get_club_or_404(db, club_id)
+    season_rows = (
+        db.query(SeasonRow)
+        .filter(SeasonRow.club_id == club_id)
+        .order_by(SeasonRow.id.desc())
+        .all()
+    )
     summaries = []
     for season in season_rows:
         game_dates = [
@@ -399,9 +509,14 @@ def list_seasons(db: Session = Depends(get_db)) -> list[SeasonSummaryOut]:
     return summaries
 
 
-@router.post("/seasons", response_model=SeasonOut)
-def start_season(payload: SeasonCreate, db: Session = Depends(get_db)) -> SeasonOut:
+@router.post("/clubs/{club_id}/seasons", response_model=SeasonOut)
+def start_season(
+    club_id: int, payload: SeasonCreate, db: Session = Depends(get_db)
+) -> SeasonOut:
+    _get_club_or_404(db, club_id)
+
     season = SeasonRow(
+        club_id=club_id,
         total_venue_cost=payload.total_venue_cost,
         capacity=payload.capacity,
         minimum_roster=payload.minimum_roster,
@@ -418,7 +533,7 @@ def start_season(payload: SeasonCreate, db: Session = Depends(get_db)) -> Season
 
     member_ids = []
     for name in payload.member_names:
-        player = _get_or_create_player(db, name)
+        player = _get_or_create_player(db, club_id, name)
         db.add(SeasonMemberRow(season_id=season.id, player_id=player.id))
         member_ids.append(player.id)
 
@@ -507,7 +622,7 @@ def add_member(
     if season.settled_at is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is already settled")
 
-    player = _get_or_create_player(db, payload.player_name)
+    player = _get_or_create_player(db, season.club_id, payload.player_name)
     existing = db.get(SeasonMemberRow, {"season_id": season_id, "player_id": player.id})
     if existing is not None:
         raise HTTPException(
@@ -552,21 +667,29 @@ def remove_member(
 
 @router.get("/seasons/{season_id}/join-pool", response_model=list[MemberOut])
 def list_join_pool(season_id: int, db: Session = Depends(get_db)) -> list[MemberOut]:
-    """Players who've bound a LINE identity (via identify_player, i.e.
-    opened the member LIFF at least once) but aren't a fixed member of
-    this season yet — candidates for the organizer to promote with the
-    existing POST /seasons/{id}/members.
+    """Players who are members of this season's club but aren't on this
+    season's fixed roster yet — candidates for the organizer to promote
+    with the existing POST /seasons/{id}/members. Club membership, not a
+    bare line_user_id check, is the pool boundary now: someone the
+    organizer typed in by hand is just as eligible as someone who joined
+    through the LINE link.
     """
     season = db.get(SeasonRow, season_id)
     if season is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
 
-    member_ids = db.query(SeasonMemberRow.player_id).filter(
+    club_member_ids = db.query(ClubMemberRow.player_id).filter(
+        ClubMemberRow.club_id == season.club_id
+    )
+    season_member_ids = db.query(SeasonMemberRow.player_id).filter(
         SeasonMemberRow.season_id == season_id
     )
     pool = (
         db.query(PlayerRow)
-        .filter(PlayerRow.line_user_id.is_not(None), ~PlayerRow.id.in_(member_ids))
+        .filter(
+            PlayerRow.id.in_(club_member_ids),
+            ~PlayerRow.id.in_(season_member_ids),
+        )
         .order_by(PlayerRow.id)
         .all()
     )
@@ -727,11 +850,11 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
 
 @router.post("/absences", response_model=AbsenceOut)
 def record_absence(payload: AbsenceCreate, db: Session = Depends(get_db)) -> AbsenceOut:
-    player = _get_player_by_name(db, payload.player_name)
     game = _get_game_or_404(db, payload.game_id)
-    _require_season_member(db, game.season_id, player.id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
+    player = _get_player_by_name(db, season.club_id, payload.player_name)
+    _require_season_member(db, game.season_id, player.id)
     _require_within_change_deadline(game, season)
 
     existing = (
@@ -849,7 +972,7 @@ def set_substitute(
         # index.
         db.flush()
 
-    player = _get_or_create_player(db, payload.player_name)
+    player = _get_or_create_player(db, season.club_id, payload.player_name)
     if player.gender is None and payload.gender is not None:
         player.gender = payload.gender
 
@@ -890,10 +1013,10 @@ def set_substitute(
 
 @router.post("/drop-ins", response_model=DropInOut)
 def sign_up(payload: DropInCreate, db: Session = Depends(get_db)) -> DropInOut:
-    player = _get_or_create_player(db, payload.player_name)
     game = _get_game_or_404(db, payload.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
+    player = _get_or_create_player(db, season.club_id, payload.player_name)
     _require_within_change_deadline(game, season)
 
     already_signed_up = (
@@ -999,6 +1122,7 @@ def settle_season(season_id: int, db: Session = Depends(get_db)) -> SeasonSettle
         db.add(
             LedgerEntryRow(
                 player_id=ms.player.id,
+                club_id=season_row.club_id,
                 entry_type=EntryType.SEASON_FEE_CHARGED,
                 amount=-ms.season_fee,
                 recorded_at=now,
@@ -1010,6 +1134,7 @@ def settle_season(season_id: int, db: Session = Depends(get_db)) -> SeasonSettle
             db.add(
                 LedgerEntryRow(
                     player_id=ms.player.id,
+                    club_id=season_row.club_id,
                     entry_type=EntryType.ABSENCE_REFUND,
                     amount=ms.refund,
                     recorded_at=now,
@@ -1102,19 +1227,24 @@ def set_player_gender(
     )
 
 
-@router.post("/players/{player_id}/payments", response_model=LedgerEntryOut)
+@router.post(
+    "/clubs/{club_id}/players/{player_id}/payments", response_model=LedgerEntryOut
+)
 def record_payment(
-    player_id: int, payload: PaymentCreate, db: Session = Depends(get_db)
+    club_id: int, player_id: int, payload: PaymentCreate, db: Session = Depends(get_db)
 ) -> LedgerEntryOut:
     """A manual cash movement the organizer marks by hand — CLAUDE.md 2.4:
     payments and refunds are recorded manually, never via a payment
     gateway. Positive amount: the player paid the organizer. Negative:
     the organizer paid the player.
     """
+    _get_club_or_404(db, club_id)
     _get_player_or_404(db, player_id)
+    _require_club_member(db, club_id, player_id)
 
     entry = LedgerEntryRow(
         player_id=player_id,
+        club_id=club_id,
         entry_type=EntryType.PAYMENT,
         amount=payload.amount,
         recorded_at=_now(),
@@ -1135,19 +1265,28 @@ def record_payment(
     )
 
 
-@router.get("/players/{player_id}/ledger", response_model=PlayerLedgerOut)
-def get_player_ledger(player_id: int, db: Session = Depends(get_db)) -> PlayerLedgerOut:
-    """A player's full append-only history and the balance it adds up to.
-    Positive balance: the organizer owes the player. Negative: the player
-    owes the organizer. Spans every season — see docs/billing-rules.md
-    "Ledger" for why nothing ever needs to be explicitly carried over.
+@router.get(
+    "/clubs/{club_id}/players/{player_id}/ledger", response_model=PlayerLedgerOut
+)
+def get_player_ledger(
+    club_id: int, player_id: int, db: Session = Depends(get_db)
+) -> PlayerLedgerOut:
+    """A player's full append-only history within this club and the
+    balance it adds up to. Positive balance: the organizer owes the
+    player. Negative: the player owes the organizer. Spans every season
+    *in this club* — see docs/billing-rules.md "Ledger" for why nothing
+    ever needs to be explicitly carried over. A player active in two
+    clubs has two separate balances, never combined.
     """
+    _get_club_or_404(db, club_id)
     player_row = _get_player_or_404(db, player_id)
     player = player_from_row(player_row)
 
     entry_rows = (
         db.query(LedgerEntryRow)
-        .filter(LedgerEntryRow.player_id == player_id)
+        .filter(
+            LedgerEntryRow.player_id == player_id, LedgerEntryRow.club_id == club_id
+        )
         .order_by(LedgerEntryRow.recorded_at)
         .all()
     )
