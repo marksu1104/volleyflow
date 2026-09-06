@@ -5,9 +5,10 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import cast
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
+from volleyflow.api.auth import verify_id_token
 from volleyflow.api.conversion import (
     absence_from_row,
     drop_in_from_row,
@@ -23,7 +24,6 @@ from volleyflow.api.schemas import (
     AbsenceDetailOut,
     AbsenceOut,
     ClubCreate,
-    ClubJoin,
     ClubMemberOut,
     ClubOut,
     DropInCancelOut,
@@ -161,6 +161,66 @@ def _require_club_member(db: Session, club_id: int, player_id: int) -> None:
     if membership is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Player is not a member of this club"
+        )
+
+
+def get_current_player(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> PlayerRow:
+    """The verified caller, from a LINE ID token in the Authorization
+    header — never trust a client-supplied player_id/line_user_id in a
+    request body for anything that changes data. Every mutating
+    endpoint below takes this as a dependency instead.
+
+    404s (not 401) if there's no Player for this line_user_id yet: that
+    can only mean the caller never called POST /players/identify, which
+    is the one endpoint that verifies a token itself and doesn't depend
+    on this — everything else assumes identify already ran once.
+    """
+    if authorization is None or not authorization.startswith("Bearer "):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
+    token = authorization.removeprefix("Bearer ")
+    try:
+        line_user_id = verify_id_token(token)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(e)) from e
+
+    player = db.query(PlayerRow).filter(PlayerRow.line_user_id == line_user_id).first()
+    if player is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "No player identified for this LINE account yet"
+        )
+    return player
+
+
+def _require_organizer(db: Session, club_id: int, current_player: PlayerRow) -> None:
+    membership = db.get(
+        ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}
+    )
+    if membership is None or membership.role != "organizer":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Only this club's organizer can do that"
+        )
+
+
+def _require_self_or_organizer(
+    db: Session, club_id: int, current_player: PlayerRow, target_player_id: int
+) -> None:
+    """Lets a member act on their own attendance/substitute, and lets
+    the club's organizer act on anyone's — the same "self, or the
+    organizer" shape CLAUDE.md 2.3/2.4 describes for absences, signups,
+    and substitutes throughout.
+    """
+    if current_player.id == target_player_id:
+        return
+    membership = db.get(
+        ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}
+    )
+    if membership is None or membership.role != "organizer":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "You can only do that for yourself, unless you're the organizer",
         )
 
 
@@ -415,20 +475,21 @@ def _member_settlement_out(ms: MemberSettlement) -> MemberSettlementOut:
 
 
 @router.post("/clubs", response_model=ClubOut)
-def create_club(payload: ClubCreate, db: Session = Depends(get_db)) -> ClubOut:
+def create_club(
+    payload: ClubCreate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> ClubOut:
     """Whoever creates a club becomes its organizer — see CLAUDE.md 2.5.
-    player_id must already exist (resolved via /players/identify by the
-    caller beforehand).
+    The creator is the verified caller, not a client-supplied id.
     """
-    _get_player_or_404(db, payload.player_id)
-
     club = ClubRow(name=payload.name, created_at=_now())
     db.add(club)
     db.flush()
     db.add(
         ClubMemberRow(
             club_id=club.id,
-            player_id=payload.player_id,
+            player_id=current_player.id,
             role="organizer",
             joined_at=_now(),
         )
@@ -474,12 +535,18 @@ def list_club_members(
 
 @router.post("/clubs/{club_id}/join", response_model=MemberOut)
 def join_club(
-    club_id: int, payload: ClubJoin, db: Session = Depends(get_db)
+    club_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
 ) -> MemberOut:
+    """A player can only join a club as themselves — the verified
+    caller, never an arbitrary player_id someone else could sign up.
+    """
     _get_club_or_404(db, club_id)
-    player = _get_player_or_404(db, payload.player_id)
 
-    existing = db.get(ClubMemberRow, {"club_id": club_id, "player_id": player.id})
+    existing = db.get(
+        ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}
+    )
     if existing is not None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Already a member of this club"
@@ -487,15 +554,18 @@ def join_club(
 
     db.add(
         ClubMemberRow(
-            club_id=club_id, player_id=player.id, role="member", joined_at=_now()
+            club_id=club_id,
+            player_id=current_player.id,
+            role="member",
+            joined_at=_now(),
         )
     )
     db.commit()
     return MemberOut(
-        id=player.id,
-        name=player.name,
-        gender=_gender(player.gender),
-        avatar_url=player.avatar_url,
+        id=current_player.id,
+        name=current_player.name,
+        gender=_gender(current_player.gender),
+        avatar_url=current_player.avatar_url,
     )
 
 
@@ -540,9 +610,13 @@ def list_seasons(club_id: int, db: Session = Depends(get_db)) -> list[SeasonSumm
 
 @router.post("/clubs/{club_id}/seasons", response_model=SeasonOut)
 def start_season(
-    club_id: int, payload: SeasonCreate, db: Session = Depends(get_db)
+    club_id: int,
+    payload: SeasonCreate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
 ) -> SeasonOut:
     _get_club_or_404(db, club_id)
+    _require_organizer(db, club_id, current_player)
 
     season = SeasonRow(
         club_id=club_id,
@@ -608,7 +682,10 @@ def _season_out(db: Session, season: SeasonRow) -> SeasonOut:
 
 @router.patch("/seasons/{season_id}", response_model=SeasonOut)
 def update_season(
-    season_id: int, payload: SeasonUpdate, db: Session = Depends(get_db)
+    season_id: int,
+    payload: SeasonUpdate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
 ) -> SeasonOut:
     """A partial update — only fields the client actually sent are
     touched (see SeasonUpdate). Changing `total_venue_cost` changes
@@ -620,6 +697,7 @@ def update_season(
     season = db.get(SeasonRow, season_id)
     if season is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    _require_organizer(db, season.club_id, current_player)
 
     updates = payload.model_dump(exclude_unset=True)
     if "total_venue_cost" in updates and season.settled_at is not None:
@@ -638,7 +716,10 @@ def update_season(
 
 @router.post("/seasons/{season_id}/members", response_model=MemberOut)
 def add_member(
-    season_id: int, payload: MemberAdd, db: Session = Depends(get_db)
+    season_id: int,
+    payload: MemberAdd,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
 ) -> MemberOut:
     """Adding a member changes everyone's per-game share for the whole
     season, same reasoning as changing the venue cost — the frontend
@@ -648,6 +729,7 @@ def add_member(
     season = db.get(SeasonRow, season_id)
     if season is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    _require_organizer(db, season.club_id, current_player)
     if season.settled_at is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is already settled")
 
@@ -671,7 +753,10 @@ def add_member(
 
 @router.delete("/seasons/{season_id}/members/{player_id}", status_code=204)
 def remove_member(
-    season_id: int, player_id: int, db: Session = Depends(get_db)
+    season_id: int,
+    player_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
 ) -> None:
     """Same retroactive-share caveat as adding one. Doesn't touch this
     player's past absence/drop-in rows for this season — they simply
@@ -681,6 +766,7 @@ def remove_member(
     season = db.get(SeasonRow, season_id)
     if season is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    _require_organizer(db, season.club_id, current_player)
     if season.settled_at is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is already settled")
 
@@ -695,17 +781,23 @@ def remove_member(
 
 
 @router.get("/seasons/{season_id}/join-pool", response_model=list[MemberOut])
-def list_join_pool(season_id: int, db: Session = Depends(get_db)) -> list[MemberOut]:
+def list_join_pool(
+    season_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> list[MemberOut]:
     """Players who are members of this season's club but aren't on this
     season's fixed roster yet — candidates for the organizer to promote
     with the existing POST /seasons/{id}/members. Club membership, not a
     bare line_user_id check, is the pool boundary now: someone the
     organizer typed in by hand is just as eligible as someone who joined
-    through the LINE link.
+    through the LINE link. Organizer-only: this is specifically an
+    organizer tool, unlike the public season/roster reads.
     """
     season = db.get(SeasonRow, season_id)
     if season is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    _require_organizer(db, season.club_id, current_player)
 
     club_member_ids = db.query(ClubMemberRow.player_id).filter(
         ClubMemberRow.club_id == season.club_id
@@ -878,11 +970,16 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
 
 
 @router.post("/absences", response_model=AbsenceOut)
-def record_absence(payload: AbsenceCreate, db: Session = Depends(get_db)) -> AbsenceOut:
+def record_absence(
+    payload: AbsenceCreate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> AbsenceOut:
     game = _get_game_or_404(db, payload.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
     player = _get_player_by_name(db, season.club_id, payload.player_name)
+    _require_self_or_organizer(db, season.club_id, current_player, player.id)
     _require_season_member(db, game.season_id, player.id)
     _require_within_change_deadline(game, season)
 
@@ -919,7 +1016,11 @@ def record_absence(payload: AbsenceCreate, db: Session = Depends(get_db)) -> Abs
 
 
 @router.post("/absences/{absence_id}/cancel", response_model=AbsenceCancelOut)
-def cancel_absence(absence_id: int, db: Session = Depends(get_db)) -> AbsenceCancelOut:
+def cancel_absence(
+    absence_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> AbsenceCancelOut:
     """The member is attending after all. Only allowed while nothing is
     covering this absence yet (see _is_absence_covered) — undoing it out
     from under someone who already committed to cover needs the
@@ -936,6 +1037,7 @@ def cancel_absence(absence_id: int, db: Session = Depends(get_db)) -> AbsenceCan
     game = _get_game_or_404(db, absence.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
+    _require_self_or_organizer(db, season.club_id, current_player, absence.player_id)
     _require_within_change_deadline(game, season)
 
     if _is_absence_covered(db, absence):
@@ -953,13 +1055,20 @@ def cancel_absence(absence_id: int, db: Session = Depends(get_db)) -> AbsenceCan
 
 @router.put("/absences/{absence_id}/substitute", response_model=DropInOut)
 def set_substitute(
-    absence_id: int, payload: SubstituteCreate, db: Session = Depends(get_db)
+    absence_id: int,
+    payload: SubstituteCreate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
 ) -> DropInOut:
     """A member (or the organizer) personally arranging — or later
     changing — who covers a specific absence, a "代打". Always
     confirmed, never queued: filling your own slot with someone you
     picked isn't competing with the waitlist for open capacity. See
     attendance.DropIn.covers.
+
+    "Self" here means the absent member — the one whose slot is being
+    covered, not the substitute being named — matching who's actually
+    allowed to arrange this per CLAUDE.md 2.3.
 
     No change-deadline check here, on purpose: swapping who's covering
     doesn't create the understaffed-at-the-last-minute risk the
@@ -981,6 +1090,7 @@ def set_substitute(
     game = _get_game_or_404(db, absence.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
+    _require_self_or_organizer(db, season.club_id, current_player, absence.player_id)
 
     existing = (
         db.query(DropInRow)
@@ -1041,11 +1151,16 @@ def set_substitute(
 
 
 @router.post("/drop-ins", response_model=DropInOut)
-def sign_up(payload: DropInCreate, db: Session = Depends(get_db)) -> DropInOut:
+def sign_up(
+    payload: DropInCreate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> DropInOut:
     game = _get_game_or_404(db, payload.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
     player = _get_or_create_player(db, season.club_id, payload.player_name)
+    _require_self_or_organizer(db, season.club_id, current_player, player.id)
     _require_within_change_deadline(game, season)
 
     already_signed_up = (
@@ -1096,7 +1211,11 @@ def sign_up(payload: DropInCreate, db: Session = Depends(get_db)) -> DropInOut:
 
 
 @router.post("/drop-ins/{drop_in_id}/cancel", response_model=DropInCancelOut)
-def cancel_drop_in(drop_in_id: int, db: Session = Depends(get_db)) -> DropInCancelOut:
+def cancel_drop_in(
+    drop_in_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> DropInCancelOut:
     drop_in = db.get(DropInRow, drop_in_id)
     if drop_in is None:
         raise HTTPException(
@@ -1108,6 +1227,7 @@ def cancel_drop_in(drop_in_id: int, db: Session = Depends(get_db)) -> DropInCanc
     game = _get_game_or_404(db, drop_in.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
+    _require_self_or_organizer(db, season.club_id, current_player, drop_in.player_id)
     _require_within_change_deadline(game, season)
 
     drop_in.cancelled_at = _now()
@@ -1125,11 +1245,17 @@ def cancel_drop_in(drop_in_id: int, db: Session = Depends(get_db)) -> DropInCanc
 
 
 @router.get("/seasons/{season_id}/settlement", response_model=SettlementOut)
-def view_settlement(season_id: int, db: Session = Depends(get_db)) -> SettlementOut:
+def view_settlement(
+    season_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> SettlementOut:
     """Read-only preview — what settling right now would charge/refund.
     Doesn't touch the ledger. See POST .../settle to actually record it.
+    Organizer-only: this exposes every member's fee and refund at once.
     """
-    _, settlements = _gather_member_settlements(db, season_id)
+    season_row, settlements = _gather_member_settlements(db, season_id)
+    _require_organizer(db, season_row.club_id, current_player)
     return SettlementOut(
         season_id=season_id,
         members=[_member_settlement_out(ms) for ms in settlements],
@@ -1137,12 +1263,17 @@ def view_settlement(season_id: int, db: Session = Depends(get_db)) -> Settlement
 
 
 @router.post("/seasons/{season_id}/settle", response_model=SeasonSettleOut)
-def settle_season(season_id: int, db: Session = Depends(get_db)) -> SeasonSettleOut:
+def settle_season(
+    season_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> SeasonSettleOut:
     """Charges every member's season fee and credits their absence refund
     to the ledger, once. See CLAUDE.md 2.4: settlement happens at season
     end; a season can't be settled twice.
     """
     season_row, settlements = _gather_member_settlements(db, season_id)
+    _require_organizer(db, season_row.club_id, current_player)
     if season_row.settled_at is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season already settled")
 
@@ -1186,8 +1317,10 @@ def settle_season(season_id: int, db: Session = Depends(get_db)) -> SeasonSettle
 def identify_player(
     payload: PlayerIdentify, db: Session = Depends(get_db)
 ) -> PlayerIdentifyOut:
-    """Called once per LIFF page load, right after liff.getProfile()
-    resolves. Two cases:
+    """Called once per LIFF page load, right after LIFF resolves. The
+    one endpoint that verifies a token itself rather than depending on
+    get_current_player: there's no Player row to look up yet on a first
+    visit, so identity has to come from the token directly. Two cases:
 
     1. This line_user_id has been seen before — this is a returning
        player. Sync their display name/avatar (LINE names can change).
@@ -1202,11 +1335,14 @@ def identify_player(
     Reconciling a real person's pre-LIFF record with their LINE identity
     is a manual, organizer-driven action.
     """
-    player = (
-        db.query(PlayerRow)
-        .filter(PlayerRow.line_user_id == payload.line_user_id)
-        .first()
-    )
+    try:
+        line_user_id = verify_id_token(payload.id_token)
+    except ValueError as e:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "Invalid or expired LINE ID token"
+        ) from e
+
+    player = db.query(PlayerRow).filter(PlayerRow.line_user_id == line_user_id).first()
     if player is not None:
         if player.name != payload.display_name:
             player.name = _unique_display_name(
@@ -1224,7 +1360,7 @@ def identify_player(
 
     name = _unique_display_name(db, payload.display_name)
     new_player = PlayerRow(
-        name=name, line_user_id=payload.line_user_id, avatar_url=payload.picture_url
+        name=name, line_user_id=line_user_id, avatar_url=payload.picture_url
     )
     db.add(new_player)
     db.commit()
@@ -1239,12 +1375,22 @@ def identify_player(
 
 @router.put("/players/{player_id}/gender", response_model=MemberOut)
 def set_player_gender(
-    player_id: int, payload: GenderUpdate, db: Session = Depends(get_db)
+    player_id: int,
+    payload: GenderUpdate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
 ) -> MemberOut:
     """Self-reported by the player — never billing-relevant, only shown
     on the roster so a game's expected male/female split is visible.
+    Self only, no organizer override: unlike attendance, there's no
+    "arranging this for someone else" case CLAUDE.md describes for a
+    personal, cosmetic attribute like this.
     """
     player = _get_player_or_404(db, player_id)
+    if current_player.id != player_id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "You can only set your own gender"
+        )
     player.gender = payload.gender
     db.commit()
     db.refresh(player)
@@ -1260,7 +1406,11 @@ def set_player_gender(
     "/clubs/{club_id}/players/{player_id}/payments", response_model=LedgerEntryOut
 )
 def record_payment(
-    club_id: int, player_id: int, payload: PaymentCreate, db: Session = Depends(get_db)
+    club_id: int,
+    player_id: int,
+    payload: PaymentCreate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
 ) -> LedgerEntryOut:
     """A manual cash movement the organizer marks by hand — CLAUDE.md 2.4:
     payments and refunds are recorded manually, never via a payment
@@ -1268,6 +1418,7 @@ def record_payment(
     the organizer paid the player.
     """
     _get_club_or_404(db, club_id)
+    _require_organizer(db, club_id, current_player)
     _get_player_or_404(db, player_id)
     _require_club_member(db, club_id, player_id)
 
@@ -1298,16 +1449,22 @@ def record_payment(
     "/clubs/{club_id}/players/{player_id}/ledger", response_model=PlayerLedgerOut
 )
 def get_player_ledger(
-    club_id: int, player_id: int, db: Session = Depends(get_db)
+    club_id: int,
+    player_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
 ) -> PlayerLedgerOut:
     """A player's full append-only history within this club and the
     balance it adds up to. Positive balance: the organizer owes the
     player. Negative: the player owes the organizer. Spans every season
     *in this club* — see docs/billing-rules.md "Ledger" for why nothing
     ever needs to be explicitly carried over. A player active in two
-    clubs has two separate balances, never combined.
+    clubs has two separate balances, never combined. Self-or-organizer:
+    money is sensitive enough that only the player themselves or their
+    club's organizer should be able to read it.
     """
     _get_club_or_404(db, club_id)
+    _require_self_or_organizer(db, club_id, current_player, player_id)
     player_row = _get_player_or_404(db, player_id)
     player = player_from_row(player_row)
 

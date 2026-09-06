@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VolleyFlow 季別設定</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <link rel="stylesheet" href="shared.css">
 <style>
   .settings-form { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
@@ -32,6 +33,7 @@
 <div class="wrap wide">
   <h1>季別設定</h1>
   <p class="sub">場地費、人數、時間、地點、更動期限</p>
+  <div id="identity" class="identity"></div>
 
   <nav class="org-nav">
     <a href="organizer.html" class="org-nav-link">總覽</a>
@@ -93,8 +95,17 @@
 <script src="shared.js"></script>
 <script>
   const API_BASE = "https://volleyflow.onrender.com";
+  const LIFF_ID = "2011156233-6CouG6VI";
   let currentSeasonId = null;
   let originalVenueCost = null;
+
+  (async function initIdentity() {
+    const identityEl = document.getElementById("identity");
+    const identified = await initLiffIdentity(API_BASE, LIFF_ID);
+    identityEl.textContent = identified
+      ? `已用 LINE 身分登入：${identified.name}`
+      : "（非 LINE 環境，僅能瀏覽公開資訊）";
+  })();
 
   initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
     if (id) loadSettings(id);
