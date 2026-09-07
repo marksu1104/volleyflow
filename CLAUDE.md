@@ -207,6 +207,7 @@ with.
 
 ### Testing
 - pytest. One test file per source file: `tests/test_pricing.py` ↔ `src/volleyflow/pricing.py`.
+- The frontend is checked with `node --test tests/frontend/*.test.js`, using Node's own runner and no dependencies — there's no build step to hang a framework off, and the runner is already on the CI machine. `tests/frontend/harness.js` loads `shared.js` and a page's inline script into a scope with the browser globals stubbed. It covers what would be expensive to get wrong without a browser to notice: the billing preview the new-season wizard shows, who the game sheet reports as playing, and what a stale cache is allowed to overrule. Not a substitute for opening the app — three real bugs (`[hidden]` losing to a class's own `display`, iOS time inputs overflowing, empty screens reading as broken) shipped past every static check there is.
 - Test names: `test_<scenario>_<expected_outcome>` — readable without opening the body.
 - Arrange–Act–Assert, separated by a blank line.
 - Billing logic (`pricing.py`, `settlement.py`, `ledger.py`) targets 100% coverage. CI fails below that.
