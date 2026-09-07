@@ -35,9 +35,11 @@
     <a href="organizer-settings.html" class="org-nav-link active">設定</a>
   </nav>
 
-  <select id="club-picker" class="season-picker club-picker"></select>
-  <select id="season-picker" class="season-picker"></select>
+  <select id="club-picker" class="season-picker club-picker" hidden></select>
+  <select id="season-picker" class="season-picker" hidden></select>
   <div id="error"></div>
+
+  <div id="page-state"></div>
 
   <p id="no-club-note" class="empty-club-note" hidden>
     還沒有加入任何球隊——請先到<a href="member.html">會員頁</a>用 LINE 開啟，建立或加入一個球隊。
@@ -215,16 +217,29 @@
     location.href = "profile.html";
   });
 
-  initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
+  showPageLoading(document.getElementById("page-state"));
+  document.getElementById("settings-form").hidden = true;
+
+  initClubAndSeasonPickers(
+    API_BASE,
+    document.getElementById("club-picker"),
+    document.getElementById("season-picker"),
+    "vf_org_season",
+    (id) => {
+    stopLoadingEscalation();
+    document.getElementById("page-state").innerHTML = "";
     const hasClub = !!currentClubId();
+    document.getElementById("club-picker").hidden = !hasClub;
     document.getElementById("no-club-note").hidden = hasClub;
     document.getElementById("create-season-form").hidden = !hasClub || !!id;
     document.getElementById("settings-form").hidden = !id;
     // "尚無任何季別" in a picker is noise when creating the first season
     // is the only thing you can do here.
-    document.getElementById("season-picker").hidden = !id;
-    if (id) loadSettings(id);
-  });
+      document.getElementById("season-picker").hidden = !id;
+      if (id) loadSettings(id);
+    },
+    (e) => showPageError(document.getElementById("page-state"), e.message)
+  );
 
   async function createSeason() {
     const gameDates = document.getElementById("c-dates").value.split("\n").map((d) => d.trim()).filter(Boolean);

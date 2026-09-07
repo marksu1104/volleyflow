@@ -162,8 +162,22 @@ async function initClubAndSeasonPickers(
   clubEl,
   seasonEl,
   seasonStorageKey,
-  onSeasonChange
+  onSeasonChange,
+  onError
 ) {
+  // Without this, a failed fetch (offline, CORS, a backend that never
+  // woke up) rejected an un-awaited promise and the page just sat there
+  // blank forever with nothing said. Now the caller gets to show the
+  // failure — see showPageError.
+  try {
+    await loadClubs();
+  } catch (e) {
+    console.error("Could not load clubs:", e);
+    if (onError) onError(e);
+    else onSeasonChange(null);
+  }
+
+  async function loadClubs() {
   const res = await fetch(`${apiBase}/clubs`);
   const clubs = res.ok ? await res.json() : [];
 
@@ -223,6 +237,7 @@ async function initClubAndSeasonPickers(
   };
 
   await loadSeasons();
+  }
 }
 
 /**
@@ -557,6 +572,46 @@ async function postJson(apiBase, path, body, method) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || res.statusText);
   return data;
+}
+
+let _loadingEscalation = null;
+
+/** Says "still loading" in the same box that will later hold either the
+ * content or the empty state, so those three states are never confusable.
+ * Escalates its wording after a few seconds: the backend is on a free
+ * tier that sleeps, and a silent 30-second wait is indistinguishable
+ * from a broken app unless the page says what's happening. */
+function showPageLoading(container) {
+  if (!container) return;
+  container.innerHTML = `
+    <div class="page-state">
+      <div class="spinner" role="status" aria-label="載入中"></div>
+      <p data-loading-text>載入中…</p>
+    </div>
+  `;
+  clearTimeout(_loadingEscalation);
+  _loadingEscalation = setTimeout(() => {
+    const text = container.querySelector("[data-loading-text]");
+    if (text) text.textContent = "伺服器休眠中，正在喚醒——第一次開啟大約需要 30 秒。";
+  }, 4000);
+}
+
+/** The third state: the request actually failed. Always offers a way
+ * out (retry) rather than leaving a dead page. */
+function showPageError(container, detail) {
+  clearTimeout(_loadingEscalation);
+  if (!container) return;
+  container.innerHTML = `
+    <div class="empty-state">
+      <h3>連不上伺服器</h3>
+      <p>可能是網路不穩，或伺服器還在喚醒中。稍等一下再試一次。${detail ? `<br><span style="font-size:.75rem;opacity:.7">${escapeHtml(detail)}</span>` : ""}</p>
+      <button type="button" class="btn btn-primary" onclick="location.reload()">重新載入</button>
+    </div>
+  `;
+}
+
+function stopLoadingEscalation() {
+  clearTimeout(_loadingEscalation);
 }
 
 /** The "there's nothing here yet, and here's what to do about it" block.
