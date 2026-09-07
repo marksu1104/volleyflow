@@ -213,7 +213,8 @@ with.
 
 ### Git
 - Default branch: `main`.
-- Workflow: feature branch → PR → CI green → merge. No direct commits to `main`.
+- Commit straight to `main`. CI runs on every push to `main` (`ci.yml` is `on: push: branches: [main]`), so pushing directly still gets `ruff` → `mypy` → `pytest`; the only thing a PR added was running them a few minutes earlier. Decided 2026-09-08, replacing "feature branch → PR → CI green → merge". On a solo project a PR nobody reviews is ceremony: it produced 24 self-merged PRs in two days, a notification for each, and a public record that makes the process look more collaborative than it was.
+- Open a PR only when the change genuinely wants one: billing logic, authentication or authorization, or a database migration. Those are the changes worth gating on CI *before* they reach `main`, and worth leaving a written explanation next to. Everything else — frontend fixes, copy, styling, docs — goes straight to `main`.
 - Commit messages: one line, plain short description of what the code now does. No `type:` prefix, no body, no internal planning terms (e.g. "milestone 1") — describe the change, not where it sits in the schedule.
 - No AI attribution (e.g. `Co-Authored-By: Claude`) in commit messages.
 - Commit granularity is one commit per completed, tested stage, not per file or per intermediate step. For milestone 1 that stage is the whole billing engine (all six modules, full test suite) — one commit, not six.
