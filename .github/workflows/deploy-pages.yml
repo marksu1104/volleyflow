@@ -27,6 +27,21 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
+      # shared.js and shared.css are referenced at a URL that never
+      # changes, so a browser that already has them has no reason to ask
+      # again — and LINE's in-app webview holds onto them hard enough
+      # that deployed fixes kept appearing not to have shipped. Stamping
+      # the commit onto the URL makes every deploy a new file to fetch.
+      # Done here rather than in the source so the checked-in HTML stays
+      # readable and nothing has to be remembered by hand.
+      - name: Version the shared assets
+        run: |
+          cd frontend
+          sha="${GITHUB_SHA::8}"
+          sed -i "s|src=\"shared.js\"|src=\"shared.js?v=$sha\"|g" *.html
+          sed -i "s|href=\"shared.css\"|href=\"shared.css?v=$sha\"|g" *.html
+          grep -o 'shared\.\(js\|css\)?v=[0-9a-f]*' member.html | sort -u
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: frontend
