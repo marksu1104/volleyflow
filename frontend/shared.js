@@ -184,6 +184,13 @@ async function initClubAndSeasonPickers(
   if (clubs.length === 0) {
     clubEl.innerHTML = '<option value="">尚無球隊</option>';
     seasonEl.innerHTML = '<option value="">尚無任何季別</option>';
+    // Forget the remembered club, or currentClubId() keeps returning an
+    // id that no longer exists — which reads to the rest of the app as
+    // "a club is selected, it just has no season", the wrong empty state
+    // entirely. Hits anyone whose club was deleted, and anyone testing a
+    // wiped database.
+    localStorage.removeItem(CLUB_STORAGE_KEY);
+    localStorage.removeItem(seasonStorageKey);
     onSeasonChange(null);
     return;
   }
