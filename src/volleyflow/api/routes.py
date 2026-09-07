@@ -215,6 +215,35 @@ def _require_club_access(db: Session, club_id: int, current_player: PlayerRow) -
         )
 
 
+def _may_edit_accountless_player(
+    db: Session, current_player: PlayerRow, target: PlayerRow
+) -> bool:
+    """Whether `current_player` organizes a club that `target` belongs to,
+    and `target` has no LINE identity to speak for themselves with. The
+    narrow case where acting on someone else's profile is legitimate:
+    they only exist because an organizer typed their name in.
+    """
+    if target.line_user_id is not None:
+        return False
+    shared = (
+        db.query(ClubMemberRow)
+        .join(
+            ClubRow,
+            ClubRow.id == ClubMemberRow.club_id,
+        )
+        .filter(ClubMemberRow.player_id == target.id)
+        .all()
+    )
+    for membership in shared:
+        mine = db.get(
+            ClubMemberRow,
+            {"club_id": membership.club_id, "player_id": current_player.id},
+        )
+        if mine is not None and mine.role == "organizer":
+            return True
+    return False
+
+
 def _require_organizer(db: Session, club_id: int, current_player: PlayerRow) -> None:
     membership = db.get(
         ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}
@@ -720,6 +749,169 @@ def join_club(
         gender=_gender(current_player.gender),
         avatar_url=current_player.avatar_url,
     )
+
+
+@router.delete("/clubs/{club_id}/members/{player_id}", status_code=204)
+def remove_club_member(
+    club_id: int,
+    player_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> None:
+    """Take someone out of the club — a wrong-link join, a test account,
+    or someone who has left for good. Distinct from removing them from a
+    *season's* roster (DELETE /seasons/{id}/members/{id}), which is about
+    one season's billing.
+
+    Refused while they're still on any of this club's season rosters:
+    that removal has to go through the season endpoint, which corrects
+    everyone's charge. Silently dropping them here would leave a season
+    whose member list and ledger disagree.
+
+    Refused for the last organizer, which would leave the club with
+    nobody able to manage it.
+    """
+    _get_club_or_404(db, club_id)
+    _require_organizer(db, club_id, current_player)
+
+    membership = db.get(ClubMemberRow, {"club_id": club_id, "player_id": player_id})
+    if membership is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not a member of this club")
+
+    on_a_roster = (
+        db.query(SeasonMemberRow)
+        .join(SeasonRow, SeasonRow.id == SeasonMemberRow.season_id)
+        .filter(
+            SeasonRow.club_id == club_id,
+            SeasonMemberRow.player_id == player_id,
+        )
+        .first()
+    )
+    if on_a_roster is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Still a fixed member of a season — remove them from that season first",
+        )
+
+    if membership.role == "organizer":
+        other_organizers = (
+            db.query(ClubMemberRow)
+            .filter(
+                ClubMemberRow.club_id == club_id,
+                ClubMemberRow.role == "organizer",
+                ClubMemberRow.player_id != player_id,
+            )
+            .count()
+        )
+        if other_organizers == 0:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "This is the club's only organizer",
+            )
+
+    db.delete(membership)
+    db.commit()
+
+
+@router.delete("/seasons/{season_id}", status_code=204)
+def delete_season(
+    season_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> None:
+    """Deletes a season outright, with its games, attendance and the
+    ledger entries it wrote. For a season created by mistake or for
+    testing — not for tidying up a real one.
+
+    Refused once settled. A settled season is closed books: CLAUDE.md 2.5
+    calls for every data change to be auditable, and destroying finished
+    accounts is the one thing that can't be. Before settlement the only
+    ledger entries a season owns are its own fee charges, which are
+    meaningless without it.
+    """
+    season = db.get(SeasonRow, season_id)
+    if season is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    _require_organizer(db, season.club_id, current_player)
+    if season.settled_at is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This season is settled — its books can't be deleted",
+        )
+
+    _delete_season_rows(db, season)
+    db.commit()
+
+
+def _delete_season_rows(db: Session, season: SeasonRow) -> None:
+    """Removes a season and everything hanging off it, children first so
+    no foreign key is ever left dangling."""
+    game_ids = [
+        row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id).all()
+    ]
+    if game_ids:
+        absence_ids = [
+            row.id
+            for row in db.query(AbsenceRow)
+            .filter(AbsenceRow.game_id.in_(game_ids))
+            .all()
+        ]
+        db.query(WaitlistEntryRow).filter(
+            WaitlistEntryRow.game_id.in_(game_ids)
+        ).delete(synchronize_session=False)
+        db.query(DropInRow).filter(DropInRow.game_id.in_(game_ids)).delete(
+            synchronize_session=False
+        )
+        if absence_ids:
+            db.query(AbsenceRow).filter(AbsenceRow.id.in_(absence_ids)).delete(
+                synchronize_session=False
+            )
+    db.query(LedgerEntryRow).filter(LedgerEntryRow.season_id == season.id).delete(
+        synchronize_session=False
+    )
+    db.query(SeasonMemberRow).filter(SeasonMemberRow.season_id == season.id).delete(
+        synchronize_session=False
+    )
+    db.query(GameRow).filter(GameRow.season_id == season.id).delete(
+        synchronize_session=False
+    )
+    db.delete(season)
+
+
+@router.delete("/clubs/{club_id}", status_code=204)
+def delete_club(
+    club_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> None:
+    """Deletes a club and every season in it. Same reasoning and the same
+    refusal as deleting a season: a settled season anywhere in the club
+    blocks it, because that's real closed books. Players themselves are
+    never deleted — a Player is global and outlives any one club
+    (CLAUDE.md 2.1); only their membership of this club goes.
+    """
+    _get_club_or_404(db, club_id)
+    _require_organizer(db, club_id, current_player)
+
+    seasons = db.query(SeasonRow).filter(SeasonRow.club_id == club_id).all()
+    if any(s.settled_at is not None for s in seasons):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "A season in this club is settled — its books can't be deleted",
+        )
+
+    for season in seasons:
+        _delete_season_rows(db, season)
+    db.query(LedgerEntryRow).filter(LedgerEntryRow.club_id == club_id).delete(
+        synchronize_session=False
+    )
+    db.query(ClubMemberRow).filter(ClubMemberRow.club_id == club_id).delete(
+        synchronize_session=False
+    )
+    club = db.get(ClubRow, club_id)
+    if club is not None:
+        db.delete(club)
+    db.commit()
 
 
 @router.get("/clubs/{club_id}/seasons", response_model=list[SeasonSummaryOut])
@@ -1605,12 +1797,18 @@ def set_player_gender(
 ) -> MemberOut:
     """Self-reported by the player — never billing-relevant, only shown
     on the roster so a game's expected male/female split is visible.
-    Self only, no organizer override: unlike attendance, there's no
-    "arranging this for someone else" case CLAUDE.md describes for a
-    personal, cosmetic attribute like this.
+
+    Yours to set, with one exception: a player the organizer typed in by
+    hand has no LINE account, so they cannot open the app and set it
+    themselves, and their half of the roster's male/female count would
+    be stuck at unknown forever. An organizer of a club they belong to
+    may fill it in for them. Once that person claims a LINE identity,
+    it's theirs alone again.
     """
     player = _get_player_or_404(db, player_id)
-    if current_player.id != player_id:
+    if current_player.id != player_id and not _may_edit_accountless_player(
+        db, current_player, player
+    ):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "You can only set your own gender"
         )

@@ -25,6 +25,13 @@
     font-weight: 700; padding: 5px 10px; border-radius: 7px; cursor: pointer;
   }
   .settled-note { font-size: .82rem; color: var(--ink-soft); padding: 16px 0; }
+  .row-actions { display: flex; align-items: center; gap: 8px; }
+  .mini-gender { display: inline-flex; gap: 3px; }
+  .mini-gender button {
+    border: 1px solid var(--rule); background: var(--surface); color: var(--ink-faint);
+    font-size: .74rem; padding: 4px 9px; border-radius: 7px; cursor: pointer;
+  }
+  .mini-gender button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
 </style>
 </head>
 <body>
@@ -211,6 +218,7 @@
               <span>${escapeHtml(p.name)}${genderLabel(p.gender)}</span>
             </span>
             <button type="button" class="pool-promote" onclick="promoteFromPool(${p.id})">加入本季</button>
+            <button type="button" class="member-remove" onclick="removeFromClub(${p.id}, '${p.name.replace(/'/g, "\'")}')">移出球隊</button>
           </div>
         `
       )
@@ -237,6 +245,41 @@
     }
   }
 
+  /** Someone the organizer typed in by hand has no LINE account, so they
+   * can't open the app and set this themselves — and without it the
+   * roster's 男/女 count is permanently incomplete. Only offered for
+   * those players; anyone with their own login sets it in 個人資料. */
+  function genderButtons(m) {
+    if (m.avatar_url) return "";  // has a LINE account -> theirs to set
+    return `
+      <span class="mini-gender">
+        <button type="button" class="${m.gender === "male" ? "on" : ""}" onclick="setGender(${m.id}, 'male')">男</button>
+        <button type="button" class="${m.gender === "female" ? "on" : ""}" onclick="setGender(${m.id}, 'female')">女</button>
+      </span>
+    `;
+  }
+
+  async function setGender(playerId, gender) {
+    try {
+      await postJson(API_BASE, `/players/${playerId}/gender`, { gender }, "PUT");
+      loadMembers(currentSeason.id);
+    } catch (e) {
+      alert("設定性別失敗：" + e.message);
+    }
+  }
+
+  async function removeFromClub(playerId, name) {
+    if (!confirm(`要把「${name}」移出球隊嗎？
+
+他們之後可以再用邀請連結加入。`)) return;
+    try {
+      await deleteJson(API_BASE, `/clubs/${currentClubId()}/members/${playerId}`);
+      loadMembers(currentSeason.id);
+    } catch (e) {
+      alert("移出球隊失敗：" + e.message);
+    }
+  }
+
   function genderLabel(g) {
     if (g === "male") return '<span class="gender-tag male">男</span>';
     if (g === "female") return '<span class="gender-tag female">女</span>';
@@ -259,7 +302,10 @@
         (m) => `
           <div class="member-row">
             <span>${escapeHtml(m.name)}${genderLabel(m.gender)}</span>
-            ${settled ? "" : `<button type="button" class="member-remove" onclick="removeMember(${m.id})">移除</button>`}
+            <span class="row-actions">
+              ${settled ? "" : genderButtons(m)}
+              ${settled ? "" : `<button type="button" class="member-remove" onclick="removeMember(${m.id})">移除</button>`}
+            </span>
           </div>
         `
       )
