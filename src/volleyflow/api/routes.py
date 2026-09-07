@@ -198,6 +198,23 @@ def get_current_player(
     return player
 
 
+def _require_club_access(db: Session, club_id: int, current_player: PlayerRow) -> None:
+    """You may read a club's roster, seasons and games only if you belong
+    to it. CLAUDE.md 2.5: "clubs never see each other's members, seasons,
+    or books." These reads were public until now, which meant every
+    member's name, gender and LINE profile picture — plus who took leave
+    and who dropped in — were readable by anyone who knew a club or
+    season id, and GET /clubs handed out the ids.
+    """
+    membership = db.get(
+        ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}
+    )
+    if membership is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "You are not a member of this club"
+        )
+
+
 def _require_organizer(db: Session, club_id: int, current_player: PlayerRow) -> None:
     membership = db.get(
         ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}
@@ -572,9 +589,41 @@ def create_club(
 
 
 @router.get("/clubs", response_model=list[ClubOut])
-def list_clubs(db: Session = Depends(get_db)) -> list[ClubOut]:
-    clubs = db.query(ClubRow).order_by(ClubRow.id).all()
+def list_clubs(
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> list[ClubOut]:
+    """Only the caller's own clubs. This used to return every club that
+    existed, to anyone — which both leaked the club list and handed out
+    the ids that made the other reads enumerable. Joining a club you're
+    not in yet goes through its invite link, which carries the id; see
+    GET /clubs/{id} for the name lookup that link needs.
+    """
+    clubs = (
+        db.query(ClubRow)
+        .join(ClubMemberRow, ClubMemberRow.club_id == ClubRow.id)
+        .filter(ClubMemberRow.player_id == current_player.id)
+        .order_by(ClubRow.id)
+        .all()
+    )
     return [ClubOut(id=c.id, name=c.name) for c in clubs]
+
+
+@router.get("/clubs/{club_id}", response_model=ClubOut)
+def get_club(
+    club_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> ClubOut:
+    """A club's name, for someone who has its invite link but hasn't
+    joined yet — the "加入「啪排郎」?" prompt needs something to name.
+    Deliberately not membership-gated (that's the whole point) and
+    deliberately nothing but id and name; everything richer about a club
+    requires belonging to it. Still requires a verified caller, so this
+    isn't anonymously scrapable.
+    """
+    club = _get_club_or_404(db, club_id)
+    return ClubOut(id=club.id, name=club.name)
 
 
 @router.get("/players/{player_id}/clubs", response_model=list[MyClubOut])
@@ -608,13 +657,16 @@ def list_player_clubs(
 
 @router.get("/clubs/{club_id}/members", response_model=list[ClubMemberOut])
 def list_club_members(
-    club_id: int, db: Session = Depends(get_db)
+    club_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
 ) -> list[ClubMemberOut]:
     """Everyone in the club and their role — distinct from a *season's*
-    fixed roster (GET /seasons/{id} returns that). The member page uses
-    this to tell whether the person looking has joined this club yet.
+    fixed roster (GET /seasons/{id} returns that). Members only: this
+    returns real names, genders and LINE profile pictures.
     """
     _get_club_or_404(db, club_id)
+    _require_club_access(db, club_id, current_player)
     rows = (
         db.query(PlayerRow, ClubMemberRow)
         .join(ClubMemberRow, ClubMemberRow.player_id == PlayerRow.id)
@@ -671,11 +723,16 @@ def join_club(
 
 
 @router.get("/clubs/{club_id}/seasons", response_model=list[SeasonSummaryOut])
-def list_seasons(club_id: int, db: Session = Depends(get_db)) -> list[SeasonSummaryOut]:
+def list_seasons(
+    club_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> list[SeasonSummaryOut]:
     """Enough per season to label it in a picker — dates, not a bare id
-    a human has no way to recognize.
+    a human has no way to recognize. Members only, same as the roster.
     """
     _get_club_or_404(db, club_id)
+    _require_club_access(db, club_id, current_player)
     season_rows = (
         db.query(SeasonRow)
         .filter(SeasonRow.club_id == club_id)
@@ -981,10 +1038,19 @@ def list_join_pool(
 
 
 @router.get("/seasons/{season_id}", response_model=SeasonDetailOut)
-def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut:
+def get_season(
+    season_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> SeasonDetailOut:
+    """The whole season: roster, every game, who's absent, who's
+    dropping in, who's waiting. Members of this season's club only — it
+    names names.
+    """
     season_row = db.get(SeasonRow, season_id)
     if season_row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    _require_club_access(db, season_row.club_id, current_player)
 
     game_rows = db.query(GameRow).filter(GameRow.season_id == season_id).all()
     game_ids = [g.id for g in game_rows]

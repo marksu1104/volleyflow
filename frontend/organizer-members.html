@@ -87,7 +87,7 @@
   const LIFF_ID = "2011156233-6CouG6VI";
   let currentSeason = null;
 
-  (async function initIdentity() {
+  const identityReady = (async function initIdentity() {
     const identityEl = document.getElementById("identity");
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
     if (identified) {
@@ -96,6 +96,7 @@
     } else {
       identityEl.textContent = "（非 LINE 環境，僅能瀏覽公開資訊）";
     }
+    return identified;
   })();
   document.getElementById("avatar-btn").addEventListener("click", () => {
     location.href = "profile.html";
@@ -104,31 +105,44 @@
   showPageLoading(document.getElementById("no-season"));
   document.getElementById("roster-section").hidden = true;
 
-  initClubAndSeasonPickers(
-    API_BASE,
-    document.getElementById("club-picker"),
-    document.getElementById("season-picker"),
-    "vf_org_season",
-    (id) => {
-    stopLoadingEscalation();
-    document.getElementById("club-picker").hidden = !currentClubId();
-    renderJoinLink();
-    // The join link stays useful with no season (people can join the club
-    // and wait in the pool), so only the season roster half is swapped
-    // out for the empty state here.
-    document.getElementById("roster-section").hidden = !id;
-    document.getElementById("season-picker").hidden = !id;
-    document.getElementById("no-season").innerHTML = id
-      ? ""
-      : emptyStateHtml(
-          "這個球隊還沒有開季",
-          "固定成員名單是跟著一季走的。可以先把上面的連結分享出去讓大家加入球隊，等開季時再從待加入名單挑人。",
-          { label: "建立第一季", href: "organizer-settings.html" }
-        );
-      if (id) loadMembers(id);
-    },
-    (e) => showPageError(document.getElementById("no-season"), e.message)
-  );
+  // Every club-scoped read carries the caller's token now, so nothing may
+  // fetch before LIFF identity has resolved — otherwise authHeader() is
+  // empty and the server correctly says 401.
+  identityReady.then((identified) => {
+    if (!identified) {
+      stopLoadingEscalation();
+      document.getElementById("no-season").innerHTML = emptyStateHtml(
+        "請用 LINE 開啟",
+        "名單和帳務只有球隊成員看得到，所以需要先用 LINE 登入。請從 LINE 裡的連結開啟這一頁。"
+      );
+      return;
+    }
+    initClubAndSeasonPickers(
+      API_BASE,
+      document.getElementById("club-picker"),
+      document.getElementById("season-picker"),
+      "vf_org_season",
+      (id) => {
+      stopLoadingEscalation();
+      document.getElementById("club-picker").hidden = !currentClubId();
+      renderJoinLink();
+      // The join link stays useful with no season (people can join the club
+      // and wait in the pool), so only the season roster half is swapped
+      // out for the empty state here.
+      document.getElementById("roster-section").hidden = !id;
+      document.getElementById("season-picker").hidden = !id;
+      document.getElementById("no-season").innerHTML = id
+        ? ""
+        : emptyStateHtml(
+            "這個球隊還沒有開季",
+            "固定成員名單是跟著一季走的。可以先把上面的連結分享出去讓大家加入球隊，等開季時再從待加入名單挑人。",
+            { label: "建立第一季", href: "organizer-settings.html" }
+          );
+        if (id) loadMembers(id);
+      },
+      (e) => showPageError(document.getElementById("no-season"), e.message)
+    );
+  });
 
   function renderJoinLink() {
     const clubId = currentClubId();
@@ -150,7 +164,9 @@
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
     try {
-      const res = await fetch(`${API_BASE}/seasons/${seasonId}`);
+      const res = await fetch(`${API_BASE}/seasons/${seasonId}`, {
+        headers: authHeader(),
+      });
       if (!res.ok) {
         errorEl.textContent = "找不到這一季";
         return;

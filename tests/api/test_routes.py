@@ -51,7 +51,12 @@ def test_list_seasons_only_shows_this_clubs_seasons(client: TestClient) -> None:
     club_b = create_club(client)
     _start_season(client, member_names=["Alice"], club_id=club_b["id"])
 
-    body = client.get(f"/clubs/{club_a_season['club_id']}/seasons").json()
+    # create_club above re-pointed the client at club B's organizer, who
+    # can't read club A any more — ask as club A's own organizer.
+    body = client.get(
+        f"/clubs/{club_a_season['club_id']}/seasons",
+        headers=auth_headers(club_a_season["organizer_token"]),
+    ).json()
 
     assert [s["id"] for s in body] == [club_a_season["id"]]
 
@@ -356,6 +361,8 @@ def test_get_season_reflects_absences_signups_and_waitlist(
 
 
 def test_get_season_for_an_unknown_season_returns_404(client: TestClient) -> None:
+    create_club(client)  # an identified caller, so this isn't a 401
+
     response = client.get("/seasons/999999")
 
     assert response.status_code == 404
@@ -984,7 +991,9 @@ def test_create_club_makes_the_creator_its_organizer(client: TestClient) -> None
 
     assert response.status_code == 200
     assert response.json()["name"] == "Tuesday Volleyball"
-    members = client.get(f"/clubs/{response.json()['id']}/members").json()
+    members = client.get(
+        f"/clubs/{response.json()['id']}/members", headers=auth_headers("U1")
+    ).json()
     assert members[0]["name"] == "Alice"
     assert members[0]["role"] == "organizer"
 
@@ -1029,6 +1038,8 @@ def test_list_club_members_shows_roles(client: TestClient) -> None:
 
 
 def test_list_club_members_for_unknown_club_returns_404(client: TestClient) -> None:
+    create_club(client)  # an identified caller, so this isn't a 401
+
     response = client.get("/clubs/999999/members")
 
     assert response.status_code == 404
@@ -1834,3 +1845,101 @@ def test_list_player_clubs_for_someone_else_returns_403(client: TestClient) -> N
     )
 
     assert response.status_code == 403
+
+
+# --- club-scoped reads ---------------------------------------------------
+#
+# These four reads were public until they weren't: between them they
+# expose every member's name, gender and LINE profile picture, who took
+# leave, who dropped in, and what a game costs. CLAUDE.md 2.5 says a club
+# never sees another club's members, seasons or books.
+
+
+def test_a_stranger_cannot_read_a_clubs_members(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    stranger = identify(client, "Stranger")
+
+    response = client.get(
+        f"/clubs/{season['club_id']}/members",
+        headers=auth_headers(stranger["token"]),
+    )
+
+    assert response.status_code == 403
+
+
+def test_a_stranger_cannot_list_a_clubs_seasons(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    stranger = identify(client, "Stranger")
+
+    response = client.get(
+        f"/clubs/{season['club_id']}/seasons",
+        headers=auth_headers(stranger["token"]),
+    )
+
+    assert response.status_code == 403
+
+
+def test_a_stranger_cannot_read_a_season(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    stranger = identify(client, "Stranger")
+
+    response = client.get(
+        f"/seasons/{season['id']}", headers=auth_headers(stranger["token"])
+    )
+
+    assert response.status_code == 403
+
+
+def test_these_reads_are_rejected_without_any_identity(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+
+    for path in (
+        "/clubs",
+        f"/clubs/{season['club_id']}/members",
+        f"/clubs/{season['club_id']}/seasons",
+        f"/seasons/{season['id']}",
+    ):
+        response = client.get(path, headers={"Authorization": ""})
+        assert response.status_code == 401, path
+
+
+def test_list_clubs_returns_only_your_own(client: TestClient) -> None:
+    mine = create_club(client, name="Mine")
+    my_token = mine["organizer_token"]
+    create_club(client, name="Someone Else's")  # a different organizer
+
+    body = client.get("/clubs", headers=auth_headers(my_token)).json()
+
+    assert [c["name"] for c in body] == ["Mine"]
+
+
+def test_a_club_member_can_read_the_club(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    carol = identify(client, "Carol")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+    )
+
+    response = client.get(
+        f"/seasons/{season['id']}", headers=auth_headers(carol["token"])
+    )
+
+    assert response.status_code == 200
+
+
+def test_an_invite_link_can_name_a_club_you_have_not_joined(
+    client: TestClient,
+) -> None:
+    """The whole point of GET /clubs/{id}: someone holding an invite link
+    needs the club's name to decide whether to join. Nothing else about
+    the club is readable until they do.
+    """
+    club = create_club(client, name="啪排郎")
+    stranger = identify(client, "Stranger")
+
+    response = client.get(
+        f"/clubs/{club['id']}", headers=auth_headers(stranger["token"])
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"id": club["id"], "name": "啪排郎"}
