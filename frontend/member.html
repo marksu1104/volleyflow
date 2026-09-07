@@ -327,25 +327,34 @@
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
     try {
-      const res = await fetch(`${API_BASE}/seasons/${seasonId}`);
-      if (!res.ok) { errorEl.textContent = "找不到這一季"; return; }
-      const season = await res.json();
+      // Paints from the last-seen copy first, then corrects itself — see
+      // getJsonSWR. render() runs once or twice; it rebuilds everything
+      // it touches, so running twice is just a redraw.
+      await getJsonSWR(`${API_BASE}/seasons/${seasonId}`, (season) => render(season));
+    } catch (e) {
+      errorEl.textContent = "連不上伺服器：" + e.message;
+    }
+
+    function render(season) {
       const isNewSeason = !currentSeason || currentSeason.id !== season.id;
       currentSeason = season;
       if (isNewSeason || !season.games.some((g) => g.id === selectedGameId)) {
         const upcoming = season.games.find((g) => !describeDate(g.date).isPast) || season.games[season.games.length - 1];
         selectedGameId = upcoming ? upcoming.id : null;
       }
-      clubMembers = await fetchClubMembers(API_BASE, currentClubId());
       document.getElementById("season-picker").hidden = false;
       document.getElementById("cal-label").hidden = false;
       document.getElementById("month-cal").hidden = false;
       renderHero(season);
       renderMonthCalendar(document.getElementById("month-cal"), season.games, selectGame);
       renderSelectedGameDetail();
-      await renderBalance(season);
-    } catch (e) {
-      errorEl.textContent = "連不上伺服器：" + e.message;
+      // These two are independent of the season document and each other,
+      // so they run in parallel rather than blocking the paint above.
+      fetchClubMembers(API_BASE, currentClubId()).then((m) => {
+        clubMembers = m;
+        renderSelectedGameDetail();
+      });
+      renderBalance(season);
     }
   }
 

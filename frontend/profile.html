@@ -97,6 +97,9 @@
     if (name === me.name) return;
     try {
       const updated = await postJson(API_BASE, `/players/${me.id}/name`, { name }, "PUT");
+      // initLiffIdentity caches "who am I" for the session; the name in
+      // it is now wrong.
+      sessionStorage.removeItem("vf_identity");
       me.name = updated.name;
       renderProfile();
       if (updated.name !== name) {
@@ -112,6 +115,7 @@
     if (!btn) return;
     try {
       const updated = await postJson(API_BASE, `/players/${me.id}/gender`, { gender: btn.dataset.gender }, "PUT");
+      sessionStorage.removeItem("vf_identity");
       me.gender = updated.gender;
       renderProfile();
     } catch (e) {
