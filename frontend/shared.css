@@ -335,6 +335,27 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 }
 .gdetail-roster-wrap { margin-top: 10px; }
 
+/* The attendance list: one numbered line per person who'll be on court,
+   so "how many, and who" is answered by looking rather than counting.
+   Absent members keep the same row shape with a dash for a number —
+   they're part of the same picture, just on the other side of it. */
+.att-list { display: flex; flex-direction: column; gap: 3px; }
+.att-row {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border-radius: 9px; background: var(--surface); border: 1px solid var(--rule); font-size: .87rem;
+}
+.att-row.dropin { background: var(--good-soft); border-color: transparent; }
+.att-row.absent { background: var(--surface-2); border-color: transparent; color: var(--ink-soft); }
+.att-num {
+  font-family: var(--font-num); font-size: .78rem; font-weight: 800; color: var(--ink-faint);
+  min-width: 18px; text-align: right; font-variant-numeric: tabular-nums;
+}
+.att-name { flex: 1; min-width: 0; font-weight: 500; }
+.att-note { font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-soft); white-space: nowrap; }
+.att-row.dropin .att-note { background: var(--surface); color: var(--good); }
+.att-note.sub { background: var(--accent-soft); color: var(--accent); }
+.att-note.gap { background: var(--bad-soft); color: var(--bad); }
+
 .gender-tag { font-size: .68rem; margin-left: 4px; opacity: .8; }
 .gender-tag.male { color: var(--accent); }
 .gender-tag.female { color: var(--pink); }

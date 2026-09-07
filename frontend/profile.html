@@ -8,7 +8,6 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
 <link rel="stylesheet" href="shared.css">
 <style>
-  .back-link { display: inline-block; margin-bottom: 10px; font-size: .84rem; color: var(--ink-soft); text-decoration: none; }
   .name-save-row { display: flex; gap: 8px; }
   .name-save-row input { flex: 1; }
   .name-save-row button {
@@ -20,8 +19,14 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="brand">VolleyFlow</div>
-  <a class="back-link" href="member.html">‹ 返回</a>
+  <div class="app-bar">
+    <span class="app-bar-left">
+      <button type="button" class="back-btn" onclick="location.href='member.html'">‹ 返回</button>
+    </span>
+    <button type="button" class="brand" onclick="location.href='member.html'">VolleyFlow</button>
+    <span class="app-bar-right"></span>
+  </div>
+
   <h1>個人資料</h1>
   <div id="identity" class="identity"></div>
 
