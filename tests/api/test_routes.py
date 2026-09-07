@@ -2527,3 +2527,58 @@ def test_reporting_requires_an_identity(client: TestClient) -> None:
     )
 
     assert response.status_code == 401
+
+
+def test_a_report_with_a_screenshot_sends_the_picture_too(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LINE renders an image by fetching a URL from its own servers, so
+    the picture has to be reachable without any of our credentials."""
+    sent_text: list[str] = []
+    sent_images: list[str] = []
+    monkeypatch.setattr(routes, "push_to_user", lambda uid, t: sent_text.append(t))
+    monkeypatch.setattr(
+        routes, "push_image_to_user", lambda uid, url: sent_images.append(url)
+    )
+    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
+    alice = identify(client, "Alice")
+    # a 1x1 PNG
+    png = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+
+    response = client.post(
+        "/reports",
+        json={"message": "畫面壞了", "screenshot": png},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 204
+    assert len(sent_images) == 1
+    # The image must be readable with no auth at all, the way LINE fetches it.
+    fetched = client.get(sent_images[0].replace("http://testserver", ""))
+    assert fetched.status_code == 200
+    assert fetched.headers["content-type"] == "image/png"
+
+
+def test_a_screenshot_that_is_not_an_image_is_refused(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(routes, "push_to_user", lambda uid, t: None)
+    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
+    alice = identify(client, "Alice")
+
+    response = client.post(
+        "/reports",
+        json={"message": "x", "screenshot": "data:text/html;base64,PHNjcmlwdD4="},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 400
+
+
+def test_an_unknown_screenshot_token_is_a_404(client: TestClient) -> None:
+    response = client.get("/reports/not-a-real-token/image")
+
+    assert response.status_code == 404
