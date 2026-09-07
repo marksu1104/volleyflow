@@ -17,15 +17,20 @@
 </head>
 <body>
 <div class="wrap wide">
-  <div class="brand">VolleyFlow</div>
-  <div class="app-top">
-    <div>
-      <h1 style="margin-bottom:2px">帳務</h1>
-      <p class="sub" style="margin-bottom:0">季費、當天臨打、季末結算，分開看</p>
-    </div>
-    <button type="button" class="avatar" id="avatar-btn" title="個人資料">?</button>
+  <div class="app-bar">
+    <span class="app-bar-left">
+      <button type="button" class="back-btn" onclick="location.href='member.html'">‹ 會員頁</button>
+    </span>
+    <button type="button" class="brand" onclick="location.href='member.html'">VolleyFlow</button>
+    <span class="app-bar-right">
+      <button type="button" class="avatar" id="avatar-btn" title="個人資料">?</button>
+    </span>
   </div>
-  <div id="identity" class="identity"></div>
+
+  <nav class="context-switch">
+    <a href="member.html">會員</a>
+    <a href="organizer.html" class="on">管理</a>
+  </nav>
 
   <nav class="org-nav">
     <a href="organizer.html" class="org-nav-link">總覽</a>
@@ -88,13 +93,9 @@
   let currentSeason = null;
 
   const identityReady = (async function initIdentity() {
-    const identityEl = document.getElementById("identity");
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
     if (identified) {
       document.getElementById("avatar-btn").textContent = identified.name.slice(0, 1);
-      identityEl.textContent = `已用 LINE 身分登入：${identified.name}`;
-    } else {
-      identityEl.textContent = "（非 LINE 環境，僅能瀏覽公開資訊）";
     }
     return identified;
   })();

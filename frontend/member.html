@@ -24,16 +24,22 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="brand">VolleyFlow</div>
-  <div class="app-top">
-    <button type="button" id="club-chip" class="club-chip">
-      <i class="club-dot" id="club-dot">-</i><span id="club-chip-name">選擇球隊</span><span class="caret">▾</span>
-    </button>
-    <span class="app-top-right">
-      <button type="button" id="manage-btn" class="manage-btn" hidden>管理</button>
+  <div class="app-bar">
+    <span class="app-bar-left">
+      <button type="button" id="club-chip" class="club-chip">
+        <i class="club-dot" id="club-dot">-</i><span id="club-chip-name">選擇球隊</span><span class="caret">▾</span>
+      </button>
+    </span>
+    <button type="button" class="brand" onclick="location.href='member.html'">VolleyFlow</button>
+    <span class="app-bar-right">
       <button type="button" class="avatar" id="avatar-btn" title="個人資料">?</button>
     </span>
   </div>
+
+  <nav class="context-switch" id="context-switch" hidden>
+    <a href="member.html" class="on">會員</a>
+    <a href="organizer.html">管理</a>
+  </nav>
   <div id="identity" class="identity"></div>
 
   <div id="name-row" class="name-row">
@@ -247,7 +253,7 @@
   function renderManageButton() {
     const clubId = currentClubId();
     const mine = myClubs.find((c) => String(c.id) === String(clubId));
-    document.getElementById("manage-btn").hidden = !(mine && mine.role === "organizer");
+    document.getElementById("context-switch").hidden = !(mine && mine.role === "organizer");
   }
 
   function renderClubChip() {
@@ -344,10 +350,6 @@
 
   document.getElementById("avatar-btn").addEventListener("click", () => {
     location.href = "profile.html";
-  });
-
-  document.getElementById("manage-btn").addEventListener("click", () => {
-    location.href = "organizer.html";
   });
 
   [

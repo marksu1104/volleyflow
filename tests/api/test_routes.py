@@ -2108,3 +2108,135 @@ def test_a_stranger_cannot_set_gender_for_an_accountless_player(
     )
 
     assert response.status_code == 403
+
+
+# --- linking a LINE account to a roster entry ----------------------------
+#
+# The organizer types someone in before they've ever opened the app, then
+# that person logs in and identify_player — which never guesses identity
+# from a name — creates a second row for them. This is the manual
+# reconciliation the docstring there always promised.
+
+
+def test_link_moves_the_line_identity_onto_the_roster_entry(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["吳亞彤"])
+    typed_in_id = season["member_ids"][0]
+    with_line = identify(client, "吳亞彤")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(with_line["token"])
+    )
+
+    response = client.post(
+        f"/clubs/{season['club_id']}/players/{typed_in_id}/link",
+        json={"line_player_id": with_line["id"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["linked"] is True
+    members = client.get(f"/clubs/{season['club_id']}/members").json()
+    assert [m["id"] for m in members if m["name"].startswith("吳亞彤")] == [typed_in_id]
+
+
+def test_link_keeps_the_roster_entrys_ledger(client: TestClient) -> None:
+    """The whole point of merging onto the typed-in row: it already owns
+    the season fee, and that history has to survive."""
+    season = _start_season(client, member_names=["吳亞彤"])
+    typed_in_id = season["member_ids"][0]
+    before = client.get(
+        f"/clubs/{season['club_id']}/players/{typed_in_id}/ledger"
+    ).json()["balance"]
+    with_line = identify(client, "吳亞彤")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(with_line["token"])
+    )
+
+    client.post(
+        f"/clubs/{season['club_id']}/players/{typed_in_id}/link",
+        json={"line_player_id": with_line["id"]},
+    )
+
+    after = client.get(
+        f"/clubs/{season['club_id']}/players/{typed_in_id}/ledger"
+    ).json()
+    assert after["balance"] == before
+
+
+def test_after_linking_that_person_can_act_as_themselves(client: TestClient) -> None:
+    season = _start_season(client, member_names=["吳亞彤"])
+    typed_in_id = season["member_ids"][0]
+    with_line = identify(client, "吳亞彤")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(with_line["token"])
+    )
+    client.post(
+        f"/clubs/{season['club_id']}/players/{typed_in_id}/link",
+        json={"line_player_id": with_line["id"]},
+    )
+
+    # Their token now resolves to the roster entry, so recording their own
+    # absence is a self-action rather than something only the organizer can do.
+    response = client.post(
+        "/absences",
+        json={"player_name": "吳亞彤", "game_id": season["games"][0]["id"]},
+        headers=auth_headers(with_line["token"]),
+    )
+
+    assert response.status_code == 200
+
+
+def test_link_refuses_when_the_line_account_has_its_own_history(
+    client: TestClient,
+) -> None:
+    """Deleting it would destroy real records — the duplicate to remove
+    is the roster entry, not this one."""
+    season = _start_season(client, member_names=["吳亞彤"])
+    typed_in_id = season["member_ids"][0]
+    with_line = identify(client, "吳亞彤")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(with_line["token"])
+    )
+    client.post(
+        "/drop-ins",
+        json={"player_name": with_line["name"], "game_id": season["games"][0]["id"]},
+    )
+
+    response = client.post(
+        f"/clubs/{season['club_id']}/players/{typed_in_id}/link",
+        json={"line_player_id": with_line["id"]},
+    )
+
+    assert response.status_code == 400
+
+
+def test_link_refuses_an_already_linked_roster_entry(client: TestClient) -> None:
+    club = create_club(client)
+    alice = identify(client, "Alice")
+    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(alice["token"]))
+    bob = identify(client, "Bob")
+    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(bob["token"]))
+
+    response = client.post(
+        f"/clubs/{club['id']}/players/{alice['id']}/link",
+        json={"line_player_id": bob["id"]},
+    )
+
+    assert response.status_code == 400
+
+
+def test_a_member_cannot_link_players(client: TestClient) -> None:
+    season = _start_season(client, member_names=["吳亞彤"])
+    typed_in_id = season["member_ids"][0]
+    carol = identify(client, "Carol")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+    )
+
+    response = client.post(
+        f"/clubs/{season['club_id']}/players/{typed_in_id}/link",
+        json={"line_player_id": carol["id"]},
+        headers=auth_headers(carol["token"]),
+    )
+
+    assert response.status_code == 403

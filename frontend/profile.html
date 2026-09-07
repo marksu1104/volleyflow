@@ -114,12 +114,17 @@
   document.getElementById("gender-pick").addEventListener("click", async (e) => {
     const btn = e.target.closest("[data-gender]");
     if (!btn) return;
+    const previous = me.gender;
+    me.gender = btn.dataset.gender;  // flip now, confirm after
+    renderProfile();
     try {
       const updated = await postJson(API_BASE, `/players/${me.id}/gender`, { gender: btn.dataset.gender }, "PUT");
       sessionStorage.removeItem("vf_identity");
       me.gender = updated.gender;
       renderProfile();
     } catch (e) {
+      me.gender = previous;
+      renderProfile();
       alert("設定失敗：" + e.message);
     }
   });

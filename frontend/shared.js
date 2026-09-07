@@ -373,6 +373,15 @@ function renderGameDetail(container, season, game, options) {
     return "";
   }
 
+  /** Marks anyone who has never opened the app: they can't record their
+   * own absence or sign themselves up, so somebody has to do it for
+   * them, and that's worth seeing on any list of names. */
+  function guestTag(person) {
+    return person && person.linked === false
+      ? '<span class="guest-tag">訪客</span>'
+      : "";
+  }
+
   function initial(name) {
     return escapeHtml((name || "?").trim().slice(0, 1));
   }
@@ -444,9 +453,9 @@ function renderGameDetail(container, season, game, options) {
   const fullRosterRows = season.members
     .map((m) => {
       if (absentNames.has(m.name)) {
-        return `<div class="roster-row absent"><span>${escapeHtml(m.name)}${genderTag(m.gender)}</span><span class="roster-note">請假</span></div>`;
+        return `<div class="roster-row absent"><span>${escapeHtml(m.name)}${genderTag(m.gender)}${guestTag(m)}</span><span class="roster-note">請假</span></div>`;
       }
-      return `<div class="roster-row present"><span>${escapeHtml(m.name)}${genderTag(m.gender)}</span></div>`;
+      return `<div class="roster-row present"><span>${escapeHtml(m.name)}${genderTag(m.gender)}${guestTag(m)}</span></div>`;
     })
     .join("");
 
