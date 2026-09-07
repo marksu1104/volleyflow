@@ -36,7 +36,7 @@
     <input id="player-name" type="text" placeholder="你的名字（測試用，非 LINE 環境）">
   </div>
 
-  <select id="season-picker" class="season-picker" style="margin-bottom: 14px"></select>
+  <select id="season-picker" class="season-picker" style="margin-bottom: 14px" hidden></select>
   <div id="error"></div>
 
   <div id="join-prompt" class="balance join-prompt" hidden>
@@ -96,6 +96,10 @@
   // doing this inside initIdentity instead would race the pickers and
   // sometimes lose. Stripped from the URL right away so a later reload
   // or club switch (which also reloads) doesn't keep snapping back here.
+  // Said before any request goes out, so the very first paint is "載入中"
+  // rather than a bare page that looks like it failed.
+  showPageLoading(document.getElementById("hero-wrap"));
+
   const requestedClubId = new URLSearchParams(location.search).get("club");
   if (requestedClubId) {
     localStorage.setItem(CLUB_STORAGE_KEY, requestedClubId);
@@ -145,11 +149,13 @@
     document.getElementById("season-picker"),
     "vf_season",
     (id) => {
+      stopLoadingEscalation();
       renderClubChip();
       renderJoinPrompt();
       if (id) loadSeason(id);
       else renderNoSeason();
-    }
+    },
+    (e) => showPageError(document.getElementById("hero-wrap"), e.message)
   );
 
   /** No season to show — either this player is in no club at all, or the
