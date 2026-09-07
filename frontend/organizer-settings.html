@@ -51,55 +51,114 @@
       <p>一季 = 一段時間內的一組場次 + 一筆場地費 + 一份固定成員名單。填完下面幾格，系統會把場地費平均分攤成每人每場的金額，並在開季時就把季費記到每個人的帳上。</p>
     </div>
 
-    <div class="field">
-      <label for="c-cost">場地費總額</label>
-      <input id="c-cost" class="control" type="number" step="1" min="0">
+    <div class="stepper">
+      <span class="step on" data-step="1"><i>1</i>基本</span><span class="step-line"></span>
+      <span class="step" data-step="2"><i>2</i>場次</span><span class="step-line"></span>
+      <span class="step" data-step="3"><i>3</i>成員</span>
     </div>
 
-    <div class="field">
-      <label for="c-dates">場次日期（一行一個，格式 YYYY-MM-DD）</label>
-      <textarea id="c-dates" class="control" placeholder="2026-07-07&#10;2026-07-14&#10;2026-07-21"></textarea>
-    </div>
-
-    <div class="field">
-      <label for="c-members">固定成員名單（一行一個名字）</label>
-      <textarea id="c-members" class="control" placeholder="蘇慬&#10;黃筌揚 Ricky"></textarea>
-      <span class="hint">先不加也可以，之後從「名單」的待加入名單升級即可。</span>
-    </div>
-
-    <div class="field-pair">
+    <!-- 1. 基本 -->
+    <div data-panel="1">
       <div class="field">
-        <label for="c-capacity">人數上限</label>
-        <input id="c-capacity" class="control" type="number" step="1" min="1" value="18">
+        <label for="c-cost">場地費總額</label>
+        <input id="c-cost" class="control" type="number" step="1" min="0" inputmode="numeric" placeholder="整季付給場地的總金額">
       </div>
+
+      <div class="field-pair" style="margin-bottom:13px">
+        <div class="field">
+          <label for="c-capacity">人數上限</label>
+          <input id="c-capacity" class="control" type="number" step="1" min="1" value="18">
+        </div>
+        <div class="field">
+          <label for="c-min-roster">最低人數門檻</label>
+          <input id="c-min-roster" class="control" type="number" step="1" min="0" value="12">
+        </div>
+      </div>
+
+      <div class="field-pair" style="margin-bottom:13px">
+        <div class="field">
+          <label for="c-start-time">開始時間</label>
+          <input id="c-start-time" class="control" type="time">
+        </div>
+        <div class="field">
+          <label for="c-end-time">結束時間</label>
+          <input id="c-end-time" class="control" type="time">
+        </div>
+      </div>
+
       <div class="field">
-        <label for="c-min-roster">最低人數門檻</label>
-        <input id="c-min-roster" class="control" type="number" step="1" min="0" value="12">
+        <label for="c-location">地點</label>
+        <input id="c-location" class="control" type="text" placeholder="例如：啪排郎">
       </div>
-    </div>
 
-    <div class="field-pair">
       <div class="field">
-        <label for="c-start-time">開始時間</label>
-        <input id="c-start-time" class="control" type="time">
+        <label for="c-deadline">請假／報名的更動期限</label>
+        <select id="c-deadline" class="control">
+          <option value="">不限，隨時可以改</option>
+          <option value="1">賽前 1 天截止</option>
+          <option value="2">賽前 2 天截止</option>
+          <option value="3">賽前 3 天截止</option>
+        </select>
       </div>
-      <div class="field">
-        <label for="c-end-time">結束時間</label>
-        <input id="c-end-time" class="control" type="time">
+
+      <button type="button" class="btn btn-primary" data-go="2">下一步：排場次</button>
+    </div>
+
+    <!-- 2. 場次 -->
+    <div data-panel="2" hidden>
+      <div class="gen-box">
+        <div class="gen-row">
+          <div class="field">
+            <label for="g-weekday">每週</label>
+            <select id="g-weekday" class="control">
+              <option value="0">週日</option><option value="1">週一</option>
+              <option value="2" selected>週二</option><option value="3">週三</option>
+              <option value="4">週四</option><option value="5">週五</option>
+              <option value="6">週六</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="g-start">從哪天開始</label>
+            <input id="g-start" class="control" type="date">
+          </div>
+          <div class="field" style="flex:0 1 90px">
+            <label for="g-weeks">週數</label>
+            <input id="g-weeks" class="control" type="number" min="1" max="52" value="13">
+          </div>
+        </div>
+        <button type="button" class="btn btn-quiet" onclick="generateDates()">產生場次</button>
+
+        <div id="date-chips" class="chips"></div>
+        <div id="gen-summary" class="gen-summary"></div>
+      </div>
+      <p class="hint">產生後可以逐一刪掉不打的日期，或用「＋ 新增日期」補上額外的場次。場次數會直接影響每人每場的金額。</p>
+
+      <div class="btn-row" style="margin-top:14px">
+        <button type="button" class="btn btn-quiet" data-go="1">上一步</button>
+        <button type="button" class="btn btn-primary" data-go="3">下一步：挑成員</button>
       </div>
     </div>
 
-    <div class="field">
-      <label for="c-location">地點</label>
-      <input id="c-location" class="control" type="text" placeholder="例如：啪排郎">
-    </div>
+    <!-- 3. 成員 -->
+    <div data-panel="3" hidden>
+      <div class="section-label" style="margin-top:0">從球隊成員挑本季的固定成員</div>
+      <div id="member-picks" class="pick"></div>
 
-    <div class="field">
-      <label for="c-deadline">更動期限（賽前幾天截止，留空表示沒有期限）</label>
-      <input id="c-deadline" class="control" type="number" step="1" min="0" placeholder="例如：1">
-    </div>
+      <div class="or-line" style="margin:14px 0 8px"><span>不在球隊裡的人</span></div>
+      <div class="add-member-row" style="margin:0">
+        <input id="c-extra-name" class="control" type="text" placeholder="直接輸入名字">
+        <button type="button" onclick="addExtraName()">加入</button>
+      </div>
+      <div id="extra-names" class="chips"></div>
 
-    <button type="button" class="save-btn" onclick="createSeason()">建立這一季</button>
+      <div class="section-label">確認</div>
+      <div id="create-preview"></div>
+
+      <div class="btn-row" style="margin-top:14px">
+        <button type="button" class="btn btn-quiet" data-go="2">上一步</button>
+        <button type="button" class="btn btn-primary" onclick="createSeason()">建立這一季</button>
+      </div>
+    </div>
   </div>
 
   <div id="settings-form" class="settings-form">
@@ -241,12 +300,200 @@
     (e) => showPageError(document.getElementById("page-state"), e.message)
   );
 
+  // --- 開新一季 wizard -------------------------------------------------
+  //
+  // Three steps rather than one long form, because the three decisions
+  // are independent and each one's effect on the money is only legible
+  // once the previous is settled: cost -> dates -> members, with 每人每場
+  // recomputed live at each stage. Dates are generated from "every
+  // <weekday>, starting <date>, for <n> weeks" and then edited by
+  // deleting the ones you're not playing — the schedule is regular with
+  // exceptions, so generate-then-prune beats typing 13 dates by hand.
+
+  let wizardDates = [];
+  let extraNames = [];
+  let pickedIds = new Set();
+  let clubRoster = [];
+
+  document.getElementById("create-season-form").addEventListener("click", (e) => {
+    const go = e.target.closest("[data-go]");
+    if (go) showWizardStep(Number(go.dataset.go));
+  });
+
+  function showWizardStep(step) {
+    for (const panel of document.querySelectorAll("[data-panel]")) {
+      panel.hidden = Number(panel.dataset.panel) !== step;
+    }
+    for (const dot of document.querySelectorAll(".step")) {
+      const n = Number(dot.dataset.step);
+      dot.classList.toggle("on", n === step);
+      dot.classList.toggle("done", n < step);
+      dot.querySelector("i").textContent = n < step ? "✓" : String(n);
+    }
+    if (step === 2 && wizardDates.length === 0) {
+      // Default the generator to the next occurrence of the chosen
+      // weekday, so "產生場次" is one tap away from being right.
+      const start = document.getElementById("g-start");
+      if (!start.value) start.value = new Date().toISOString().slice(0, 10);
+    }
+    if (step === 3) loadClubRoster();
+    renderWizard();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function generateDates() {
+    const weekday = Number(document.getElementById("g-weekday").value);
+    const startValue = document.getElementById("g-start").value;
+    const weeks = Number(document.getElementById("g-weeks").value) || 0;
+    if (!startValue || weeks < 1) {
+      alert("請填開始日期和週數");
+      return;
+    }
+    // Walk forward to the first matching weekday on or after the start
+    // date, then step a week at a time.
+    const first = new Date(startValue + "T00:00:00");
+    while (first.getDay() !== weekday) first.setDate(first.getDate() + 1);
+
+    const dates = [];
+    for (let i = 0; i < weeks; i++) {
+      const d = new Date(first);
+      d.setDate(first.getDate() + i * 7);
+      dates.push(dateKey(d));
+    }
+    wizardDates = dates;
+    renderWizard();
+  }
+
+  function removeDate(iso) {
+    wizardDates = wizardDates.filter((d) => d !== iso);
+    renderWizard();
+  }
+
+  function addOneOffDate() {
+    const value = prompt("要新增哪一天？（格式 YYYY-MM-DD）");
+    if (!value) return;
+    const iso = value.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+      alert("日期格式要像 2026-07-07");
+      return;
+    }
+    if (!wizardDates.includes(iso)) wizardDates.push(iso);
+    wizardDates.sort();
+    renderWizard();
+  }
+
+  function addExtraName() {
+    const input = document.getElementById("c-extra-name");
+    const name = input.value.trim();
+    if (!name) return;
+    if (!extraNames.includes(name)) extraNames.push(name);
+    input.value = "";
+    renderWizard();
+  }
+
+  function removeExtraName(name) {
+    extraNames = extraNames.filter((n) => n !== name);
+    renderWizard();
+  }
+
+  async function loadClubRoster() {
+    if (clubRoster.length) return;
+    clubRoster = await fetchClubMembers(API_BASE, currentClubId());
+    // The organizer is nearly always playing too — pre-check everyone
+    // so the common case is "confirm", not "tick 18 boxes".
+    pickedIds = new Set(clubRoster.map((m) => m.id));
+    renderWizard();
+  }
+
+  function selectedNames() {
+    return clubRoster.filter((m) => pickedIds.has(m.id)).map((m) => m.name).concat(extraNames);
+  }
+
+  function renderWizard() {
+    // step 2: date chips + running total
+    document.getElementById("date-chips").innerHTML =
+      wizardDates
+        .map(
+          (d) => `<span class="chip">${describeDate(d).label}<button type="button" aria-label="移除" onclick="removeDate('${d}')">✕</button></span>`
+        )
+        .join("") + '<span class="chip add" onclick="addOneOffDate()">＋ 新增日期</span>';
+
+    const cost = Number(document.getElementById("c-cost").value) || 0;
+    const memberCount = selectedNames().length;
+    const share = previewSharePerGame(cost, wizardDates.length, memberCount);
+
+    const summary = document.getElementById("gen-summary");
+    if (wizardDates.length === 0) {
+      summary.innerHTML = '<span>還沒有場次</span>';
+    } else {
+      const span = `${describeDate(wizardDates[0]).label} – ${describeDate(wizardDates[wizardDates.length - 1]).label}`;
+      summary.innerHTML =
+        `<b>${wizardDates.length} 場</b><span>${span}</span>` +
+        (share ? `<span>· 每人每場 $${share}</span>` : "<span>· 挑完成員才算得出金額</span>");
+    }
+
+    // step 3: member picks, extra names, and what each person will owe
+    document.getElementById("member-picks").innerHTML = clubRoster.length
+      ? clubRoster
+          .map(
+            (m) => `
+              <div class="pick-row${pickedIds.has(m.id) ? " on" : ""}" onclick="togglePick(${m.id})">
+                <i class="box">✓</i>
+                <span class="avatar sm">${escapeHtml((m.name || "?").slice(0, 1))}</span>
+                <span class="pk-name">${escapeHtml(m.name)}</span>
+                ${m.role === "organizer" ? '<span class="role-tag">主揪</span>' : ""}
+              </div>`
+          )
+          .join("")
+      : '<div class="empty">球隊裡還沒有其他人，可以在下面直接輸入名字</div>';
+
+    document.getElementById("extra-names").innerHTML = extraNames
+      .map(
+        (n) => `<span class="chip">${escapeHtml(n)}<button type="button" aria-label="移除" onclick="removeExtraName('${n.replace(/'/g, "\\'")}')">✕</button></span>`
+      )
+      .join("");
+
+    const preview = document.getElementById("create-preview");
+    if (!cost || !wizardDates.length || !memberCount) {
+      preview.innerHTML = emptyStateHtml(
+        "還差一點",
+        `目前：場地費 $${cost || 0}、${wizardDates.length} 場、${memberCount} 位成員。三個都填好才算得出每個人要收多少。`
+      );
+      return;
+    }
+    const seasonFee = share * wizardDates.length;
+    preview.innerHTML = `
+      <div class="balance" style="margin-bottom:8px">
+        <span class="balance-label">每人季費</span>
+        <span class="balance-value">$${seasonFee}</span>
+      </div>
+      <p class="hint" style="margin-top:0">
+        $${cost} ÷ ${wizardDates.length} 場 ÷ ${memberCount} 人 = 每人每場 $${share}，整季 $${seasonFee}。
+        建立後這筆金額會直接記到 ${memberCount} 個人的帳上，可以在「帳務 · 季費」收款。
+        之後加人、退人或改場地費，系統會自動補一筆差額，不會動到原本的紀錄。
+      </p>
+    `;
+  }
+
+  function togglePick(id) {
+    if (pickedIds.has(id)) pickedIds.delete(id);
+    else pickedIds.add(id);
+    renderWizard();
+  }
+
+  // Cost lives on step 1 but drives the numbers shown on 2 and 3.
+  document.getElementById("c-cost").addEventListener("input", renderWizard);
+
   async function createSeason() {
-    const gameDates = document.getElementById("c-dates").value.split("\n").map((d) => d.trim()).filter(Boolean);
-    const memberNames = document.getElementById("c-members").value.split("\n").map((n) => n.trim()).filter(Boolean);
+    const gameDates = wizardDates;
+    const memberNames = selectedNames();
 
     if (gameDates.length === 0) {
-      alert("至少要輸入一個場次日期");
+      alert("至少要有一個場次日期");
+      return;
+    }
+    if (memberNames.length === 0) {
+      alert("至少要有一位固定成員");
       return;
     }
 

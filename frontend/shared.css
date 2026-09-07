@@ -465,6 +465,42 @@ textarea.control { resize: vertical; min-height: 90px; }
 .empty-state .btn { max-width: 240px; margin-left: auto; margin-right: auto; }
 a.btn { display: block; text-decoration: none; text-align: center; }
 
+/* 開新一季 wizard: a stepper, a date generator, and the chips it makes */
+.stepper { display: flex; align-items: center; gap: 6px; margin-bottom: 18px; }
+.step { display: flex; align-items: center; gap: 6px; font-size: .78rem; color: var(--ink-faint); }
+.step i {
+  width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--rule-strong);
+  display: grid; place-items: center; font-size: .68rem; font-style: normal; font-weight: 700;
+}
+.step.on { color: var(--ink); font-weight: 700; }
+.step.on i { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+.step.done i { background: var(--good-soft); color: var(--good); border-color: transparent; }
+.step-line { flex: 1; height: 1px; background: var(--rule); }
+
+.gen-box { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 13px; }
+.gen-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.gen-row .field { flex: 1 1 110px; min-width: 0; margin-bottom: 0; }
+.gen-summary { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.gen-summary b { font-family: var(--font-num); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.gen-summary span { font-size: .78rem; color: var(--ink-soft); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; background: var(--surface-2);
+  border-radius: 8px; padding: 5px 8px 5px 10px; font-size: .8rem; font-variant-numeric: tabular-nums;
+}
+.chip button { border: none; background: none; color: inherit; cursor: pointer; font-size: .82rem; opacity: .55; padding: 0; line-height: 1; }
+.chip button:hover { opacity: 1; }
+.chip.add { background: none; border: 1px dashed var(--rule-strong); color: var(--ink-soft); cursor: pointer; padding: 5px 10px; }
+
+/* a tap-to-toggle checkbox row, for picking this season's members */
+.box {
+  width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--rule-strong);
+  display: grid; place-items: center; flex: none; font-size: .7rem; color: transparent;
+  background: var(--surface); font-style: normal;
+}
+.pick-row.on .box { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+
 /* inner segmented control — 季費 / 當天臨打 / 季末結算 within the 帳務 page */
 .seg { display: flex; gap: 3px; background: var(--surface-2); padding: 3px; border-radius: 9px; margin-bottom: 14px; }
 .seg span { flex: 1; text-align: center; font-size: .8rem; font-weight: 600; padding: 7px 4px; border-radius: 7px; color: var(--ink-soft); cursor: pointer; }
