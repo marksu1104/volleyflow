@@ -336,6 +336,16 @@ class LedgerEntryOut(BaseModel):
     note: str | None
 
 
+class ProblemReport(BaseModel):
+    message: str
+    """What went wrong, in the reporter's own words."""
+    page: str | None = None
+    """Which screen they were on. Sent by the page rather than typed,
+    because "it broke" is only actionable with the where."""
+    user_agent: str | None = None
+    club_id: int | None = None
+
+
 class PlayerBalanceOut(BaseModel):
     """One player's money in one club, summed three ways at once.
 

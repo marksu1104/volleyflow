@@ -1,5 +1,6 @@
 """API routes."""
 
+import os
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -51,6 +52,7 @@ from volleyflow.api.schemas import (
     PlayerIdentifyOut,
     PlayerLedgerOut,
     PlayerLink,
+    ProblemReport,
     SeasonCreate,
     SeasonDetailOut,
     SeasonOut,
@@ -73,6 +75,7 @@ from volleyflow.db.models import (
     WaitlistEntryRow,
 )
 from volleyflow.ledger import EntryType, balance
+from volleyflow.notify.line_client import push_to_user
 from volleyflow.pricing import share_per_game
 from volleyflow.schedule import GameStatus
 from volleyflow.settlement import MemberSettlement, covered_absences, settle_member
@@ -1996,6 +1999,65 @@ def settle_season(
         settled_at=now,
         members=[_member_settlement_out(ms) for ms in settlements],
     )
+
+
+@router.post("/reports", status_code=204)
+def report_a_problem(
+    payload: ProblemReport,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> None:
+    """Sends a problem report straight to the developer over LINE.
+
+    Delivered rather than stored: an unread row in a table nobody has a
+    screen for is the same as no report at all, and this project has no
+    admin surface to grow one on. LINE is where the developer already
+    is. The consequence is deliberate — if the push fails (LINE's free
+    monthly quota is shared with game reminders), this fails loudly and
+    the reporter is told, instead of the report quietly disappearing.
+
+    Most of what makes a report actionable isn't the sentence someone
+    types, it's who and where — so the caller's identity, screen and
+    browser are attached here rather than asked for.
+    """
+    text = (payload.message or "").strip()
+    if not text:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing to report")
+
+    club_name = ""
+    if payload.club_id is not None:
+        club = db.get(ClubRow, payload.club_id)
+        if club is not None:
+            club_name = club.name
+
+    lines = [
+        "🐞 VolleyFlow 問題回報",
+        "",
+        text,
+        "",
+        f"回報者：{current_player.name}（#{current_player.id}）",
+    ]
+    if club_name:
+        lines.append(f"球隊：{club_name}")
+    if payload.page:
+        lines.append(f"畫面：{payload.page}")
+    if payload.user_agent:
+        lines.append(f"裝置：{payload.user_agent[:180]}")
+    lines.append(f"時間：{_now().isoformat(timespec='seconds')} UTC")
+
+    developer_id = os.environ.get("LINE_ORGANIZER_USER_ID")
+    if not developer_id:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Problem reporting isn't configured yet",
+        )
+    try:
+        push_to_user(developer_id, "\n".join(lines))
+    except Exception as e:  # noqa: BLE001 - any failure means undelivered
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Couldn't send the report — please tell the organizer directly",
+        ) from e
 
 
 @router.post("/players/identify", response_model=PlayerIdentifyOut)
