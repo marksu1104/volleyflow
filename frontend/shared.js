@@ -559,6 +559,21 @@ async function postJson(apiBase, path, body, method) {
   return data;
 }
 
+/** The "there's nothing here yet, and here's what to do about it" block.
+ * Every page that can legitimately have no data (a club with no season,
+ * a player in no club) renders one of these instead of leaving its
+ * styled-but-empty cards on screen, which reads as a broken page rather
+ * than an empty one. `action` is optional: {label, href}. */
+function emptyStateHtml(title, body, action) {
+  return `
+    <div class="empty-state">
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(body)}</p>
+      ${action ? `<a class="btn btn-primary" href="${action.href}">${escapeHtml(action.label)}</a>` : ""}
+    </div>
+  `;
+}
+
 /** Everyone in a club (fixed member or not) — the pool the 指定代打
  * picker offers before falling back to typing a name. Public endpoint,
  * no auth needed. Returns [] rather than throwing on failure, since a

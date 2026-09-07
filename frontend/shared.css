@@ -4,6 +4,13 @@
    them, so member.html, the organizer pages, and profile.html can all
    draw from the same vocabulary. */
 :root {
+  /* Declares that this page renders correctly in both schemes. Without
+     it, an embedded webview (LINE's LIFF browser among them) can stay on
+     light regardless of the device setting, and form controls keep their
+     light-mode chrome — the same page in a normal browser follows the
+     system fine, which is exactly the asymmetry this fixes. */
+  color-scheme: light dark;
+
   --ground: #eef1f5;
   --surface: #ffffff;
   --surface-2: #f6f8fa;
@@ -348,8 +355,14 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 }
 .control:disabled { background: var(--surface-2); color: var(--ink-soft); }
 textarea.control { resize: vertical; min-height: 90px; }
-.field-pair { display: flex; gap: 10px; }
-.field-pair .field { flex: 1; min-width: 0; margin-bottom: 0; }
+/* iOS gives date/time inputs an intrinsic width wide enough to push a
+   two-up row past the screen edge — width:100% alone doesn't hold them
+   back, the appearance reset plus min-width:0 does. */
+.control[type="time"], .control[type="date"] { -webkit-appearance: none; appearance: none; min-width: 0; }
+/* flex-basis over flex:1 so a pair that genuinely can't fit side by side
+   wraps to two rows instead of overflowing. */
+.field-pair { display: flex; gap: 10px; flex-wrap: wrap; }
+.field-pair .field { flex: 1 1 130px; min-width: 0; margin-bottom: 0; }
 .seg-pick { display: flex; gap: 6px; }
 .seg-pick button {
   flex: 1; padding: 9px; border-radius: 9px; border: 1px solid var(--rule); background: var(--surface);
@@ -421,6 +434,19 @@ textarea.control { resize: vertical; min-height: 90px; }
   border-radius: 9px; background: none; color: var(--ink-soft); font-size: .8rem; cursor: pointer;
 }
 .empty { color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center; }
+
+/* What a page shows before there's anything to show. Deliberately not a
+   bare "沒有資料" line: an organizer opening a brand-new club needs to be
+   told what the next step is and taken there, not left staring at empty
+   cards wondering whether the app is broken. */
+.empty-state {
+  background: var(--surface); border: 1px dashed var(--rule-strong); border-radius: 14px;
+  padding: 26px 20px; text-align: center;
+}
+.empty-state h3 { margin: 0 0 6px; font-size: .95rem; font-weight: 700; }
+.empty-state p { margin: 0; font-size: .82rem; color: var(--ink-soft); line-height: 1.65; }
+.empty-state .btn { max-width: 240px; margin-left: auto; margin-right: auto; }
+a.btn { display: block; text-decoration: none; text-align: center; }
 
 /* inner segmented control — 季費 / 當天臨打 / 季末結算 within the 帳務 page */
 .seg { display: flex; gap: 3px; background: var(--surface-2); padding: 3px; border-radius: 9px; margin-bottom: 14px; }
