@@ -111,12 +111,13 @@
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
     try {
-      const res = await fetch(`${API_BASE}/seasons/${seasonId}`);
-      if (!res.ok) {
-        errorEl.textContent = "找不到這一季";
-        return;
-      }
-      const season = await res.json();
+      // Cached copy first, network second — see getJsonSWR.
+      await getJsonSWR(`${API_BASE}/seasons/${seasonId}`, (season) => render(season));
+    } catch (e) {
+      errorEl.textContent = "連不上伺服器：" + e.message;
+    }
+
+    function render(season) {
       const isNewSeason = !currentSeason || currentSeason.id !== season.id;
       currentSeason = season;
       // Keep whatever game was selected across a reload — only reset to
@@ -126,7 +127,6 @@
         selectedGameId = upcoming ? upcoming.id : null;
       }
 
-      clubMembers = await fetchClubMembers(API_BASE, currentClubId());
       document.getElementById("season-picker").hidden = false;
       document.getElementById("cal-label").hidden = false;
       document.getElementById("month-cal").hidden = false;
@@ -134,8 +134,12 @@
       renderHero(season);
       renderMonthCalendar(document.getElementById("month-cal"), season.games, selectGame);
       renderSelectedGameDetail();
-    } catch (e) {
-      errorEl.textContent = "連不上伺服器：" + e.message;
+      // Only the substitute picker needs the club roster, so it loads
+      // alongside the paint instead of delaying it.
+      fetchClubMembers(API_BASE, currentClubId()).then((m) => {
+        clubMembers = m;
+        renderSelectedGameDetail();
+      });
     }
   }
 
