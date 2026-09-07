@@ -178,8 +178,19 @@ async function initClubAndSeasonPickers(
   }
 
   async function loadClubs() {
-  const res = await fetch(`${apiBase}/clubs`);
-  const clubs = res.ok ? await res.json() : [];
+    // applyClubs kicks off the season fetch, and getJsonSWR may call it
+    // twice (cache then network) — its rejection has to be caught here
+    // rather than escaping as an unhandled rejection, which is exactly
+    // the silent-blank-page failure this whole path is meant to prevent.
+    await getJsonSWR(`${apiBase}/clubs`, (clubs, meta) => {
+      applyClubs(clubs, meta).catch((e) => {
+        console.error("Could not load seasons:", e);
+        if (onError) onError(e);
+      });
+    });
+  }
+
+  async function applyClubs(clubs, meta) {
 
   if (clubs.length === 0) {
     clubEl.innerHTML = '<option value="">尚無球隊</option>';
@@ -188,9 +199,12 @@ async function initClubAndSeasonPickers(
     // id that no longer exists — which reads to the rest of the app as
     // "a club is selected, it just has no season", the wrong empty state
     // entirely. Hits anyone whose club was deleted, and anyone testing a
-    // wiped database.
-    localStorage.removeItem(CLUB_STORAGE_KEY);
-    localStorage.removeItem(seasonStorageKey);
+    // wiped database. Only ever on the network's word: a cached copy
+    // that happens to be empty is a guess, and forgetting is not undoable.
+    if (!meta || meta.fresh) {
+      localStorage.removeItem(CLUB_STORAGE_KEY);
+      localStorage.removeItem(seasonStorageKey);
+    }
     onSeasonChange(null);
     return;
   }
@@ -206,9 +220,12 @@ async function initClubAndSeasonPickers(
   localStorage.setItem(CLUB_STORAGE_KEY, clubEl.value);
 
   async function loadSeasons() {
-    const seasonRes = await fetch(`${apiBase}/clubs/${clubEl.value}/seasons`);
-    const seasons = seasonRes.ok ? await seasonRes.json() : [];
+    await getJsonSWR(`${apiBase}/clubs/${clubEl.value}/seasons`, (seasons) =>
+      applySeasons(seasons)
+    );
+  }
 
+  function applySeasons(seasons) {
     if (seasons.length === 0) {
       seasonEl.innerHTML = '<option value="">尚無任何季別</option>';
       onSeasonChange(null);
@@ -558,12 +575,33 @@ async function initLiffIdentity(apiBase, liffId) {
       liff.login();
       return null; // page reloads after LINE login redirects back
     }
+    // Resolved once per LIFF session rather than on every page load:
+    // navigating between the four organizer pages is a full document
+    // load each time, and this is a whole network round trip before
+    // anything else can start. The ID token itself still comes fresh
+    // from liff.getIDToken() on every request (see authHeader) — only
+    // the "who is this" lookup is reused. Cleared by profile.html when
+    // the player renames themselves.
+    const cached = sessionStorage.getItem("vf_identity");
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch (e) {
+        sessionStorage.removeItem("vf_identity");
+      }
+    }
     const profile = await liff.getProfile();
-    return await postJson(apiBase, "/players/identify", {
+    const identified = await postJson(apiBase, "/players/identify", {
       id_token: liff.getIDToken(),
       display_name: profile.displayName,
       picture_url: profile.pictureUrl,
     });
+    try {
+      sessionStorage.setItem("vf_identity", JSON.stringify(identified));
+    } catch (e) {
+      // Private mode — just means we identify again next page.
+    }
+    return identified;
   } catch (e) {
     console.warn("LIFF/identify unavailable:", e);
     return null;
@@ -578,6 +616,11 @@ async function postJson(apiBase, path, body, method) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || res.statusText);
+  // Anything that writes invalidates every cached read: taking leave
+  // changes the season detail, adding a member changes the season list,
+  // creating a club changes the club list. Dropping the lot is cheap
+  // (a handful of small keys) and can't get the invalidation wrong.
+  clearResponseCache();
   return data;
 }
 
@@ -595,6 +638,85 @@ async function postJson(apiBase, path, body, method) {
 function previewSharePerGame(totalVenueCost, totalGames, memberCount) {
   if (!(totalGames > 0) || !(memberCount > 0)) return null;
   return Math.ceil(Number(totalVenueCost) / (totalGames * memberCount));
+}
+
+// --- stale-while-revalidate -------------------------------------------
+//
+// Every page transition re-runs the whole chain (identify -> clubs ->
+// seasons -> season detail), and the last three are strictly sequential
+// because each needs the previous one's id. That's a visible pause on
+// every tap. So: paint from whatever this device saw last time, then
+// correct it when the network answers. Only structural data is cached —
+// money is always fetched fresh, because a stale balance is worse than a
+// slow one.
+
+const CACHE_PREFIX = "vf_cache:";
+
+function readCache(url) {
+  try {
+    const raw = localStorage.getItem(CACHE_PREFIX + url);
+    return raw === null ? null : JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function writeCache(url, data) {
+  try {
+    localStorage.setItem(CACHE_PREFIX + url, JSON.stringify(data));
+  } catch (e) {
+    // Quota or private mode — caching is an optimisation, never required.
+  }
+}
+
+/**
+ * GETs JSON, calling `onData(data, { fresh })` up to twice: once
+ * immediately with the cached copy if there is one (`fresh: false`),
+ * then again with the network's copy if it differs (`fresh: true`).
+ * Renderers must therefore be idempotent — they all are, since each one
+ * rebuilds its container from scratch.
+ *
+ * The `fresh` flag matters for anything irreversible. A cached copy is a
+ * guess about the world; only the network's answer is authoritative, so
+ * "there are no clubs, forget the remembered one" must key off `fresh`,
+ * not off a stale copy that happened to be empty.
+ *
+ * If the network fails but a cached copy was served, the failure is
+ * swallowed: the page is already showing something usable. With no cache
+ * to fall back on, it throws, and the caller shows its error state.
+ */
+async function getJsonSWR(url, onData, options) {
+  const cached = readCache(url);
+  const hadCache = cached !== null;
+  if (hadCache) onData(cached, { fresh: false });
+
+  try {
+    const res = await fetch(url, options);
+    if (!res.ok) throw new Error(res.statusText);
+    const fresh = await res.json();
+    const changed = JSON.stringify(fresh) !== JSON.stringify(cached);
+    writeCache(url, fresh);
+    if (!hadCache || changed) onData(fresh, { fresh: true });
+    return fresh;
+  } catch (e) {
+    if (hadCache) {
+      console.warn("Revalidation failed, keeping cached copy:", url, e);
+      return cached;
+    }
+    throw e;
+  }
+}
+
+/** Drops every cached response. Called after anything that writes, so
+ * the next page doesn't paint from a copy we just invalidated. */
+function clearResponseCache() {
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(CACHE_PREFIX)) localStorage.removeItem(key);
+    }
+  } catch (e) {
+    // Nothing to do — a stale cache self-corrects on the next revalidate.
+  }
 }
 
 let _loadingEscalation = null;
