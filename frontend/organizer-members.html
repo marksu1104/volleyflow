@@ -36,6 +36,10 @@
     border: none; background: var(--accent-soft); color: var(--accent); font-size: .76rem;
     font-weight: 700; padding: 6px 11px; border-radius: 8px; cursor: pointer; white-space: nowrap;
   }
+  .waiting-tag {
+    font-size: .68rem; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+    background: var(--warn-soft); color: var(--warn); margin-left: 6px; white-space: nowrap;
+  }
   .guest-tag {
     font-size: .68rem; font-weight: 700; padding: 2px 7px; border-radius: 999px;
     background: var(--surface-2); color: var(--ink-faint); margin-left: 6px; white-space: nowrap;
@@ -88,14 +92,31 @@
 
   <div id="no-season"></div>
 
+  <div id="guest-section">
+    <div class="section-label">新增訪客</div>
+    <p class="hint" style="margin-top:0">
+      沒有 LINE、或不想自己操作的人。他們沒辦法自己請假或報名，都要由你代為處理。
+      加進來之後一樣算本季固定成員，季費照算。
+    </p>
+    <div class="add-member-row">
+      <input id="new-member-name" class="control" type="text" placeholder="訪客姓名">
+      <select id="new-member-gender" class="control" style="flex:0 0 84px">
+        <option value="">性別</option>
+        <option value="male">男</option>
+        <option value="female">女</option>
+      </select>
+      <button type="button" onclick="addGuest()">新增</button>
+    </div>
+  </div>
+
   <div id="roster-section">
     <div class="section-label">本季固定成員</div>
     <p id="warn-note" class="hint" style="color: var(--warn)">
       新增或移除成員會重新計算整季每人每場的金額，包含已經打過的場次。
     </p>
     <p class="hint">
-      固定成員從上面的「球隊成員」挑，他們都是用 LINE 開過連結的人，可以自己請假。
-      臨時來打的人不必加進這裡，在該場次直接新增臨打即可。
+      用 LINE 加入過的人從上面的「球隊成員」挑，他們可以自己請假；沒有帳號的人用上面的「新增訪客」。
+      只來單場的人不必加進這裡，在該場次直接新增臨打即可。
     </p>
 
     <div id="member-list" class="member-list"></div>
@@ -147,6 +168,7 @@
       // and wait in the pool), so only the season roster half is swapped
       // out for the empty state here.
       document.getElementById("roster-section").hidden = !id;
+      document.getElementById("guest-section").hidden = !id;
       document.getElementById("season-picker").hidden = !id;
       document.getElementById("no-season").innerHTML = id
         ? ""
@@ -225,7 +247,7 @@
               ${p.avatar_url
                 ? `<img class="avatar sm" src="${escapeHtml(p.avatar_url)}" alt="">`
                 : `<span class="avatar sm">${escapeHtml((p.name || "?").slice(0, 1))}</span>`}
-              <span>${escapeHtml(p.name)}${genderLabel(p.gender)}${guestTag(p)}</span>
+              <span>${escapeHtml(p.name)}${genderLabel(p.gender)}${guestTag(p)}${waitingTag(p)}</span>
             </span>
             <button type="button" class="pool-promote" onclick="promoteFromPool(${p.id})">加入本季</button>
             ${p.linked ? `<button type="button" class="link-btn" onclick="linkToRosterEntry(${p.id})">已在名單上</button>` : ""}
@@ -264,6 +286,15 @@
    * take their own leave, sign themselves up, or set their own gender —
    * the organizer has to do all of it for them. Worth saying on the row,
    * because otherwise it looks like they're just not participating. */
+  /** Someone who said "I'm a fixed member" and is waiting on you. They
+   * can't sign up or take leave until you put them on the roster, so an
+   * unanswered request leaves a real person stuck. */
+  function waitingTag(m) {
+    return m.wants_fixed_membership === true
+      ? '<span class="waiting-tag">要求加入本季</span>'
+      : "";
+  }
+
   function guestTag(m) {
     return m.linked ? "" : '<span class="guest-tag">訪客</span>';
   }
@@ -355,6 +386,7 @@
   function renderMembers(season) {
     const settled = season.settled_at !== null;
     document.getElementById("settled-note").hidden = !settled;
+    document.getElementById("guest-section").hidden = settled;
     document.getElementById("warn-note").hidden = settled;
 
     const list = document.getElementById("member-list");
@@ -377,6 +409,27 @@
       .join("");
   }
 
+
+  async function addGuest() {
+    const input = document.getElementById("new-member-name");
+    const genderSelect = document.getElementById("new-member-gender");
+    const name = input.value.trim();
+    if (!name) return;
+    if (!confirm(`新增「${name}」會重新計算整季每人每場的金額，包含已經打過的場次。要繼續嗎？`)) {
+      return;
+    }
+    try {
+      await postJson(API_BASE, `/seasons/${currentSeason.id}/members`, {
+        player_name: name,
+        gender: genderSelect.value || null,
+      });
+      input.value = "";
+      genderSelect.value = "";
+      loadMembers(currentSeason.id);
+    } catch (e) {
+      alert("新增失敗：" + e.message);
+    }
+  }
 
   async function removeMember(playerId) {
     const member = currentSeason.members.find((m) => m.id === playerId);
