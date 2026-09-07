@@ -5,28 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VolleyFlow 主揪儀表板</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
 <link rel="stylesheet" href="shared.css">
-<style>
-  .season-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-  .pill {
-    background: var(--surface); border: 1px solid var(--rule); border-radius: 20px;
-    padding: 5px 12px; font-size: .78rem; color: var(--ink-soft);
-  }
-  .pill strong { color: var(--ink); font-weight: 600; }
-  .pill.settled { background: var(--good-soft); color: var(--good); border-color: transparent; }
-  .empty { color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center; }
-</style>
 </head>
 <body>
 <div class="wrap wide">
-  <h1>主揪儀表板</h1>
-  <p class="sub">出席狀況一頁看完，帳務與成員在上面分頁</p>
+  <div class="app-top">
+    <div>
+      <h1 style="margin-bottom:2px">主揪儀表板</h1>
+      <p class="sub" style="margin-bottom:0">出席狀況一頁看完，帳務與成員在上面分頁</p>
+    </div>
+    <button type="button" class="avatar" id="avatar-btn" title="個人資料">?</button>
+  </div>
   <div id="identity" class="identity"></div>
 
   <nav class="org-nav">
     <a href="organizer.html" class="org-nav-link active">總覽</a>
-    <a href="organizer-ledger.html" class="org-nav-link">帳務管理</a>
-    <a href="organizer-members.html" class="org-nav-link">成員管理</a>
+    <a href="organizer-members.html" class="org-nav-link">名單</a>
+    <a href="organizer-ledger.html" class="org-nav-link">帳務</a>
     <a href="organizer-settings.html" class="org-nav-link">設定</a>
   </nav>
 
@@ -35,12 +31,9 @@
   <div id="error"></div>
   <div id="season-meta" class="season-meta"></div>
 
-  <div id="glance" class="glance" style="display:none">
-    <div class="glance-label">下一場</div>
-    <div id="glance-main" class="glance-main"></div>
-    <div id="glance-sub" class="glance-sub"></div>
-  </div>
+  <div id="hero-wrap" style="margin-top: 14px"></div>
 
+  <div class="section-label">本季場次</div>
   <div id="month-cal" class="mcal"></div>
 </div>
 
@@ -57,6 +50,8 @@
   const LIFF_ID = "2011156233-6CouG6VI";
   let currentSeason = null;
   let selectedGameId = null;
+  let clubMembers = [];
+  let myName = "";
 
   // Every organizer-only action here (settle, edit season settings,
   // manage members) is enforced server-side against this identity —
@@ -65,10 +60,17 @@
   (async function initIdentity() {
     const identityEl = document.getElementById("identity");
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
-    identityEl.textContent = identified
-      ? `已用 LINE 身分登入：${identified.name}`
-      : "（非 LINE 環境，僅能瀏覽公開資訊）";
+    if (identified) {
+      myName = identified.name;
+      document.getElementById("avatar-btn").textContent = identified.name.slice(0, 1);
+      identityEl.textContent = `已用 LINE 身分登入：${identified.name}`;
+    } else {
+      identityEl.textContent = "（非 LINE 環境，僅能瀏覽公開資訊）";
+    }
   })();
+  document.getElementById("avatar-btn").addEventListener("click", () => {
+    location.href = "profile.html";
+  });
 
   initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
     if (id) loadDashboard(id);
@@ -93,8 +95,9 @@
         selectedGameId = upcoming ? upcoming.id : null;
       }
 
+      clubMembers = await fetchClubMembers(API_BASE, currentClubId());
       renderMeta(season);
-      renderGlance(season);
+      renderHero(season);
       renderMonthCalendar(document.getElementById("month-cal"), season.games, selectGame);
       renderSelectedGameDetail();
     } catch (e) {
@@ -106,14 +109,13 @@
     const el = document.getElementById("season-meta");
     const settled = season.settled_at !== null;
     const timePill = season.game_start_time && season.game_end_time
-      ? `<span class="pill">球局時間 <strong>${season.game_start_time.slice(0, 5)}-${season.game_end_time.slice(0, 5)}</strong></span>`
+      ? `<span class="pill">球局時間 <strong>${escapeHtml(season.game_start_time.slice(0, 5))}-${escapeHtml(season.game_end_time.slice(0, 5))}</strong></span>`
       : "";
     const locationPill = season.location
-      ? `<span class="pill">地點 <strong>${season.location}</strong></span>`
+      ? `<span class="pill">地點 <strong>${escapeHtml(season.location)}</strong></span>`
       : "";
     el.innerHTML = `
       <span class="pill">場地費 <strong>$${season.total_venue_cost}</strong></span>
-      <span class="pill">人數上限 <strong>${season.capacity}</strong></span>
       <span class="pill">最低人數門檻 <strong>${season.minimum_roster}</strong></span>
       ${timePill}
       ${locationPill}
@@ -121,17 +123,16 @@
     `;
   }
 
-  function renderGlance(season) {
-    const box = document.getElementById("glance");
+  function renderHero(season) {
+    const wrap = document.getElementById("hero-wrap");
     const upcoming = season.games.find((g) => !describeDate(g.date).isPast) || season.games[season.games.length - 1];
-    if (!upcoming) { box.style.display = "none"; return; }
-    const info = describeDate(upcoming.date);
-    document.getElementById("glance-main").textContent = `${info.label}${info.relative ? "・" + info.relative : ""}`;
+    if (!upcoming) { wrap.innerHTML = '<div class="empty">這一季還沒有場次</div>'; return; }
     const expected = expectedAttendance(season, upcoming);
-    document.getElementById("glance-sub").textContent =
-      `預計出席 ${expected} 人${upcoming.waitlist_entries.length ? `・候補 ${upcoming.waitlist_entries.length} 人` : ""}` +
-      (expected < season.minimum_roster ? "・低於人數門檻" : "");
-    box.style.display = "block";
+    const shortPill = expected < season.minimum_roster
+      ? `<span class="meta-pill" style="color:var(--warn)">低於最低門檻 <strong>${season.minimum_roster}</strong></span>`
+      : `<span class="meta-pill">最低門檻 <strong>${season.minimum_roster}</strong> 人</span>`;
+    wrap.innerHTML = renderGameHero(season, upcoming, { metaPills: [shortPill] });
+    wrap.onclick = () => selectGame(upcoming.id);
   }
 
   function selectGame(gameId) {
@@ -152,6 +153,8 @@
       : `<div class="gdetail-mystatus absent">${statusLabel(game.status)}</div>`;
     renderGameDetail(el, currentSeason, game, {
       extraHtml: statusHtml,
+      clubMembers,
+      viewerName: myName,
       onAssignSubstitute: (absenceId, name, gender) => assignSubstitute(absenceId, name, gender),
       onCancelSubstitute: (dropInId, btn) => cancelSubstitute(dropInId, btn),
       // No canAssignSubstitute restriction — the organizer can arrange

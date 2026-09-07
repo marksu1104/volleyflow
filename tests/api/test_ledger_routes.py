@@ -2,7 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-from tests.api.factories import create_club, start_season
+from tests.api.factories import create_club, identify, start_season
 
 
 def test_sign_up_charges_the_drop_in_fee(client: TestClient) -> None:
@@ -158,10 +158,13 @@ def test_ledger_for_an_unknown_player_returns_404(client: TestClient) -> None:
 
 
 def test_ledger_balance_is_zero_with_no_entries(client: TestClient) -> None:
-    season = start_season(client, member_names=["Alice"])
-    alice_id = season["member_ids"][0]
+    # Carol is never added to a season, so nothing has ever charged or
+    # credited her — unlike a season member, who is charged their season
+    # fee the moment the season starts (see test_season_fee_ledger.py).
+    club = create_club(client)
+    carol = identify(client, "Carol")
 
-    ledger = client.get(f"/clubs/{season['club_id']}/players/{alice_id}/ledger").json()
+    ledger = client.get(f"/clubs/{club['id']}/players/{carol['id']}/ledger").json()
 
     assert ledger["balance"] == "0"
     assert ledger["entries"] == []

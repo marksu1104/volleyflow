@@ -64,9 +64,10 @@ the money, never the person.
 ### 2.4 Billing — the core of the project; get this wrong and the project has no point
 
 - A member's season fee is the total venue cost split evenly across members.
+- A member's season fee is charged to their `Ledger` when they become a fixed member of a season with games already scheduled — before the season starts, matching how the organizer actually collects it — not at season end. If the venue cost, the roster, or a game's cancelled-and-refunded status changes afterward, every current member's charge is corrected with an adjustment entry, never by editing the original one (see `docs/billing-rules.md` "Ledger").
 - A member's `Absence` is refunded one game's share **only if a `DropIn` actually covers it**.
-- A `DropIn` pays the same per-game share, collected by the organizer.
-- At season end, `Settlement` computes what each person is owed or still owes.
+- A `DropIn` pays the same per-game share, collected by the organizer on the day, in person.
+- At season end, `Settlement` computes each member's absence refund and locks the season — the season fee itself is already on the ledger by then.
 - A refund can be settled two ways: **cash**, or **carried into next season's balance** — this is why `Ledger` must span seasons.
 - Payments and refunds are marked received/paid **manually by the organizer**. No payment gateway integration.
 - All amounts round up to whole dollars; the rounding surplus accumulates as `surplus`, spent at the organizer's discretion.

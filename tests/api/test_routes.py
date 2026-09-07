@@ -344,6 +344,7 @@ def test_get_season_reflects_absences_signups_and_waitlist(
     assert game["confirmed_drop_ins"] == [
         {
             "id": bob_signup.json()["id"],
+            "player_id": bob_signup.json()["player_id"],
             "player_name": "Bob",
             "gender": None,
             "covering": "Alice",
@@ -693,6 +694,88 @@ def test_set_player_gender_rejects_an_invalid_value(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
+
+
+# --- player display name ------------------------------------------------
+
+
+def test_set_player_name_updates_it(client: TestClient) -> None:
+    alice = identify(client, "Alice")
+
+    response = client.put(
+        f"/players/{alice['id']}/name",
+        json={"name": "阿慬"},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "阿慬"
+
+
+def test_set_player_name_disambiguates_a_collision(client: TestClient) -> None:
+    identify(client, "Bob")
+    alice = identify(client, "Alice")
+
+    response = client.put(
+        f"/players/{alice['id']}/name",
+        json={"name": "Bob"},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Bob (2)"
+
+
+def test_set_player_name_keeping_your_own_current_name_is_allowed(
+    client: TestClient,
+) -> None:
+    alice = identify(client, "Alice")
+
+    response = client.put(
+        f"/players/{alice['id']}/name",
+        json={"name": "Alice"},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Alice"
+
+
+def test_set_player_name_rejects_blank(client: TestClient) -> None:
+    alice = identify(client, "Alice")
+
+    response = client.put(
+        f"/players/{alice['id']}/name",
+        json={"name": "   "},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 400
+
+
+def test_set_player_name_for_someone_else_returns_403(client: TestClient) -> None:
+    alice = identify(client, "Alice")
+    bob = identify(client, "Bob")
+
+    response = client.put(
+        f"/players/{alice['id']}/name",
+        json={"name": "New Name"},
+        headers=auth_headers(bob["token"]),
+    )
+
+    assert response.status_code == 403
+
+
+def test_set_player_name_for_unknown_player_returns_404(client: TestClient) -> None:
+    alice = identify(client, "Alice")
+
+    response = client.put(
+        "/players/999999/name",
+        json={"name": "New Name"},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 404
 
 
 # --- LINE identity binding -------------------------------------------------
@@ -1462,6 +1545,23 @@ def test_a_member_cannot_update_season_settings(client: TestClient) -> None:
     assert response.status_code == 403
 
 
+def test_a_member_cannot_cancel_a_game(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    carol = identify(client, "Carol")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+    )
+
+    response = client.post(
+        f"/games/{game_id}/cancel",
+        json={"refunded": True},
+        headers=auth_headers(carol["token"]),
+    )
+
+    assert response.status_code == 403
+
+
 def test_a_member_cannot_view_the_join_pool(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
@@ -1687,3 +1787,50 @@ def test_a_stranger_cannot_join_a_club_as_someone_they_are_not(
 
     assert response.status_code == 200
     assert response.json()["name"] == "Carol"  # the body's player_id was ignored
+
+
+# --- a player's own club list --------------------------------------------
+
+
+def test_list_player_clubs_spans_multiple_clubs_with_roles(client: TestClient) -> None:
+    club_a = create_club(client, name="Club A")
+    alice = identify(client, "Alice")
+    client.post(f"/clubs/{club_a['id']}/join", headers=auth_headers(alice["token"]))
+    club_b = create_club(client, name="Club B")
+    client.post(f"/clubs/{club_b['id']}/join", headers=auth_headers(alice["token"]))
+
+    response = client.get(
+        f"/players/{alice['id']}/clubs", headers=auth_headers(alice["token"])
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert {c["name"]: c["role"] for c in body} == {
+        "Club A": "member",
+        "Club B": "member",
+    }
+
+
+def test_list_player_clubs_includes_organizer_role(client: TestClient) -> None:
+    club = create_club(client)
+
+    response = client.get(
+        f"/players/{club['organizer_id']}/clubs",
+        headers=auth_headers(club["organizer_token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"id": club["id"], "name": club["name"], "role": "organizer"}
+    ]
+
+
+def test_list_player_clubs_for_someone_else_returns_403(client: TestClient) -> None:
+    alice = identify(client, "Alice")
+    bob = identify(client, "Bob")
+
+    response = client.get(
+        f"/players/{alice['id']}/clubs", headers=auth_headers(bob["token"])
+    )
+
+    assert response.status_code == 403
