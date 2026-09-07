@@ -53,6 +53,14 @@
 }
 
 * { box-sizing: border-box; }
+/* This has bitten the project twice now: any component class that sets
+   its own `display` (`.balance{display:flex}`, `.fold{display:block}`,
+   ...) has higher specificity than the browser's own `[hidden]{display:
+   none}` default, so a plain `hidden` attribute on that element quietly
+   stops working — the element still renders. One global, !important
+   rule makes `hidden` win unconditionally, for every class, including
+   ones added later, instead of chasing this class by class. */
+[hidden] { display: none !important; }
 body {
   font-family: var(--font-cjk);
   background: var(--ground);
