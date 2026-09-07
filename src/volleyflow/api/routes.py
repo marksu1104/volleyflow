@@ -46,6 +46,7 @@ from volleyflow.api.schemas import (
     PlayerIdentify,
     PlayerIdentifyOut,
     PlayerLedgerOut,
+    PlayerLink,
     SeasonCreate,
     SeasonDetailOut,
     SeasonOut,
@@ -823,6 +824,93 @@ def join_club(
         gender=_gender(current_player.gender),
         avatar_url=current_player.avatar_url,
         linked=current_player.line_user_id is not None,
+    )
+
+
+@router.post("/clubs/{club_id}/players/{player_id}/link", response_model=MemberOut)
+def link_player(
+    club_id: int,
+    player_id: int,
+    payload: PlayerLink,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> MemberOut:
+    """Says "this LINE account is that person on the roster".
+
+    identify_player deliberately never guesses this by name: a wrong
+    guess hands someone else's ledger to a stranger, so the organizer —
+    who actually knows who's who — makes the call. That was always the
+    design; this is the endpoint that was missing to carry it out, which
+    is why a member typed in by hand stayed marked 訪客 even after they
+    logged in, with a second copy of themselves sitting in the join pool.
+
+    The roster entry survives, keeping its id and therefore its whole
+    ledger history; the LINE-created row donates its identity and is
+    deleted. Refused if that row has any history of its own, since
+    deleting it would then destroy real records — remove the duplicate
+    roster entry instead.
+    """
+    _get_club_or_404(db, club_id)
+    _require_organizer(db, club_id, current_player)
+
+    target = _get_player_or_404(db, player_id)
+    source = _get_player_or_404(db, payload.line_player_id)
+    if target.id == source.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Those are the same player")
+    _require_club_member(db, club_id, target.id)
+    _require_club_member(db, club_id, source.id)
+
+    if target.line_user_id is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "That roster entry is already linked to a LINE account",
+        )
+    if source.line_user_id is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "That player has no LINE account to link",
+        )
+
+    for model, column, what in (
+        (LedgerEntryRow, LedgerEntryRow.player_id, "ledger entries"),
+        (SeasonMemberRow, SeasonMemberRow.player_id, "season memberships"),
+        (AbsenceRow, AbsenceRow.player_id, "absences"),
+        (DropInRow, DropInRow.player_id, "drop-ins"),
+    ):
+        if db.query(model).filter(column == source.id).first() is not None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"That LINE account already has {what} of its own — "
+                "remove the duplicate roster entry instead",
+            )
+
+    # Two flushes, not one: line_user_id is unique, and within a single
+    # flush SQLAlchemy is free to apply the target's UPDATE before the
+    # source's, leaving both rows holding the same id for an instant —
+    # which the index rejects. Release it first, then hand it over.
+    released = source.line_user_id
+    source.line_user_id = None
+    db.flush()
+    target.line_user_id = released
+    target.avatar_url = source.avatar_url
+    db.flush()
+
+    db.query(WaitlistEntryRow).filter(WaitlistEntryRow.player_id == source.id).delete(
+        synchronize_session=False
+    )
+    db.query(ClubMemberRow).filter(ClubMemberRow.player_id == source.id).delete(
+        synchronize_session=False
+    )
+    db.delete(source)
+    db.commit()
+    db.refresh(target)
+
+    return MemberOut(
+        id=target.id,
+        name=target.name,
+        gender=_gender(target.gender),
+        avatar_url=target.avatar_url,
+        linked=True,
     )
 
 

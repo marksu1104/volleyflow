@@ -190,6 +190,13 @@ class NameUpdate(BaseModel):
     name: str
 
 
+class PlayerLink(BaseModel):
+    line_player_id: int
+    """The Player row created when this person opened the app with LINE,
+    to be folded into the roster entry the organizer typed in earlier —
+    see routes.link_player."""
+
+
 class GameCancel(BaseModel):
     refunded: bool
     """True: CANCELLED_REFUNDED — the venue returned this game's cost, so
