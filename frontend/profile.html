@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VolleyFlow 個人資料</title>
+<link rel="preconnect" href="https://volleyflow.onrender.com" crossorigin>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
 <link rel="stylesheet" href="shared.css">
@@ -60,6 +61,16 @@
     <div class="section-label" id="clubs-label"></div>
     <div id="clubs-list"></div>
     <p class="hint">餘額分球隊各自計算，不會互相流用。</p>
+
+    <div class="section-label">回報問題</div>
+    <div class="field">
+      <textarea id="report-text" class="control" rows="4"
+        placeholder="哪個畫面、按了什麼、發生什麼事？例如：帳務頁按「已收」之後金額沒有變。"></textarea>
+      <p class="hint">
+        你是誰、在哪一頁、用什麼裝置會自動附上，不用自己打。送出後會直接傳到開發者的 LINE。
+      </p>
+    </div>
+    <button type="button" class="btn btn-primary" id="report-btn" onclick="sendReport()">送出回報</button>
   </div>
 
   <div id="no-liff" class="no-liff" hidden>
@@ -133,6 +144,36 @@
       alert("設定失敗：" + e.message);
     }
   });
+
+  async function sendReport() {
+    const box = document.getElementById("report-text");
+    const text = box.value.trim();
+    if (!text) {
+      alert("請先描述一下遇到的問題");
+      return;
+    }
+    const btn = document.getElementById("report-btn");
+    try {
+      await withButtonFeedback(btn, "送出中…", async () => {
+        await postJson(API_BASE, "/reports", {
+          message: text,
+          // Sent rather than asked for: "it broke" is only actionable
+          // with the where, and nobody types a user agent by hand.
+          page: location.pathname.split("/").pop() || "profile.html",
+          user_agent: navigator.userAgent,
+          club_id: currentClubId() ? Number(currentClubId()) : null,
+        });
+      });
+      box.value = "";
+      btn.disabled = false;
+      btn.textContent = "送出回報";
+      alert("已送出，謝謝你的回報。");
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = "送出回報";
+      alert("送出失敗：" + e.message);
+    }
+  }
 
   async function renderClubs() {
     const res = await fetch(`${API_BASE}/players/${me.id}/clubs`, { headers: authHeader() });

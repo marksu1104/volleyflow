@@ -3,11 +3,13 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from tests.api.factories import auth_headers, create_club, identify
 from tests.api.factories import start_season as _start_season
+from volleyflow.api import routes
 from volleyflow.api.routes import _today_in_taiwan
 from volleyflow.db.models import AbsenceRow, DropInRow, PlayerRow
 
@@ -2447,3 +2449,81 @@ def test_the_join_pool_shows_who_asked_to_be_a_fixed_member(
     by_name = {p["name"]: p for p in pool}
     assert by_name["Carol"]["wants_fixed_membership"] is True
     assert by_name["Dave"]["wants_fixed_membership"] is False
+
+
+# --- reporting a problem ---------------------------------------------------
+
+
+def test_a_report_reaches_the_developer_with_its_context(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What makes a report actionable is who and where, which the page
+    attaches rather than asking someone to type."""
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        routes, "push_to_user", lambda uid, text: sent.append((uid, text))
+    )
+    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
+    club = create_club(client, name="啪排郎")
+    alice = identify(client, "Alice")
+
+    response = client.post(
+        "/reports",
+        json={
+            "message": "帳務頁的金額不對",
+            "page": "organizer-ledger.html",
+            "user_agent": "iPhone LINE",
+            "club_id": club["id"],
+        },
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 204
+    assert len(sent) == 1
+    user_id, text = sent[0]
+    assert user_id == "U-dev"
+    assert "帳務頁的金額不對" in text
+    assert "Alice" in text
+    assert "啪排郎" in text
+    assert "organizer-ledger.html" in text
+
+
+def test_an_empty_report_is_refused(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
+    alice = identify(client, "Alice")
+
+    response = client.post(
+        "/reports", json={"message": "   "}, headers=auth_headers(alice["token"])
+    )
+
+    assert response.status_code == 400
+
+
+def test_a_report_that_cannot_be_delivered_says_so(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing stores these, so a silent failure would lose the report
+    outright — the reporter has to find out here."""
+
+    def explode(user_id: str, text: str) -> None:
+        raise RuntimeError("LINE quota exhausted")
+
+    monkeypatch.setattr(routes, "push_to_user", explode)
+    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
+    alice = identify(client, "Alice")
+
+    response = client.post(
+        "/reports", json={"message": "壞掉了"}, headers=auth_headers(alice["token"])
+    )
+
+    assert response.status_code == 502
+
+
+def test_reporting_requires_an_identity(client: TestClient) -> None:
+    response = client.post(
+        "/reports", json={"message": "壞掉了"}, headers={"Authorization": ""}
+    )
+
+    assert response.status_code == 401
