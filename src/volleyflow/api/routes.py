@@ -40,6 +40,7 @@ from volleyflow.api.schemas import (
     MemberAdd,
     MemberOut,
     MemberSettlementOut,
+    MembershipIntent,
     MyClubOut,
     NameUpdate,
     PaymentCreate,
@@ -753,7 +754,12 @@ def list_player_clubs(
         .all()
     )
     return [
-        MyClubOut(id=club.id, name=club.name, role=membership.role)
+        MyClubOut(
+            id=club.id,
+            name=club.name,
+            role=membership.role,
+            wants_fixed_membership=membership.wants_fixed_membership,
+        )
         for club, membership in rows
     ]
 
@@ -785,6 +791,7 @@ def list_club_members(
             avatar_url=player.avatar_url,
             linked=player.line_user_id is not None,
             role=membership.role,
+            wants_fixed_membership=membership.wants_fixed_membership,
         )
         for player, membership in rows
     ]
@@ -911,6 +918,43 @@ def link_player(
         gender=_gender(target.gender),
         avatar_url=target.avatar_url,
         linked=True,
+    )
+
+
+@router.put("/clubs/{club_id}/members/me/intent", response_model=MyClubOut)
+def set_membership_intent(
+    club_id: int,
+    payload: MembershipIntent,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> MyClubOut:
+    """Someone who has just joined saying which kind of member they are.
+
+    A fixed member's season fee is a real obligation, so claiming to be
+    one can't put you on the roster by itself — it queues you for the
+    organizer, who is the one deciding what anybody owes. Saying you're
+    not opens up drop-in signups immediately, which commit you to one
+    game at a time and nothing more.
+
+    Self only, and always changeable: someone who dropped in all season
+    and now wants in properly says so the same way.
+    """
+    club = _get_club_or_404(db, club_id)
+    membership = db.get(
+        ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}
+    )
+    if membership is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "You are not a member of this club"
+        )
+
+    membership.wants_fixed_membership = payload.wants_fixed_membership
+    db.commit()
+    return MyClubOut(
+        id=club.id,
+        name=club.name,
+        role=membership.role,
+        wants_fixed_membership=membership.wants_fixed_membership,
     )
 
 
@@ -1298,6 +1342,10 @@ def add_member(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is already settled")
 
     player = _get_or_create_player(db, season.club_id, payload.player_name)
+    # Never overwrites: a returning player's own setting is theirs, and
+    # this argument is just what the organizer happened to type today.
+    if payload.gender is not None and player.gender is None:
+        player.gender = payload.gender
     existing = db.get(SeasonMemberRow, {"season_id": season_id, "player_id": player.id})
     if existing is not None:
         raise HTTPException(
@@ -1352,12 +1400,12 @@ def remove_member(
     db.commit()
 
 
-@router.get("/seasons/{season_id}/join-pool", response_model=list[MemberOut])
+@router.get("/seasons/{season_id}/join-pool", response_model=list[ClubMemberOut])
 def list_join_pool(
     season_id: int,
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
-) -> list[MemberOut]:
+) -> list[ClubMemberOut]:
     """Players who are members of this season's club but aren't on this
     season's fixed roster yet — candidates for the organizer to promote
     with the existing POST /seasons/{id}/members. Club membership, not a
@@ -1365,36 +1413,40 @@ def list_join_pool(
     organizer typed in by hand is just as eligible as someone who joined
     through the LINE link. Organizer-only: this is specifically an
     organizer tool, unlike the public season/roster reads.
+
+    Returns club memberships rather than bare players so the pool can say
+    who has actually asked to be a fixed member — that request is the
+    whole reason an organizer looks at this list.
     """
     season = db.get(SeasonRow, season_id)
     if season is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
     _require_organizer(db, season.club_id, current_player)
 
-    club_member_ids = db.query(ClubMemberRow.player_id).filter(
-        ClubMemberRow.club_id == season.club_id
-    )
     season_member_ids = db.query(SeasonMemberRow.player_id).filter(
         SeasonMemberRow.season_id == season_id
     )
     pool = (
-        db.query(PlayerRow)
+        db.query(PlayerRow, ClubMemberRow)
+        .join(ClubMemberRow, ClubMemberRow.player_id == PlayerRow.id)
         .filter(
-            PlayerRow.id.in_(club_member_ids),
+            ClubMemberRow.club_id == season.club_id,
             ~PlayerRow.id.in_(season_member_ids),
         )
         .order_by(PlayerRow.id)
         .all()
     )
     return [
-        MemberOut(
-            id=p.id,
-            name=p.name,
-            gender=_gender(p.gender),
-            avatar_url=p.avatar_url,
-            linked=p.line_user_id is not None,
+        ClubMemberOut(
+            id=player.id,
+            name=player.name,
+            gender=_gender(player.gender),
+            avatar_url=player.avatar_url,
+            linked=player.line_user_id is not None,
+            role=membership.role,
+            wants_fixed_membership=membership.wants_fixed_membership,
         )
-        for p in pool
+        for player, membership in pool
     ]
 
 

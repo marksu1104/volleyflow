@@ -1832,7 +1832,12 @@ def test_list_player_clubs_includes_organizer_role(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == [
-        {"id": club["id"], "name": club["name"], "role": "organizer"}
+        {
+            "id": club["id"],
+            "name": club["name"],
+            "role": "organizer",
+            "wants_fixed_membership": None,
+        }
     ]
 
 
@@ -2240,3 +2245,126 @@ def test_a_member_cannot_link_players(client: TestClient) -> None:
     )
 
     assert response.status_code == 403
+
+
+# --- what a newcomer says they are ---------------------------------------
+#
+# Claiming to be a fixed member queues you for the organizer rather than
+# putting you on a roster: a season fee is a real obligation, and who
+# owes what is the organizer's call. Saying you're not opens drop-in
+# signups straight away, which commit you one game at a time.
+
+
+def test_a_newcomer_starts_with_no_stated_intent(client: TestClient) -> None:
+    club = create_club(client)
+    carol = identify(client, "Carol")
+    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"]))
+
+    body = client.get(
+        f"/players/{carol['id']}/clubs", headers=auth_headers(carol["token"])
+    ).json()
+
+    assert body[0]["wants_fixed_membership"] is None
+
+
+def test_saying_you_are_a_fixed_member_does_not_put_you_on_a_roster(
+    client: TestClient,
+) -> None:
+    """It only queues them — being on the roster is what a season fee is
+    charged against, and that stays the organizer's decision."""
+    season = _start_season(client, member_names=["Alice"])
+    carol = identify(client, "Carol")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+    )
+
+    response = client.put(
+        f"/clubs/{season['club_id']}/members/me/intent",
+        json={"wants_fixed_membership": True},
+        headers=auth_headers(carol["token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["wants_fixed_membership"] is True
+    members = client.get(f"/seasons/{season['id']}").json()["members"]
+    assert "Carol" not in [m["name"] for m in members]
+    ledger = client.get(
+        f"/clubs/{season['club_id']}/players/{carol['id']}/ledger",
+        headers=auth_headers(carol["token"]),
+    ).json()
+    assert ledger["balance"] == "0", "stating an intention must never charge anyone"
+
+
+def test_the_organizer_sees_who_is_waiting(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    carol = identify(client, "Carol")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+    )
+    client.put(
+        f"/clubs/{season['club_id']}/members/me/intent",
+        json={"wants_fixed_membership": True},
+        headers=auth_headers(carol["token"]),
+    )
+
+    members = client.get(f"/clubs/{season['club_id']}/members").json()
+
+    carol_row = next(m for m in members if m["name"] == "Carol")
+    assert carol_row["wants_fixed_membership"] is True
+
+
+def test_intent_can_be_changed_later(client: TestClient) -> None:
+    club = create_club(client)
+    carol = identify(client, "Carol")
+    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"]))
+
+    for value in (False, True, False):
+        response = client.put(
+            f"/clubs/{club['id']}/members/me/intent",
+            json={"wants_fixed_membership": value},
+            headers=auth_headers(carol["token"]),
+        )
+        assert response.json()["wants_fixed_membership"] is value
+
+
+def test_intent_needs_you_to_be_in_the_club(client: TestClient) -> None:
+    club = create_club(client)
+    stranger = identify(client, "Stranger")
+
+    response = client.put(
+        f"/clubs/{club['id']}/members/me/intent",
+        json={"wants_fixed_membership": True},
+        headers=auth_headers(stranger["token"]),
+    )
+
+    assert response.status_code == 403
+
+
+def test_the_join_pool_shows_who_asked_to_be_a_fixed_member(
+    client: TestClient,
+) -> None:
+    """The pool is the organizer's queue; a request they can't see is a
+    person left waiting."""
+    season = _start_season(client, member_names=["Alice"])
+    carol = identify(client, "Carol")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+    )
+    client.put(
+        f"/clubs/{season['club_id']}/members/me/intent",
+        json={"wants_fixed_membership": True},
+        headers=auth_headers(carol["token"]),
+    )
+    dave = identify(client, "Dave")
+    client.post(f"/clubs/{season['club_id']}/join", headers=auth_headers(dave["token"]))
+    client.put(
+        f"/clubs/{season['club_id']}/members/me/intent",
+        json={"wants_fixed_membership": False},
+        headers=auth_headers(dave["token"]),
+    )
+
+    pool = client.get(f"/seasons/{season['id']}/join-pool").json()
+
+    by_name = {p["name"]: p for p in pool}
+    assert by_name["Carol"]["wants_fixed_membership"] is True
+    assert by_name["Dave"]["wants_fixed_membership"] is False

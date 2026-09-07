@@ -54,6 +54,8 @@
     <button type="button" class="action" onclick="joinFromPrompt()">加入</button>
   </div>
 
+  <div id="intent-ask" hidden></div>
+
   <div id="hero-wrap"></div>
 
   <div class="section-label" id="balance-label" hidden>帳務</div>
@@ -136,6 +138,7 @@
     renderClubChip();
     renderManageButton();
     renderJoinPrompt();
+    renderIntentAsk();
     return identified;
   })();
 
@@ -276,11 +279,73 @@
     prompt.hidden = false;
   }
 
+  /** Asked once, right after joining. A fixed member's season fee is a
+   * real obligation, so saying you are one queues you for the organizer
+   * rather than signing you up; saying you aren't opens drop-in signups
+   * straight away. Until they answer, they get neither — an unanswered
+   * question is not a reason to let someone commit to money. */
+  function renderIntentAsk() {
+    const el = document.getElementById("intent-ask");
+    const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
+    const onRoster =
+      currentSeason &&
+      currentSeason.members.some((m) => m.name === playerName());
+
+    if (!mine || onRoster || mine.wants_fixed_membership !== null) {
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    el.innerHTML = `
+      <div class="empty-state" style="text-align:left">
+        <h3>已加入「${escapeHtml(mine.name)}」</h3>
+        <p>請問你是這一季的固定成員嗎？固定成員要分攤整季場地費，主揪確認後才會加入名單。</p>
+        <div class="btn-row" style="margin-top:12px">
+          <button type="button" class="btn btn-primary" onclick="answerIntent(true)">我是固定成員</button>
+          <button type="button" class="btn btn-quiet" onclick="answerIntent(false)">我只是臨打</button>
+        </div>
+      </div>
+    `;
+  }
+
+  async function answerIntent(wantsFixed) {
+    try {
+      const updated = await postJson(
+        API_BASE,
+        `/clubs/${currentClubId()}/members/me/intent`,
+        { wants_fixed_membership: wantsFixed },
+        "PUT"
+      );
+      const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
+      if (mine) mine.wants_fixed_membership = updated.wants_fixed_membership;
+      renderIntentAsk();
+      if (currentSeasonId) loadSeason(currentSeasonId);
+      else renderNoSeason();
+    } catch (e) {
+      alert("送出失敗：" + e.message);
+    }
+  }
+
+  /** Whether this viewer may act on a game at all. Someone waiting to be
+   * approved as a fixed member can look but not touch: signing up as a
+   * drop-in would contradict what they just said they are, and taking
+   * leave from a roster they're not on means nothing. */
+  function viewingOnly() {
+    const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
+    if (!mine) return false;
+    const onRoster =
+      currentSeason && currentSeason.members.some((m) => m.name === playerName());
+    return mine.wants_fixed_membership === true && !onRoster;
+  }
+
   async function joinFromPrompt() {
     try {
       await postJson(API_BASE, `/clubs/${currentClubId()}/join`, {});
       await refreshMyClubs();
       renderJoinPrompt();
+      renderManageButton();
+      renderIntentAsk();
+      renderIntentAsk();
     } catch (e) {
       alert("加入失敗：" + e.message);
     }
@@ -393,6 +458,7 @@
       document.getElementById("season-picker").hidden = false;
       document.getElementById("cal-label").hidden = false;
       document.getElementById("month-cal").hidden = false;
+      renderIntentAsk();
       renderHero(season);
       renderMonthCalendar(document.getElementById("month-cal"), season.games, selectGame);
       renderSelectedGameDetail();
@@ -484,6 +550,9 @@
 
   function buildMyActionHtml(season, game) {
     const name = playerName();
+    if (viewingOnly()) {
+      return '<div class="gdetail-mystatus waitlisted">等待主揪把你加入本季名單，在那之前只能查看</div>';
+    }
     if (game.locked) {
       return '<div class="gdetail-mystatus absent">已過更動期限，這一場無法再變更</div>';
     }

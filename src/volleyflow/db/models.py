@@ -62,6 +62,18 @@ class ClubMemberRow(Base):
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), primary_key=True)
     role: Mapped[str]
     joined_at: Mapped[datetime]
+    wants_fixed_membership: Mapped[bool | None] = mapped_column(default=None)
+    """What this person said they are when they joined, before anyone
+    with authority weighed in. NULL: never asked. True: they say they're
+    a fixed member and are waiting for the organizer to put them on a
+    season's roster — until then they can look but not act, since a
+    fixed member's obligations are a money question the organizer
+    decides. False: they're here for single games, and can sign up as a
+    drop-in straight away.
+
+    Deliberately not the same thing as SeasonMemberRow: that's the
+    organizer's decision and the thing billing reads. This is only a
+    stated intention, and never affects a charge."""
 
 
 class PlayerRow(Base):
