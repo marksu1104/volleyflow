@@ -3,78 +3,78 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VolleyFlow 帳務管理</title>
+<title>VolleyFlow 帳務</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
 <link rel="stylesheet" href="shared.css">
 <style>
-  .season-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-  .pill {
-    background: var(--surface); border: 1px solid var(--rule); border-radius: 20px;
-    padding: 5px 12px; font-size: .78rem; color: var(--ink-soft);
-  }
-  .pill strong { color: var(--ink); font-weight: 600; }
-  .pill.settled { background: var(--good-soft); color: var(--good); border-color: transparent; }
-
-  .tbl-scroll { overflow-x: auto; border-radius: 12px; border: 1px solid var(--rule); margin-top: 16px; }
-  table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: .86rem; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
-  tr:last-child td { border-bottom: none; }
-  th { font-size: .72rem; color: var(--ink-soft); font-weight: 600; background: var(--paper); }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .amt-positive { color: var(--good); }
-  .amt-negative { color: var(--bad); }
-
-  .pay-form { display: flex; gap: 4px; align-items: center; }
-  .pay-form input { width: 70px; padding: 5px 6px; border: 1px solid var(--rule); border-radius: 6px; font-size: .82rem; }
-  .pay-form button {
-    padding: 5px 8px; border: none; border-radius: 6px; background: var(--accent-soft);
-    color: var(--accent); font-size: .78rem; font-weight: 600; cursor: pointer; white-space: nowrap;
-  }
-
-  .settle-row { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
-  .settle-btn { padding: 10px 18px; border: none; border-radius: 8px; background: var(--ink); color: white; font-size: .88rem; font-weight: 600; cursor: pointer; }
-  .settle-btn:disabled { background: var(--rule); color: var(--ink-soft); cursor: default; }
-  .settle-note { font-size: .78rem; color: var(--ink-soft); }
-  .empty { color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center; }
+  .tab[hidden] { display: none; }
+  .m-act input, .m-act .confirm-partial { display: none; }
+  .m-act.partial input, .m-act.partial .confirm-partial { display: block; }
+  .m-act.partial .paid, .m-act.partial .later { display: none; }
+  .settle-hint { font-size: .78rem; color: var(--ink-soft); margin: 10px 0 0; text-align: center; }
 </style>
 </head>
 <body>
 <div class="wrap wide">
-  <h1>帳務管理</h1>
-  <p class="sub">結算、收款，跟出席狀況分開看</p>
+  <div class="app-top">
+    <div>
+      <h1 style="margin-bottom:2px">帳務</h1>
+      <p class="sub" style="margin-bottom:0">季費、當天臨打、季末結算，分開看</p>
+    </div>
+    <button type="button" class="avatar" id="avatar-btn" title="個人資料">?</button>
+  </div>
   <div id="identity" class="identity"></div>
 
   <nav class="org-nav">
     <a href="organizer.html" class="org-nav-link">總覽</a>
-    <a href="organizer-ledger.html" class="org-nav-link active">帳務管理</a>
-    <a href="organizer-members.html" class="org-nav-link">成員管理</a>
+    <a href="organizer-members.html" class="org-nav-link">名單</a>
+    <a href="organizer-ledger.html" class="org-nav-link active">帳務</a>
     <a href="organizer-settings.html" class="org-nav-link">設定</a>
   </nav>
 
   <select id="club-picker" class="season-picker club-picker"></select>
   <select id="season-picker" class="season-picker"></select>
   <div id="error"></div>
-  <div id="season-meta" class="season-meta"></div>
 
-  <div class="tbl-scroll">
-    <table>
-      <thead>
-        <tr>
-          <th>成員</th>
-          <th class="num">季費</th>
-          <th class="num">退費</th>
-          <th class="num">應收 / 應退</th>
-          <th class="num">已結算餘額</th>
-          <th>記錄收款</th>
-        </tr>
-      </thead>
-      <tbody id="settlement-body"></tbody>
-    </table>
+  <div class="seg" id="ledger-tabs">
+    <span class="on" data-tab="fee">季費</span>
+    <span data-tab="dropin">當天臨打</span>
+    <span data-tab="closing">季末結算</span>
   </div>
 
-  <div class="settle-row">
-    <span id="settle-note" class="settle-note"></span>
-    <button id="settle-btn" class="settle-btn" onclick="settleSeason()">結算此季</button>
+  <div id="tab-fee" class="tab">
+    <div class="balance">
+      <span class="balance-label">季費已收</span>
+      <span id="fee-collected" class="balance-value"></span>
+    </div>
+    <div class="progress"><i id="fee-progress" style="width:0%"></i></div>
+    <p id="fee-hint" class="hint"></p>
+    <div class="section-label" id="fee-share-label"></div>
+    <div id="fee-list" class="money"></div>
+  </div>
+
+  <div id="tab-dropin" class="tab" hidden>
+    <select id="dropin-game-picker" class="season-picker" style="margin-bottom: 12px"></select>
+    <div id="dropin-list" class="money"></div>
+  </div>
+
+  <div id="tab-closing" class="tab" hidden>
+    <div id="closing-before">
+      <p class="hint">結算會計算每個人這一季的請假退費，寫進帳本，並鎖住這一季的名單與場地費。結算後不能重複結算。</p>
+      <div class="section-label">本季退費</div>
+      <div id="closing-preview" class="money"></div>
+      <button type="button" class="btn btn-primary" id="settle-btn" onclick="settleSeason()">結算此季</button>
+    </div>
+    <div id="closing-after" hidden>
+      <div class="balance" style="margin-bottom: 14px">
+        <span class="balance-label">已結算</span>
+        <span id="closing-settled-at" class="balance-value even"></span>
+      </div>
+      <div class="section-label">尚未結清的餘額</div>
+      <div id="closing-list" class="money"></div>
+      <p id="closing-all-clear" class="empty" hidden>大家都已經結清了</p>
+    </div>
   </div>
 </div>
 
@@ -87,10 +87,32 @@
   (async function initIdentity() {
     const identityEl = document.getElementById("identity");
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
-    identityEl.textContent = identified
-      ? `已用 LINE 身分登入：${identified.name}`
-      : "（非 LINE 環境，僅能瀏覽公開資訊）";
+    if (identified) {
+      document.getElementById("avatar-btn").textContent = identified.name.slice(0, 1);
+      identityEl.textContent = `已用 LINE 身分登入：${identified.name}`;
+    } else {
+      identityEl.textContent = "（非 LINE 環境，僅能瀏覽公開資訊）";
+    }
   })();
+  document.getElementById("avatar-btn").addEventListener("click", () => {
+    location.href = "profile.html";
+  });
+
+  document.getElementById("ledger-tabs").addEventListener("click", (e) => {
+    const tab = e.target.closest("[data-tab]");
+    if (!tab) return;
+    showTab(tab.dataset.tab);
+  });
+
+  function showTab(name) {
+    document.querySelectorAll("#ledger-tabs [data-tab]").forEach((t) => {
+      t.classList.toggle("on", t.dataset.tab === name);
+    });
+    document.querySelectorAll(".tab").forEach((el) => {
+      el.hidden = el.id !== `tab-${name}`;
+    });
+  }
+  if (location.hash === "#settle") showTab("closing");
 
   initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
     if (id) loadLedger(id);
@@ -100,135 +122,280 @@
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
     try {
-      const [seasonRes, settlementRes] = await Promise.all([
-        fetch(`${API_BASE}/seasons/${seasonId}`),
-        fetch(`${API_BASE}/seasons/${seasonId}/settlement`, { headers: authHeader() }),
-      ]);
-      if (!seasonRes.ok || !settlementRes.ok) {
+      const res = await fetch(`${API_BASE}/seasons/${seasonId}`);
+      if (!res.ok) {
         errorEl.textContent = "找不到這一季";
         return;
       }
-      const season = await seasonRes.json();
-      const settlement = await settlementRes.json();
-      currentSeason = season;
-
-      renderMeta(season);
-      await renderSettlement(season, settlement);
+      currentSeason = await res.json();
+      await Promise.all([renderFeeTab(), renderDropInTab(), renderClosingTab()]);
     } catch (e) {
       errorEl.textContent = "連不上伺服器：" + e.message;
     }
   }
 
-  function renderMeta(season) {
-    const el = document.getElementById("season-meta");
-    const settled = season.settled_at !== null;
-    el.innerHTML = `
-      <span class="pill">場地費 <strong>$${season.total_venue_cost}</strong></span>
-      <span class="pill">每人每場 <strong>$${season.share_per_game}</strong></span>
-      <span class="pill ${settled ? "settled" : ""}">${settled ? "已結算" : "尚未結算"}</span>
-    `;
-    document.getElementById("settle-btn").disabled = settled;
-    document.getElementById("settle-note").textContent = settled
-      ? `已於 ${season.settled_at.slice(0, 16).replace("T", " ")} 結算`
-      : "結算後會把每人季費／退費寫進帳本，且不能重複結算";
-  }
+  // --- shared helpers -----------------------------------------------
 
-  async function renderSettlement(season, settlement) {
-    const body = document.getElementById("settlement-body");
-    const settled = season.settled_at !== null;
-
-    // Every member's ledger is an independent request — fire them all
-    // at once instead of awaiting one at a time in the loop. Awaiting
-    // sequentially here was the same class of mistake as the N+1 query
-    // bug fixed earlier, just moved to the browser: for N members it
-    // took N round trips back-to-back instead of one round trip's worth.
-    const rows = settlement.members.map((member) => {
-      const memberInfo = season.members.find((m) => m.name === member.player_name);
-      return { member, playerId: memberInfo ? memberInfo.id : null };
-    });
+  async function memberLedgers(season) {
     const ledgers = await Promise.all(
-      rows.map(({ playerId }) =>
-        settled && playerId
-          ? fetch(`${API_BASE}/clubs/${currentClubId()}/players/${playerId}/ledger`, {
-              headers: authHeader(),
-            }).then((r) => r.json())
-          : Promise.resolve(null)
+      season.members.map((m) =>
+        fetch(`${API_BASE}/clubs/${currentClubId()}/players/${m.id}/ledger`, {
+          headers: authHeader(),
+        }).then((r) => (r.ok ? r.json() : null))
       )
     );
+    return season.members.map((m, i) => ({ member: m, ledger: ledgers[i] }));
+  }
 
-    body.innerHTML = rows
-      .map(({ member, playerId }, i) => {
-        const balanceCell = ledgers[i] ? amountSpan(ledgers[i].balance) : "—";
-        return `
-          <tr>
-            <td>${member.player_name}</td>
-            <td class="num">$${member.season_fee}</td>
-            <td class="num">$${member.refund}</td>
-            <td class="num">${amountSpan(member.net)}</td>
-            <td class="num">${balanceCell}</td>
-            <td>
-              ${playerId ? `
-                <div class="pay-form">
-                  <input type="number" id="pay-${playerId}" placeholder="金額">
-                  <button onclick="recordPayment(${playerId}, this)">記收款</button>
-                </div>
-              ` : "-"}
-            </td>
-          </tr>
-        `;
+  /** This season's own entries vs. everything else on the player's club
+   * ledger — the "本季季費" / "上季餘額" breakdown the fee and closing
+   * tabs both show, computed from data already on hand instead of a
+   * dedicated endpoint. */
+  function splitLedger(ledger, seasonId) {
+    if (!ledger) return { seasonTotal: 0, otherTotal: 0, balance: 0 };
+    let seasonTotal = 0;
+    for (const e of ledger.entries) {
+      if (e.season_id === seasonId) seasonTotal += Number(e.amount);
+    }
+    return {
+      seasonTotal,
+      otherTotal: Number(ledger.balance) - seasonTotal,
+      balance: Number(ledger.balance),
+    };
+  }
+
+  function moneyRowHtml(playerId, name, gender, split, extraBreakLabel, extraBreakValue) {
+    const netCls = split.balance === 0 ? "clear" : split.balance > 0 ? "owed" : "owe";
+    const netText = split.balance === 0 ? "已結清" : split.balance > 0 ? `應退 $${split.balance}` : `應收 $${Math.abs(split.balance)}`;
+    const breakParts = [];
+    if (extraBreakLabel) breakParts.push(`<span>${extraBreakLabel} <b>$${extraBreakValue}</b></span>`);
+    if (split.otherTotal !== 0) {
+      breakParts.push(`<span>上季餘額 <b>${split.otherTotal > 0 ? "+" : "−"}$${Math.abs(split.otherTotal)}</b></span>`);
+    }
+
+    let actionHtml = "";
+    if (split.balance < 0) {
+      const owe = Math.abs(split.balance);
+      actionHtml = `
+        <div class="m-act">
+          <button type="button" class="paid" onclick="recordFullPayment(this, ${playerId}, ${owe})">已收</button>
+          <button type="button" class="later" onclick="showPartialInput(this)">部分收款</button>
+          <input type="number" placeholder="金額">
+          <button type="button" class="confirm-partial" onclick="recordPartialPayment(this, ${playerId})">確認</button>
+        </div>
+      `;
+    } else if (split.balance > 0) {
+      actionHtml = `
+        <div class="m-keep">
+          <span>保留於餘額</span>
+          <button type="button" class="m-alt" onclick="recordCashRefund(${playerId}, ${split.balance})">現金退款</button>
+        </div>
+      `;
+    } else {
+      actionHtml = '<div class="m-done">✓ 已結清</div>';
+    }
+
+    return `
+      <div class="m-row">
+        <div class="m-top">
+          <span class="avatar sm">${escapeHtml((name || "?").slice(0, 1))}</span>
+          <span class="m-name">${escapeHtml(name)}${genderTagFor(gender)}</span>
+          <span class="m-net ${netCls}">${netText}</span>
+        </div>
+        ${breakParts.length ? `<div class="m-break">${breakParts.join("")}</div>` : ""}
+        ${actionHtml}
+      </div>
+    `;
+  }
+
+  function genderTagFor(g) {
+    if (g === "male") return '<span class="gender-tag male">男</span>';
+    if (g === "female") return '<span class="gender-tag female">女</span>';
+    return "";
+  }
+
+  // Scoped to the clicked button's own row (via closest), not a
+  // page-wide id lookup — the same player can legitimately have a row
+  // in more than one tab at once (a fixed member who also signed up as
+  // a drop-in), and a global "[data-x=playerId]" selector would always
+  // hit whichever tab's row comes first in the DOM, even a hidden one.
+  function showPartialInput(btn) {
+    btn.closest(".m-act").classList.add("partial");
+  }
+
+  async function recordFullPayment(btn, playerId, amount) {
+    await submitPayment(playerId, amount);
+  }
+
+  async function recordPartialPayment(btn, playerId) {
+    const input = btn.closest(".m-act").querySelector("input");
+    const amount = input.value.trim();
+    if (!amount) return;
+    await submitPayment(playerId, amount);
+  }
+
+  async function recordCashRefund(playerId, amount) {
+    if (!confirm(`確定要記錄現金退款 $${amount} 嗎？`)) return;
+    await submitPayment(playerId, -amount);
+  }
+
+  async function submitPayment(playerId, amount) {
+    try {
+      await postJson(API_BASE, `/clubs/${currentClubId()}/players/${playerId}/payments`, {
+        amount: String(amount),
+        season_id: currentSeason.id,
+        note: "帳務頁記錄",
+      });
+      loadLedger(currentSeason.id);
+    } catch (e) {
+      alert("記錄失敗：" + e.message);
+    }
+  }
+
+  // --- 季費 tab --------------------------------------------------------
+
+  async function renderFeeTab() {
+    const season = currentSeason;
+    const rows = await memberLedgers(season);
+
+    let collected = 0;
+    let total = 0;
+    const rowsHtml = rows
+      .map(({ member, ledger }) => {
+        const split = splitLedger(ledger, season.id);
+        const feeCharged = -sumByType(ledger, season.id, "season_fee_charged");
+        total += feeCharged;
+        // How much of *this season's* fee is paid — driven only by
+        // entries tagged to this season, never by a carried balance
+        // from another season, which is a separate pool of money that
+        // just happens to also net into the row's headline balance.
+        const outstanding = Math.max(0, -split.seasonTotal);
+        collected += feeCharged - outstanding;
+        return moneyRowHtml(member.id, member.name, member.gender, split, "本季季費", feeCharged);
+      })
+      .join("");
+
+    document.getElementById("fee-list").innerHTML = rowsHtml || '<div class="empty">這一季還沒有固定成員</div>';
+    document.getElementById("fee-collected").textContent = `$${Math.round(collected)} / $${Math.round(total)}`;
+    document.getElementById("fee-progress").style.width = total > 0 ? `${Math.min(100, (collected / total) * 100)}%` : "0%";
+    const unpaidCount = rows.filter(({ ledger }) => ledger && Number(ledger.balance) < 0).length;
+    document.getElementById("fee-hint").textContent =
+      unpaidCount === 0 ? "全部已收" : `${rows.length - unpaidCount} 人已收・${unpaidCount} 人未收・季費於開季前收款`;
+    document.getElementById("fee-share-label").textContent = `每人 $${season.share_per_game * seasonBillableGames(season)} · ${seasonBillableGames(season)} 場 × $${season.share_per_game}`;
+  }
+
+  function seasonBillableGames(season) {
+    return season.games.filter((g) => g.status !== "cancelled_refunded").length;
+  }
+
+  function sumByType(ledger, seasonId, entryType) {
+    if (!ledger) return 0;
+    let sum = 0;
+    for (const e of ledger.entries) {
+      if (e.season_id === seasonId && e.entry_type === entryType) sum += Number(e.amount);
+    }
+    return sum;
+  }
+
+  // --- 當天臨打 tab -----------------------------------------------------
+
+  function renderDropInGamePicker() {
+    const picker = document.getElementById("dropin-game-picker");
+    const today = new Date().toISOString().slice(0, 10);
+    const nearest = currentSeason.games.find((g) => g.date >= today) || currentSeason.games[currentSeason.games.length - 1];
+    picker.innerHTML = currentSeason.games
+      .map((g) => `<option value="${g.id}">${describeDate(g.date).label}（臨打 ${g.confirmed_drop_ins.length} 人）</option>`)
+      .join("");
+    if (nearest) picker.value = nearest.id;
+    picker.onchange = renderDropInList;
+  }
+
+  async function renderDropInTab() {
+    renderDropInGamePicker();
+    await renderDropInList();
+  }
+
+  async function renderDropInList() {
+    const gameId = Number(document.getElementById("dropin-game-picker").value);
+    const game = currentSeason.games.find((g) => g.id === gameId);
+    const list = document.getElementById("dropin-list");
+    if (!game || game.confirmed_drop_ins.length === 0) {
+      list.innerHTML = '<div class="empty">這一場沒有臨打</div>';
+      return;
+    }
+    const ledgers = await Promise.all(
+      game.confirmed_drop_ins.map((d) =>
+        fetch(`${API_BASE}/clubs/${currentClubId()}/players/${d.player_id}/ledger`, {
+          headers: authHeader(),
+        }).then((r) => (r.ok ? r.json() : null))
+      )
+    );
+    list.innerHTML = game.confirmed_drop_ins
+      .map((d, i) => {
+        const ledger = ledgers[i];
+        const split = splitLedger(ledger, currentSeason.id);
+        return moneyRowHtml(d.player_id, d.player_name, d.gender, split, null, null);
       })
       .join("");
   }
 
-  function amountSpan(value) {
-    const n = Number(value);
-    const cls = n >= 0 ? "amt-positive" : "amt-negative";
-    return `<span class="${cls}">$${value}</span>`;
+  // --- 季末結算 tab -----------------------------------------------------
+
+  async function renderClosingTab() {
+    const season = currentSeason;
+    const settled = season.settled_at !== null;
+    document.getElementById("closing-before").hidden = settled;
+    document.getElementById("closing-after").hidden = !settled;
+
+    if (!settled) {
+      const settlementRes = await fetch(`${API_BASE}/seasons/${season.id}/settlement`, {
+        headers: authHeader(),
+      });
+      const settlement = settlementRes.ok ? await settlementRes.json() : { members: [] };
+      const refunded = settlement.members.filter((m) => Number(m.refund) > 0);
+      document.getElementById("closing-preview").innerHTML = refunded.length
+        ? refunded
+            .map(
+              (m) => `
+                <div class="m-row">
+                  <div class="m-top">
+                    <span class="avatar sm">${escapeHtml((m.player_name || "?").slice(0, 1))}</span>
+                    <span class="m-name">${escapeHtml(m.player_name)}</span>
+                    <span class="m-net owed">退費 $${m.refund}</span>
+                  </div>
+                </div>
+              `
+            )
+            .join("")
+        : '<div class="empty">這一季沒有需要退費的請假</div>';
+      return;
+    }
+
+    document.getElementById("closing-settled-at").textContent = season.settled_at.slice(0, 16).replace("T", " ");
+    const rows = await memberLedgers(season);
+    const unsettled = rows.filter(({ ledger }) => ledger && Number(ledger.balance) !== 0);
+    document.getElementById("closing-all-clear").hidden = unsettled.length > 0;
+    document.getElementById("closing-list").innerHTML = unsettled
+      .map(({ member, ledger }) => {
+        const split = splitLedger(ledger, season.id);
+        return moneyRowHtml(member.id, member.name, member.gender, split, null, null);
+      })
+      .join("");
   }
 
   async function settleSeason() {
-    if (!currentSeason) return;
-    if (!confirm("確定要結算這一季嗎？結算後每人的季費與退費會寫進帳本，且無法重複結算。")) return;
+    if (!confirm("確定要結算這一季嗎？結算後會鎖住名單與場地費，且無法重複結算。")) return;
     const btn = document.getElementById("settle-btn");
-    let res;
-    await withButtonFeedback(btn, "結算中...", async () => {
-      res = await fetch(`${API_BASE}/seasons/${currentSeason.id}/settle`, {
-        method: "POST",
-        headers: authHeader(),
+    try {
+      await withButtonFeedback(btn, "結算中...", async () => {
+        await postJson(API_BASE, `/seasons/${currentSeason.id}/settle`, {});
       });
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      alert("結算失敗：" + (data.detail || res.statusText));
+      loadLedger(currentSeason.id);
+    } catch (e) {
+      alert("結算失敗：" + e.message);
       btn.disabled = false;
       btn.textContent = "結算此季";
-      return;
     }
-    loadLedger(currentSeason.id);
-  }
-
-  async function recordPayment(playerId, btn) {
-    const input = document.getElementById(`pay-${playerId}`);
-    const amount = input.value.trim();
-    if (!amount) return;
-    let res;
-    await withButtonFeedback(btn, "記錄中...", async () => {
-      res = await fetch(`${API_BASE}/clubs/${currentClubId()}/players/${playerId}/payments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader() },
-        body: JSON.stringify({
-          amount,
-          season_id: currentSeason ? currentSeason.id : null,
-          note: "帳務管理頁手動記錄",
-        }),
-      });
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      alert("記錄失敗：" + (data.detail || res.statusText));
-      return;
-    }
-    loadLedger(currentSeason.id);
   }
 </script>
 </body>

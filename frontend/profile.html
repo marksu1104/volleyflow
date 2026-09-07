@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VolleyFlow 個人資料</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+  .back-link { display: inline-block; margin-bottom: 10px; font-size: .84rem; color: var(--ink-soft); text-decoration: none; }
+  .name-save-row { display: flex; gap: 8px; }
+  .name-save-row input { flex: 1; }
+  .name-save-row button {
+    flex: none; padding: 0 16px; border: none; border-radius: 9px; background: var(--accent);
+    color: var(--surface); font-weight: 700; font-size: .86rem; cursor: pointer; font-family: var(--font-cjk);
+  }
+  .no-liff { color: var(--ink-soft); font-size: .85rem; padding: 30px 0; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back-link" href="member.html">‹ 返回</a>
+  <h1>個人資料</h1>
+  <div id="identity" class="identity"></div>
+
+  <div id="content" hidden>
+    <div class="prof">
+      <div class="avatar lg" id="avatar-lg">?</div>
+      <div>
+        <div class="prof-name" id="prof-name"></div>
+        <div class="prof-sub">LINE 已連結・名字取自 LINE 個人檔案</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="name-input">名單上顯示的名字</label>
+      <div class="name-save-row">
+        <input id="name-input" class="control" type="text">
+        <button type="button" onclick="saveName()">儲存</button>
+      </div>
+      <p class="hint">主揪和其他人在名單上看到的就是這個名字。</p>
+    </div>
+
+    <div class="field">
+      <label>性別</label>
+      <div class="seg-pick" id="gender-pick">
+        <button type="button" data-gender="male">男</button>
+        <button type="button" data-gender="female">女</button>
+      </div>
+      <p class="hint">只用來統計每場的男女人數，不影響帳務。</p>
+    </div>
+
+    <div class="section-label" id="clubs-label"></div>
+    <div id="clubs-list"></div>
+    <p class="hint">餘額分球隊各自計算，不會互相流用。</p>
+  </div>
+
+  <div id="no-liff" class="no-liff" hidden>
+    個人資料需要透過 LINE 開啟才能編輯。
+  </div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+  const API_BASE = "https://volleyflow.onrender.com";
+  const LIFF_ID = "2011156233-6CouG6VI";
+  let me = null;
+
+  (async function init() {
+    const identityEl = document.getElementById("identity");
+    const identified = await initLiffIdentity(API_BASE, LIFF_ID);
+    if (!identified) {
+      identityEl.textContent = "";
+      document.getElementById("no-liff").hidden = false;
+      return;
+    }
+    me = identified;
+    identityEl.textContent = `已用 LINE 身分登入：${identified.name}`;
+    document.getElementById("content").hidden = false;
+    renderProfile();
+    await renderClubs();
+  })();
+
+  function renderProfile() {
+    document.getElementById("avatar-lg").textContent = me.name.slice(0, 1);
+    document.getElementById("prof-name").textContent = me.name;
+    document.getElementById("name-input").value = me.name;
+    for (const btn of document.querySelectorAll("#gender-pick [data-gender]")) {
+      btn.classList.toggle("selected", me.gender === btn.dataset.gender);
+    }
+  }
+
+  async function saveName() {
+    const name = document.getElementById("name-input").value.trim();
+    if (!name) { alert("名字不能是空的"); return; }
+    if (name === me.name) return;
+    try {
+      const updated = await postJson(API_BASE, `/players/${me.id}/name`, { name }, "PUT");
+      me.name = updated.name;
+      renderProfile();
+      if (updated.name !== name) {
+        alert(`「${name}」已經有人使用，改成了「${updated.name}」`);
+      }
+    } catch (e) {
+      alert("儲存失敗：" + e.message);
+    }
+  }
+
+  document.getElementById("gender-pick").addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-gender]");
+    if (!btn) return;
+    try {
+      const updated = await postJson(API_BASE, `/players/${me.id}/gender`, { gender: btn.dataset.gender }, "PUT");
+      me.gender = updated.gender;
+      renderProfile();
+    } catch (e) {
+      alert("設定失敗：" + e.message);
+    }
+  });
+
+  async function renderClubs() {
+    const res = await fetch(`${API_BASE}/players/${me.id}/clubs`, { headers: authHeader() });
+    const clubs = res.ok ? await res.json() : [];
+    document.getElementById("clubs-label").textContent = `我的球隊 ${clubs.length} 個`;
+
+    const balances = await Promise.all(
+      clubs.map((c) =>
+        fetch(`${API_BASE}/clubs/${c.id}/players/${me.id}/ledger`, { headers: authHeader() })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)
+      )
+    );
+
+    document.getElementById("clubs-list").innerHTML = clubs
+      .map((c, i) => {
+        const ledger = balances[i];
+        const roleTag = c.role === "organizer" ? '<span class="role-tag">主揪</span>' : "";
+        let balHtml = "";
+        if (ledger) {
+          const n = Number(ledger.balance);
+          const cls = n === 0 ? "" : n > 0 ? "bal plus" : "bal minus";
+          const text = n === 0 ? "已結清" : n > 0 ? `餘額 $${ledger.balance}` : `應繳 $${Math.abs(n)}`;
+          balHtml = n === 0 ? "" : `<span class="${cls}">${text}</span>`;
+        }
+        return `
+          <div class="club-row display">
+            <i class="club-dot">${escapeHtml(c.name.slice(0, 1))}</i>
+            <span class="cr-name">${escapeHtml(c.name)}</span>
+            ${roleTag}${balHtml}
+          </div>
+        `;
+      })
+      .join("") || '<div class="empty">還沒有加入任何球隊</div>';
+  }
+</script>
+</body>
+</html>
