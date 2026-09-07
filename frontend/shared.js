@@ -414,11 +414,55 @@ function renderGameDetail(container, season, game, options) {
     `;
   }
 
-  const diffRows = [];
+  // Who is actually playing. Reading that off a list of absences and a
+  // list of drop-ins means doing "everyone, minus these, plus those" in
+  // your head, and it gets harder the longer the lists are — which is
+  // exactly when you most need the answer. So the app does the sum: one
+  // numbered list of the people who will be on court, and a separate
+  // short list of who won't be and whether anyone covered for them.
+  const absentByName = {};
+  for (const a of game.absences) absentByName[a.player_name] = a;
+  const canEdit = !!opts.onRecordAbsence;
+
+  const attendingRows = [];
+  for (const m of season.members) {
+    if (absentByName[m.name]) continue;
+    const mark = canEdit
+      ? `<button type="button" class="mini-action" data-mark-absent="${escapeHtml(m.name)}">請假</button>`
+      : "";
+    attendingRows.push({
+      html: `<span class="avatar sm">${initial(m.name)}</span><span class="att-name">${escapeHtml(m.name)}${genderTag(m.gender)}${guestTag(m)}</span><span class="roster-note">${mark}</span>`,
+      cls: "",
+    });
+  }
+  for (const d of game.confirmed_drop_ins) {
+    // A substitute is playing *in someone's place*, which is the thing
+    // you want to see next to their name — not filed away elsewhere.
+    const note = d.covering
+      ? `<span class="att-note sub">代 ${escapeHtml(d.covering)}</span>`
+      : '<span class="att-note">臨打</span>';
+    const removeControl = opts.onRemoveDropIn
+      ? `<button type="button" class="mini-action danger" data-remove-drop-in="${d.id}">移除</button>`
+      : "";
+    attendingRows.push({
+      html: `<span class="avatar sm">${initial(d.player_name)}</span><span class="att-name">${escapeHtml(d.player_name)}${genderTag(d.gender)}${guestTag(d)}</span>${note}<span class="roster-note">${removeControl}</span>`,
+      cls: " dropin",
+    });
+  }
+  const attendingHtml = attendingRows
+    .map(
+      (row, i) =>
+        `<div class="att-row${row.cls}"><span class="att-num">${i + 1}</span>${row.html}</div>`
+    )
+    .join("");
+
+  const absentRows = [];
   for (const absence of game.absences) {
     const allowed = canAssignSubstitute(absence);
     const covering = game.confirmed_drop_ins.find((d) => d.covering === absence.player_name);
-    const note = absence.covered_by ? `${escapeHtml(absence.covered_by)} 代打` : "無代打";
+    const note = absence.covered_by
+      ? `<span class="att-note sub">${escapeHtml(absence.covered_by)} 代打</span>`
+      : '<span class="att-note gap">缺額</span>';
 
     const offerAssign = !!onAssignSubstitute && allowed;
     const assignLabel = absence.covered_by ? "編輯代打" : "指定代打";
@@ -435,43 +479,17 @@ function renderGameDetail(container, season, game, options) {
       opts.onCancelAbsence && !absence.covered_by
         ? `<button type="button" class="mini-action" data-undo-absence="${absence.id}">取消請假</button>`
         : "";
-    diffRows.push(`
-      <div class="roster-row absent">
-        <span><span class="avatar sm">${initial(absence.player_name)}</span> ${escapeHtml(absence.player_name)}</span>
-        <span class="roster-note">請假・${note}${assignControl}${cancelControl}${undoControl}</span>
+    absentRows.push(`
+      <div class="att-row absent">
+        <span class="att-num">—</span>
+        <span class="avatar sm">${initial(absence.player_name)}</span>
+        <span class="att-name">${escapeHtml(absence.player_name)}</span>
+        ${note}
+        <span class="roster-note">${assignControl}${cancelControl}${undoControl}</span>
       </div>
       ${offerAssign ? substituteForm(absence) : ""}
     `);
   }
-  for (const d of game.confirmed_drop_ins) {
-    const note = d.covering ? `代打・${escapeHtml(d.covering)}` : "臨打";
-    const removeControl = opts.onRemoveDropIn
-      ? `<button type="button" class="mini-action danger" data-remove-drop-in="${d.id}">移除</button>`
-      : "";
-    diffRows.push(`
-      <div class="roster-row dropin">
-        <span><span class="avatar sm">${initial(d.player_name)}</span> ${escapeHtml(d.player_name)}${genderTag(d.gender)}${guestTag(d)}</span>
-        <span class="roster-note">${note}${removeControl}</span>
-      </div>
-    `);
-  }
-
-  const absentNames = new Set(game.absences.map((a) => a.player_name));
-  const canEdit = !!opts.onRecordAbsence;
-  const fullRosterRows = season.members
-    .map((m) => {
-      if (absentNames.has(m.name)) {
-        return `<div class="roster-row absent"><span>${escapeHtml(m.name)}${genderTag(m.gender)}${guestTag(m)}</span><span class="roster-note">請假</span></div>`;
-      }
-      // The organizer gets a way to take someone's leave for them: half
-      // the roster tells them in person or in the group chat, and some
-      // members have no LINE account to do it with at all.
-      const mark = canEdit
-        ? `<button type="button" class="mini-action" data-mark-absent="${escapeHtml(m.name)}">請假</button>`
-        : "";
-      return `<div class="roster-row present"><span>${escapeHtml(m.name)}${genderTag(m.gender)}${guestTag(m)}</span><span class="roster-note">${mark}</span></div>`;
-    })
-    .join("");
 
   const waitlistRows = game.waitlist_entries.length
     ? game.waitlist_entries
@@ -485,9 +503,11 @@ function renderGameDetail(container, season, game, options) {
   container.innerHTML = `
     ${renderGameHero(season, game, { metaPills: opts.heroMetaPills })}
     ${game.locked ? '<div class="gdetail-locked">已過更動期限，這一場無法再變更</div>' : ""}
+    <div class="gdetail-section-label">出席名單（${attendingRows.length} 人）</div>
+    <div class="att-list">${attendingHtml || '<div class="empty">這一場沒有人出席</div>'}</div>
     ${
-      diffRows.length
-        ? `<div class="gdetail-section-label">請假與臨打</div><div class="gdetail-roster">${diffRows.join("")}</div>`
+      absentRows.length
+        ? `<div class="gdetail-section-label">請假（${absentRows.length} 人）</div><div class="att-list">${absentRows.join("")}</div>`
         : ""
     }
     ${
@@ -506,10 +526,6 @@ function renderGameDetail(container, season, game, options) {
            </div>`
         : ""
     }
-    <button type="button" class="gdetail-toggle" data-toggle-roster>完整名單（${season.members.length} 人）▾</button>
-    <div class="gdetail-roster-wrap" data-roster-wrap hidden>
-      <div class="gdetail-roster">${fullRosterRows}</div>
-    </div>
     ${extraHtml}
   `;
 
@@ -517,13 +533,6 @@ function renderGameDetail(container, season, game, options) {
   // container never accumulates duplicate handlers — matches
   // renderMonthCalendar's pattern.
   container.onclick = (e) => {
-    const toggleRoster = e.target.closest("[data-toggle-roster]");
-    if (toggleRoster) {
-      const wrap = container.querySelector("[data-roster-wrap]");
-      wrap.hidden = !wrap.hidden;
-      toggleRoster.textContent = `完整名單（${season.members.length} 人）${wrap.hidden ? "▾" : "▴"}`;
-      return;
-    }
     const toggleSub = e.target.closest("[data-toggle-sub]");
     if (toggleSub) {
       const form = container.querySelector(`[data-sub-form="${toggleSub.dataset.toggleSub}"]`);
