@@ -278,8 +278,12 @@ class GameDetailOut(BaseModel):
     date: date
     status: GameStatus
     locked: bool
-    """Past the season's change deadline — absences, signups, and their
-    cancellations are all rejected once this is true."""
+    """Whether *the caller* can still change this game: past the season's
+    change deadline, absences, signups and their cancellations are all
+    rejected. False for the club's organizer whatever the date, since the
+    deadline exists to stop the roster shifting under them and they're
+    the one who has to record what actually happened — so this is
+    answered per caller, not per game."""
     absences: list[AbsenceDetailOut]
     confirmed_drop_ins: list[DropInDetailOut]
     waitlist_entries: list[DropInSummary]

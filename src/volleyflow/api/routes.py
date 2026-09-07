@@ -359,12 +359,27 @@ def _within_change_deadline(game: GameRow, season: SeasonRow) -> bool:
     return _today_in_taiwan() + timedelta(days=season.change_deadline_days) <= game.date
 
 
-def _require_within_change_deadline(game: GameRow, season: SeasonRow) -> None:
-    if not _within_change_deadline(game, season):
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Past this season's change deadline for this game",
-        )
+def _require_within_change_deadline(
+    db: Session, game: GameRow, season: SeasonRow, current_player: PlayerRow
+) -> None:
+    """The deadline exists so a roster stops shifting under the organizer
+    at the last minute — so it doesn't apply to the organizer. They're
+    the one absorbing whatever happens on the day: someone drops out an
+    hour before, a replacement turns up, a court gets cancelled. Blocking
+    them from recording that doesn't make the roster more accurate, it
+    just makes the records wrong.
+    """
+    if _within_change_deadline(game, season):
+        return
+    membership = db.get(
+        ClubMemberRow, {"club_id": season.club_id, "player_id": current_player.id}
+    )
+    if membership is not None and membership.role == "organizer":
+        return
+    raise HTTPException(
+        status.HTTP_400_BAD_REQUEST,
+        "Past this season's change deadline for this game",
+    )
 
 
 def _is_absence_covered(db: Session, absence_row: AbsenceRow) -> bool:
@@ -1465,6 +1480,16 @@ def get_season(
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
     _require_club_access(db, season_row.club_id, current_player)
 
+    # "locked" is about this caller, not about the date alone — the
+    # organizer is never locked out (see _require_within_change_deadline).
+    viewer_membership = db.get(
+        ClubMemberRow,
+        {"club_id": season_row.club_id, "player_id": current_player.id},
+    )
+    viewer_is_organizer = (
+        viewer_membership is not None and viewer_membership.role == "organizer"
+    )
+
     game_rows = db.query(GameRow).filter(GameRow.season_id == season_id).all()
     game_ids = [g.id for g in game_rows]
     member_rows = (
@@ -1570,7 +1595,9 @@ def get_season(
                 id=game.id,
                 date=game.date,
                 status=game.status,
-                locked=not _within_change_deadline(game, season_row),
+                locked=not (
+                    viewer_is_organizer or _within_change_deadline(game, season_row)
+                ),
                 absences=[
                     AbsenceDetailOut(
                         id=aid, player_name=name, covered_by=covered_by_name.get(name)
@@ -1630,7 +1657,7 @@ def record_absence(
     player = _get_player_by_name(db, season.club_id, payload.player_name)
     _require_self_or_organizer(db, season.club_id, current_player, player.id)
     _require_season_member(db, game.season_id, player.id)
-    _require_within_change_deadline(game, season)
+    _require_within_change_deadline(db, game, season, current_player)
 
     existing = (
         db.query(AbsenceRow)
@@ -1687,7 +1714,7 @@ def cancel_absence(
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
     _require_self_or_organizer(db, season.club_id, current_player, absence.player_id)
-    _require_within_change_deadline(game, season)
+    _require_within_change_deadline(db, game, season, current_player)
 
     if _is_absence_covered(db, absence):
         raise HTTPException(
@@ -1810,7 +1837,7 @@ def sign_up(
     assert season is not None  # game.season_id is a foreign key, always valid
     player = _get_or_create_player(db, season.club_id, payload.player_name)
     _require_self_or_organizer(db, season.club_id, current_player, player.id)
-    _require_within_change_deadline(game, season)
+    _require_within_change_deadline(db, game, season, current_player)
 
     already_signed_up = (
         db.query(DropInRow)
@@ -1892,7 +1919,7 @@ def cancel_drop_in(
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
     _require_self_or_organizer(db, season.club_id, current_player, drop_in.player_id)
-    _require_within_change_deadline(game, season)
+    _require_within_change_deadline(db, game, season, current_player)
 
     drop_in.cancelled_at = _now()
     _record_drop_in_charge(db, drop_in, season, reverse=True)

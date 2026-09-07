@@ -1080,18 +1080,66 @@ def test_join_unknown_club_returns_404(client: TestClient) -> None:
 # --- change deadline -----------------------------------------------------
 
 
+def _member_with_login(client: TestClient, season: dict, name: str) -> dict:
+    """Gives an existing roster entry a LINE identity, so a test can act
+    as that member rather than as the club's organizer."""
+    player = identify(client, name + " (LINE)")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(player["token"])
+    )
+    roster_id = next(
+        m["id"]
+        for m in client.get(f"/seasons/{season['id']}").json()["members"]
+        if m["name"] == name
+    )
+    client.post(
+        f"/clubs/{season['club_id']}/players/{roster_id}/link",
+        json={"line_player_id": player["id"]},
+    )
+    return player
+
+
 def test_record_absence_rejected_past_the_change_deadline(client: TestClient) -> None:
+    """For an ordinary member. The organizer is exempt — see below."""
+    today = _today_in_taiwan().isoformat()
+    season = _start_season(
+        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+    )
+    game_id = season["games"][0]["id"]
+    alice = _member_with_login(client, season, "Alice")
+
+    response = client.post(
+        "/absences",
+        json={"player_name": "Alice", "game_id": game_id},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 400
+
+
+def test_the_organizer_is_not_bound_by_the_change_deadline(client: TestClient) -> None:
+    """Last-minute reality is exactly what the organizer has to record:
+    someone drops out an hour before, a replacement turns up. Blocking
+    them doesn't keep the roster accurate, it keeps it wrong.
+    """
     today = _today_in_taiwan().isoformat()
     season = _start_season(
         client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
     )
     game_id = season["games"][0]["id"]
 
-    response = client.post(
+    absence = client.post(
         "/absences", json={"player_name": "Alice", "game_id": game_id}
     )
+    signup = client.post("/drop-ins", json={"player_name": "Bob", "game_id": game_id})
 
-    assert response.status_code == 400
+    assert absence.status_code == 200
+    assert signup.status_code == 200
+    # Bob's drop-in is covering Alice's absence, and an absence someone
+    # has committed to cover can't be cancelled out from under them —
+    # a separate rule from the deadline, so undo the coverage first.
+    assert client.post(f"/drop-ins/{signup.json()['id']}/cancel").status_code == 200
+    assert client.post(f"/absences/{absence.json()['id']}/cancel").status_code == 200
 
 
 def test_record_absence_allowed_within_the_change_deadline(client: TestClient) -> None:
@@ -1115,12 +1163,22 @@ def test_sign_up_rejected_past_the_change_deadline(client: TestClient) -> None:
     )
     game_id = season["games"][0]["id"]
 
-    response = client.post("/drop-ins", json={"player_name": "Bob", "game_id": game_id})
+    bob = identify(client, "Bob")
+    client.post(f"/clubs/{season['club_id']}/join", headers=auth_headers(bob["token"]))
+
+    response = client.post(
+        "/drop-ins",
+        json={"player_name": bob["name"], "game_id": game_id},
+        headers=auth_headers(bob["token"]),
+    )
 
     assert response.status_code == 400
 
 
 def test_game_detail_locked_reflects_the_change_deadline(client: TestClient) -> None:
+    """For an ordinary member. "locked" answers "can *you* still change
+    this", so it depends on who's asking — see the organizer case below.
+    """
     today = _today_in_taiwan().isoformat()
     future = (_today_in_taiwan() + timedelta(days=10)).isoformat()
     season = _start_season(
@@ -1129,12 +1187,26 @@ def test_game_detail_locked_reflects_the_change_deadline(client: TestClient) -> 
         game_dates=[today, future],
         change_deadline_days=1,
     )
+    alice = _member_with_login(client, season, "Alice")
 
-    body = client.get(f"/seasons/{season['id']}").json()
+    body = client.get(
+        f"/seasons/{season['id']}", headers=auth_headers(alice["token"])
+    ).json()
 
     locked_by_date = {g["date"]: g["locked"] for g in body["games"]}
     assert locked_by_date[today] is True
     assert locked_by_date[future] is False
+
+
+def test_nothing_is_locked_for_the_organizer(client: TestClient) -> None:
+    today = _today_in_taiwan().isoformat()
+    season = _start_season(
+        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+    )
+
+    body = client.get(f"/seasons/{season['id']}").json()
+
+    assert body["games"][0]["locked"] is False
 
 
 def test_cancel_absence_rejected_past_the_change_deadline(
@@ -1153,8 +1225,11 @@ def test_cancel_absence_rejected_past_the_change_deadline(
     db_session.add(absence)
     db_session.commit()
     db_session.refresh(absence)
+    alice = _member_with_login(client, season, "Alice")
 
-    response = client.post(f"/absences/{absence.id}/cancel")
+    response = client.post(
+        f"/absences/{absence.id}/cancel", headers=auth_headers(alice["token"])
+    )
 
     assert response.status_code == 400
 
@@ -1178,8 +1253,12 @@ def test_cancel_drop_in_rejected_past_the_change_deadline(
     db_session.add(drop_in)
     db_session.commit()
     db_session.refresh(drop_in)
+    bob.line_user_id = "bob-token"
+    db_session.commit()
 
-    response = client.post(f"/drop-ins/{drop_in.id}/cancel")
+    response = client.post(
+        f"/drop-ins/{drop_in.id}/cancel", headers=auth_headers("bob-token")
+    )
 
     assert response.status_code == 400
 
