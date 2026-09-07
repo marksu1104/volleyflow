@@ -43,7 +43,7 @@ class ClubMemberOut(BaseModel):
     name: str
     gender: Gender | None = None
     avatar_url: str | None = None
-    linked: bool = False
+    linked: bool
     """See MemberOut.linked."""
     role: str
     """"organizer" or "member" — see ClubMemberRow."""
@@ -174,7 +174,7 @@ class MemberOut(BaseModel):
     name: str
     gender: Gender | None = None
     avatar_url: str | None = None
-    linked: bool = False
+    linked: bool
     """Whether this player has claimed a LINE identity. False means the
     organizer typed their name in and they've never opened the app — so
     they can't record their own absence, sign themselves up, or set their

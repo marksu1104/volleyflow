@@ -1554,7 +1554,11 @@ def get_season(
         settled_at=season_row.settled_at,
         members=[
             MemberOut(
-                id=m.id, name=m.name, gender=_gender(m.gender), avatar_url=m.avatar_url
+                id=m.id,
+                name=m.name,
+                gender=_gender(m.gender),
+                avatar_url=m.avatar_url,
+                linked=m.line_user_id is not None,
             )
             for m in member_rows
         ],

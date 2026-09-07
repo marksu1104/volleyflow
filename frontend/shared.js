@@ -431,31 +431,45 @@ function renderGameDetail(container, season, game, options) {
       ? `<button type="button" class="mini-action danger" data-cancel-sub="${covering.id}">取消代打</button>`
       : "";
 
+    const undoControl =
+      opts.onCancelAbsence && !absence.covered_by
+        ? `<button type="button" class="mini-action" data-undo-absence="${absence.id}">取消請假</button>`
+        : "";
     diffRows.push(`
       <div class="roster-row absent">
         <span><span class="avatar sm">${initial(absence.player_name)}</span> ${escapeHtml(absence.player_name)}</span>
-        <span class="roster-note">請假・${note}${assignControl}${cancelControl}</span>
+        <span class="roster-note">請假・${note}${assignControl}${cancelControl}${undoControl}</span>
       </div>
       ${offerAssign ? substituteForm(absence) : ""}
     `);
   }
   for (const d of game.confirmed_drop_ins) {
     const note = d.covering ? `代打・${escapeHtml(d.covering)}` : "臨打";
+    const removeControl = opts.onRemoveDropIn
+      ? `<button type="button" class="mini-action danger" data-remove-drop-in="${d.id}">移除</button>`
+      : "";
     diffRows.push(`
       <div class="roster-row dropin">
-        <span><span class="avatar sm">${initial(d.player_name)}</span> ${escapeHtml(d.player_name)}${genderTag(d.gender)}</span>
-        <span class="roster-note">${note}</span>
+        <span><span class="avatar sm">${initial(d.player_name)}</span> ${escapeHtml(d.player_name)}${genderTag(d.gender)}${guestTag(d)}</span>
+        <span class="roster-note">${note}${removeControl}</span>
       </div>
     `);
   }
 
   const absentNames = new Set(game.absences.map((a) => a.player_name));
+  const canEdit = !!opts.onRecordAbsence;
   const fullRosterRows = season.members
     .map((m) => {
       if (absentNames.has(m.name)) {
         return `<div class="roster-row absent"><span>${escapeHtml(m.name)}${genderTag(m.gender)}${guestTag(m)}</span><span class="roster-note">請假</span></div>`;
       }
-      return `<div class="roster-row present"><span>${escapeHtml(m.name)}${genderTag(m.gender)}${guestTag(m)}</span></div>`;
+      // The organizer gets a way to take someone's leave for them: half
+      // the roster tells them in person or in the group chat, and some
+      // members have no LINE account to do it with at all.
+      const mark = canEdit
+        ? `<button type="button" class="mini-action" data-mark-absent="${escapeHtml(m.name)}">代為請假</button>`
+        : "";
+      return `<div class="roster-row present"><span>${escapeHtml(m.name)}${genderTag(m.gender)}${guestTag(m)}</span><span class="roster-note">${mark}</span></div>`;
     })
     .join("");
 
@@ -479,6 +493,17 @@ function renderGameDetail(container, season, game, options) {
     ${
       waitlistRows
         ? `<div class="gdetail-section-label">候補（${game.waitlist_entries.length} 人）</div><div class="gdetail-waitlist">${waitlistRows}</div>`
+        : ""
+    }
+    ${
+      opts.onAddDropIn
+        ? `<div class="add-dropin">
+             <input type="text" placeholder="臨打姓名" data-new-dropin>
+             <select data-new-dropin-gender>
+               <option value="">性別</option><option value="male">男</option><option value="female">女</option>
+             </select>
+             <button type="button" data-add-dropin>新增臨打</button>
+           </div>`
         : ""
     }
     <button type="button" class="gdetail-toggle" data-toggle-roster>完整名單（${season.members.length} 人）▾</button>
@@ -530,6 +555,30 @@ function renderGameDetail(container, season, game, options) {
     const cancelSub = e.target.closest("[data-cancel-sub]");
     if (cancelSub && onCancelSubstitute) {
       onCancelSubstitute(Number(cancelSub.dataset.cancelSub), cancelSub);
+      return;
+    }
+    const markAbsent = e.target.closest("[data-mark-absent]");
+    if (markAbsent && opts.onRecordAbsence) {
+      opts.onRecordAbsence(markAbsent.dataset.markAbsent, markAbsent);
+      return;
+    }
+    const undoAbsence = e.target.closest("[data-undo-absence]");
+    if (undoAbsence && opts.onCancelAbsence) {
+      opts.onCancelAbsence(Number(undoAbsence.dataset.undoAbsence), undoAbsence);
+      return;
+    }
+    const removeDropIn = e.target.closest("[data-remove-drop-in]");
+    if (removeDropIn && opts.onRemoveDropIn) {
+      opts.onRemoveDropIn(Number(removeDropIn.dataset.removeDropIn), removeDropIn);
+      return;
+    }
+    const addDropIn = e.target.closest("[data-add-dropin]");
+    if (addDropIn && opts.onAddDropIn) {
+      const nameInput = container.querySelector("[data-new-dropin]");
+      const genderSelect = container.querySelector("[data-new-dropin-gender]");
+      const name = nameInput ? nameInput.value.trim() : "";
+      if (!name) return;
+      opts.onAddDropIn(name, (genderSelect && genderSelect.value) || null, addDropIn);
     }
   };
 }

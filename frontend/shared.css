@@ -323,6 +323,11 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 .gdetail-count strong { font-variant-numeric: tabular-nums; font-family: var(--font-num); }
 .gdetail-locked { font-size: .78rem; color: var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 6px 10px; margin-top: 8px; }
 
+.add-dropin { display: flex; gap: 6px; margin-top: 12px; }
+.add-dropin input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 8px; font-size: .84rem; background: var(--surface); color: var(--ink); font-family: var(--font-cjk); }
+.add-dropin select { padding: 8px; border: 1px solid var(--rule); border-radius: 8px; font-size: .82rem; background: var(--surface); color: var(--ink); font-family: var(--font-cjk); }
+.add-dropin button { border: none; background: var(--good); color: var(--surface); font-size: .8rem; font-weight: 700; padding: 8px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap; font-family: var(--font-cjk); }
+
 .gdetail-toggle {
   display: block; width: 100%; margin-top: 12px; padding: 9px; border: 1px solid var(--rule);
   border-radius: 9px; background: var(--surface-2); color: var(--ink-soft); font-size: .82rem;

@@ -213,6 +213,13 @@
       viewerName: myName,
       onAssignSubstitute: (absenceId, name, gender) => assignSubstitute(absenceId, name, gender),
       onCancelSubstitute: (dropInId, btn) => cancelSubstitute(dropInId, btn),
+      // The organizer arranges all of this for other people: half the
+      // club tells them in person or in the group chat, and members with
+      // no LINE account can't do any of it themselves.
+      onRecordAbsence: (playerName, btn) => recordAbsenceFor(playerName, btn),
+      onCancelAbsence: (absenceId, btn) => cancelAbsenceFor(absenceId, btn),
+      onRemoveDropIn: (dropInId, btn) => cancelSubstitute(dropInId, btn),
+      onAddDropIn: (name, gender, btn) => addDropIn(name, gender, btn),
       // No canAssignSubstitute restriction — the organizer can arrange
       // a substitute for anyone's absence, not just their own.
     });
@@ -243,6 +250,52 @@
       loadDashboard(currentSeason.id);
     } catch (e) {
       alert("設定代打失敗：" + e.message);
+    }
+  }
+
+  async function recordAbsenceFor(playerName, btn) {
+    try {
+      await withButtonFeedback(btn, "處理中...", async () => {
+        await postJson(API_BASE, "/absences", {
+          player_name: playerName,
+          game_id: selectedGameId,
+        });
+      });
+      loadDashboard(currentSeason.id);
+    } catch (e) {
+      alert("代為請假失敗：" + e.message);
+    }
+  }
+
+  async function cancelAbsenceFor(absenceId, btn) {
+    try {
+      await withButtonFeedback(btn, "處理中...", async () => {
+        await postJson(API_BASE, `/absences/${absenceId}/cancel`, {});
+      });
+      loadDashboard(currentSeason.id);
+    } catch (e) {
+      alert("取消請假失敗：" + e.message);
+    }
+  }
+
+  async function addDropIn(name, gender, btn) {
+    try {
+      await withButtonFeedback(btn, "新增中...", async () => {
+        const created = await postJson(API_BASE, "/drop-ins", {
+          player_name: name,
+          game_id: selectedGameId,
+        });
+        // A drop-in is often someone with no account, so their gender —
+        // which the roster's male/female count needs — has to be set for
+        // them, and only right after they exist.
+        if (gender && created.player_id) {
+          await postJson(API_BASE, `/players/${created.player_id}/gender`, { gender }, "PUT")
+            .catch(() => {});
+        }
+      });
+      loadDashboard(currentSeason.id);
+    } catch (e) {
+      alert("新增臨打失敗：" + e.message);
     }
   }
 
