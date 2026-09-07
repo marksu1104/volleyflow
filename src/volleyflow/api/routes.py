@@ -514,6 +514,79 @@ def _gather_member_settlements(
     return season_row, settlements
 
 
+def _absorb_drop_ins_into_membership(
+    db: Session, season: SeasonRow, player_id: int
+) -> None:
+    """Someone who signed up as a drop-in and is now being made a fixed
+    member: cancel those signups and hand the fees back.
+
+    This is the ordinary sequence for a new person, not an edge case —
+    they join the club, see a signup button, tap it, and the organizer
+    adds them to the roster afterwards. Left alone they'd be charged the
+    per-game share twice for the same game (once as a drop-in, once
+    inside their season fee) and counted twice against capacity.
+
+    No waitlist promotion here, deliberately: they were already counted
+    as attending and still are, just as a member now, so no slot opened.
+    """
+    game_ids = [
+        row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id).all()
+    ]
+    if not game_ids:
+        return
+
+    now = _now()
+    drop_ins = (
+        db.query(DropInRow)
+        .filter(
+            DropInRow.player_id == player_id,
+            DropInRow.game_id.in_(game_ids),
+            DropInRow.cancelled_at.is_(None),
+        )
+        .all()
+    )
+    for drop_in in drop_ins:
+        drop_in.cancelled_at = now
+
+    # Reverse to a target of nothing owed, rather than recomputing a
+    # share and subtracting that: the share when they signed up was
+    # divided among a smaller roster than the one they've just joined,
+    # so a freshly computed refund would be smaller than what was
+    # actually taken and quietly leave them short. Their season fee now
+    # covers every game, so their drop-in fees for this season must come
+    # to exactly zero, whatever they were charged along the way.
+    charged = sum(
+        (
+            amount
+            for (amount,) in db.query(LedgerEntryRow.amount).filter(
+                LedgerEntryRow.player_id == player_id,
+                LedgerEntryRow.season_id == season.id,
+                LedgerEntryRow.entry_type == EntryType.DROP_IN_FEE_CHARGED,
+            )
+        ),
+        Decimal("0"),
+    )
+    if charged != 0:
+        db.add(
+            LedgerEntryRow(
+                player_id=player_id,
+                club_id=season.club_id,
+                entry_type=EntryType.DROP_IN_FEE_CHARGED,
+                amount=-charged,
+                recorded_at=now,
+                season_id=season.id,
+                note="Drop-in fees refunded — now a fixed member",
+            )
+        )
+
+    # Waiting for a slot is equally moot once they're on the roster.
+    db.query(WaitlistEntryRow).filter(
+        WaitlistEntryRow.player_id == player_id,
+        WaitlistEntryRow.game_id.in_(game_ids),
+    ).delete(synchronize_session=False)
+    db.flush()
+
+
 def _sync_season_fee_ledger(db: Session, season_row: SeasonRow) -> None:
     """Bring every current member's season_fee_charged total up to date
     with what settle_member says they should owe right now, writing one
@@ -709,6 +782,7 @@ def list_club_members(
             name=player.name,
             gender=_gender(player.gender),
             avatar_url=player.avatar_url,
+            linked=player.line_user_id is not None,
             role=membership.role,
         )
         for player, membership in rows
@@ -748,6 +822,7 @@ def join_club(
         name=current_player.name,
         gender=_gender(current_player.gender),
         avatar_url=current_player.avatar_url,
+        linked=current_player.line_user_id is not None,
     )
 
 
@@ -1143,6 +1218,7 @@ def add_member(
 
     db.add(SeasonMemberRow(season_id=season_id, player_id=player.id))
     db.flush()
+    _absorb_drop_ins_into_membership(db, season, player.id)
     _sync_season_fee_ledger(db, season)
     db.commit()
     db.refresh(player)
@@ -1151,6 +1227,7 @@ def add_member(
         name=player.name,
         gender=_gender(player.gender),
         avatar_url=player.avatar_url,
+        linked=player.line_user_id is not None,
     )
 
 
@@ -1223,7 +1300,11 @@ def list_join_pool(
     )
     return [
         MemberOut(
-            id=p.id, name=p.name, gender=_gender(p.gender), avatar_url=p.avatar_url
+            id=p.id,
+            name=p.name,
+            gender=_gender(p.gender),
+            avatar_url=p.avatar_url,
+            linked=p.line_user_id is not None,
         )
         for p in pool
     ]
@@ -1615,6 +1696,21 @@ def sign_up(
             "This player is already on the waitlist for this game",
         )
 
+    # A fixed member is expected at every game already (CLAUDE.md 2.3);
+    # signing up as a drop-in on top of that would charge them the
+    # per-game share a second time, on top of the season fee that
+    # already covers this game, and count them twice against capacity.
+    # Easy to do by accident: someone new joins the club, sees a signup
+    # button, taps it, and only afterwards gets added to the roster.
+    fixed_member = db.get(
+        SeasonMemberRow, {"season_id": season.id, "player_id": player.id}
+    )
+    if fixed_member is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Already a fixed member of this season — no need to sign up",
+        )
+
     if _has_open_slot(db, game, season):
         drop_in = DropInRow(player_id=player.id, game_id=game.id, signed_up_at=_now())
         db.add(drop_in)
@@ -1820,6 +1916,7 @@ def set_player_gender(
         name=player.name,
         gender=_gender(player.gender),
         avatar_url=player.avatar_url,
+        linked=player.line_user_id is not None,
     )
 
 
@@ -1853,6 +1950,7 @@ def set_player_name(
         name=player.name,
         gender=_gender(player.gender),
         avatar_url=player.avatar_url,
+        linked=player.line_user_id is not None,
     )
 
 

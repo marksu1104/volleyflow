@@ -37,6 +37,7 @@ function describeDate(dateStr) {
 
   return {
     label: `${date.getMonth() + 1}/${date.getDate()}（週${WEEKDAYS[date.getDay()]}）`,
+    year: date.getFullYear(),
     month: date.getMonth() + 1,
     day: String(date.getDate()),
     weekday: `週${WEEKDAYS[date.getDay()]}`,
@@ -91,7 +92,7 @@ function renderGameHero(season, game, opts) {
   const capacity = season.capacity;
   const full = expected >= capacity;
 
-  const whenParts = [info.weekday];
+  const whenParts = [];
   if (season.game_start_time && season.game_end_time) {
     whenParts.push(escapeHtml(`${season.game_start_time.slice(0, 5)}–${season.game_end_time.slice(0, 5)}`));
   }
@@ -101,8 +102,8 @@ function renderGameHero(season, game, opts) {
     <div class="hero">
       <div class="hero-head">
         <div>
-          <div class="hero-date">${info.month} / ${info.day}</div>
-          <div class="hero-when">${whenParts.join(" · ")}</div>
+          <div class="hero-date">${info.month}/${info.day}<span class="hero-weekday">${info.weekday}</span></div>
+          <div class="hero-when">${whenParts.length ? whenParts.join(" · ") : `${info.year} 年`}</div>
         </div>
         ${info.relative ? `<span class="hero-rel">${info.relative}</span>` : ""}
       </div>
