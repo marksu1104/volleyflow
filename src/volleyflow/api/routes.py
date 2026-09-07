@@ -6,6 +6,8 @@ from decimal import Decimal
 from typing import cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
+from sqlalchemy import case, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from volleyflow.api.auth import verify_id_token
@@ -44,6 +46,7 @@ from volleyflow.api.schemas import (
     MyClubOut,
     NameUpdate,
     PaymentCreate,
+    PlayerBalanceOut,
     PlayerIdentify,
     PlayerIdentifyOut,
     PlayerLedgerOut,
@@ -2145,6 +2148,26 @@ def record_payment(
     _get_player_or_404(db, player_id)
     _require_club_member(db, club_id, player_id)
 
+    # Recording money is the one thing that must not happen twice because
+    # a phone lost signal mid-request and the tap was repeated. If this
+    # token has been seen, the payment is already recorded: hand back the
+    # entry that exists rather than writing another.
+    if payload.client_token is not None:
+        already = (
+            db.query(LedgerEntryRow)
+            .filter(LedgerEntryRow.client_token == payload.client_token)
+            .first()
+        )
+        if already is not None:
+            return LedgerEntryOut(
+                id=already.id,
+                entry_type=already.entry_type,
+                amount=already.amount,
+                recorded_at=already.recorded_at,
+                season_id=already.season_id,
+                note=already.note,
+            )
+
     entry = LedgerEntryRow(
         player_id=player_id,
         club_id=club_id,
@@ -2153,9 +2176,31 @@ def record_payment(
         recorded_at=_now(),
         season_id=payload.season_id,
         note=payload.note,
+        client_token=payload.client_token,
     )
     db.add(entry)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two copies of the same tap arrived close enough together that
+        # both passed the check above; the index caught the loser. The
+        # payment is recorded either way, which is all the caller needs.
+        db.rollback()
+        existing = (
+            db.query(LedgerEntryRow)
+            .filter(LedgerEntryRow.client_token == payload.client_token)
+            .first()
+        )
+        if existing is None:
+            raise
+        return LedgerEntryOut(
+            id=existing.id,
+            entry_type=existing.entry_type,
+            amount=existing.amount,
+            recorded_at=existing.recorded_at,
+            season_id=existing.season_id,
+            note=existing.note,
+        )
     db.refresh(entry)
 
     return LedgerEntryOut(
@@ -2166,6 +2211,60 @@ def record_payment(
         season_id=entry.season_id,
         note=entry.note,
     )
+
+
+@router.get("/clubs/{club_id}/balances", response_model=list[PlayerBalanceOut])
+def list_club_balances(
+    club_id: int,
+    season_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> list[PlayerBalanceOut]:
+    """Every player's balance in this club, in one query.
+
+    The ledger screen needs a number per person, and fetching each
+    person's full entry history to add it up in the browser meant one
+    request per member — around forty on a page load for a normal club,
+    against a six-connection browser limit. The sums are trivial for the
+    database to do together, so it does.
+
+    Organizer-only: this is the whole club's books at a glance. A member
+    reading their own balance still goes through the per-player ledger
+    endpoint, which shows the entries behind the number.
+    """
+    _get_club_or_404(db, club_id)
+    _require_organizer(db, club_id, current_player)
+
+    in_season = LedgerEntryRow.season_id == season_id
+    rows = (
+        db.query(
+            LedgerEntryRow.player_id,
+            func.sum(LedgerEntryRow.amount),
+            func.sum(case((in_season, LedgerEntryRow.amount), else_=0)),
+            func.sum(
+                case(
+                    (
+                        in_season
+                        & (LedgerEntryRow.entry_type == EntryType.SEASON_FEE_CHARGED),
+                        LedgerEntryRow.amount,
+                    ),
+                    else_=0,
+                )
+            ),
+        )
+        .filter(LedgerEntryRow.club_id == club_id)
+        .group_by(LedgerEntryRow.player_id)
+        .all()
+    )
+    return [
+        PlayerBalanceOut(
+            player_id=player_id,
+            balance=balance_total,
+            season_total=season_total,
+            season_fee_charged=season_fee,
+        )
+        for player_id, balance_total, season_total, season_fee in rows
+    ]
 
 
 @router.get(

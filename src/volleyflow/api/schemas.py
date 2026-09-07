@@ -319,6 +319,12 @@ class PaymentCreate(BaseModel):
     paid the organizer, negative means the organizer paid the player."""
     season_id: int | None = None
     note: str | None = None
+    client_token: str | None = None
+    """Generated once per intended payment by the caller. Sending the
+    same token again returns the entry already recorded instead of
+    recording a second one — so a double tap, or a retry after a request
+    that timed out on a bad connection, can't book the money twice. See
+    routes.record_payment."""
 
 
 class LedgerEntryOut(BaseModel):
@@ -328,6 +334,27 @@ class LedgerEntryOut(BaseModel):
     recorded_at: datetime
     season_id: int | None
     note: str | None
+
+
+class PlayerBalanceOut(BaseModel):
+    """One player's money in one club, summed three ways at once.
+
+    The ledger page needs all three per person, and used to fetch a whole
+    entry history per member to add them up in the browser — one request
+    each, forty on a page load for a normal-sized club. The database can
+    do the same arithmetic for everyone in a single pass.
+    """
+
+    player_id: int
+    balance: Decimal
+    """Everything this player has ever been charged or credited in this
+    club. Positive: the organizer owes them."""
+    season_total: Decimal
+    """The part of that belonging to the season asked about — so the rest
+    of the balance is what carried in from elsewhere."""
+    season_fee_charged: Decimal
+    """Just the season-fee entries for that season, before any payment,
+    which is what "本季季費" means on screen."""
 
 
 class PlayerLedgerOut(BaseModel):

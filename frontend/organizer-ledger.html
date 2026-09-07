@@ -180,6 +180,7 @@
         return;
       }
       currentSeason = await res.json();
+      await loadBalances(currentSeason);
       await Promise.all([renderFeeTab(), renderDropInTab(), renderClosingTab()]);
     } catch (e) {
       errorEl.textContent = "連不上伺服器：" + e.message;
@@ -188,32 +189,45 @@
 
   // --- shared helpers -----------------------------------------------
 
-  async function memberLedgers(season) {
-    const ledgers = await Promise.all(
-      season.members.map((m) =>
-        fetch(`${API_BASE}/clubs/${currentClubId()}/players/${m.id}/ledger`, {
-          headers: authHeader(),
-        }).then((r) => (r.ok ? r.json() : null))
-      )
+  /** Everyone's balance in one request. This used to be one request per
+   * member — around forty on a page load for a normal club, against a
+   * browser that opens six connections at a time, which is why this
+   * screen crawled. Cached on `balances` so switching tabs doesn't
+   * re-ask. */
+  let balances = {};
+
+  async function loadBalances(season) {
+    const res = await fetch(
+      `${API_BASE}/clubs/${currentClubId()}/balances?season_id=${season.id}`,
+      { headers: authHeader() }
     );
-    return season.members.map((m, i) => ({ member: m, ledger: ledgers[i] }));
+    balances = {};
+    if (res.ok) {
+      for (const row of await res.json()) balances[row.player_id] = row;
+    }
+  }
+
+  /** The zero row for someone with no ledger entries at all — a member
+   * added moments ago, a drop-in who hasn't been charged yet. */
+  function balanceOf(playerId) {
+    return (
+      balances[playerId] || {
+        player_id: playerId,
+        balance: "0",
+        season_total: "0",
+        season_fee_charged: "0",
+      }
+    );
   }
 
   /** This season's own entries vs. everything else on the player's club
    * ledger — the "本季季費" / "上季餘額" breakdown the fee and closing
    * tabs both show, computed from data already on hand instead of a
    * dedicated endpoint. */
-  function splitLedger(ledger, seasonId) {
-    if (!ledger) return { seasonTotal: 0, otherTotal: 0, balance: 0 };
-    let seasonTotal = 0;
-    for (const e of ledger.entries) {
-      if (e.season_id === seasonId) seasonTotal += Number(e.amount);
-    }
-    return {
-      seasonTotal,
-      otherTotal: Number(ledger.balance) - seasonTotal,
-      balance: Number(ledger.balance),
-    };
+  function splitLedger(row) {
+    const balance = Number(row.balance);
+    const seasonTotal = Number(row.season_total);
+    return { seasonTotal, otherTotal: balance - seasonTotal, balance };
   }
 
   function moneyRowHtml(playerId, name, gender, split, extraBreakLabel, extraBreakValue) {
@@ -291,31 +305,63 @@
     await submitPayment(playerId, -amount);
   }
 
+  /**
+   * Records money, and shows it as recorded straight away.
+   *
+   * Two separate problems are being handled here. The tap used to wait
+   * on a write and then a full reload of the page's data before
+   * anything moved, which on a phone is a long, silent second or more.
+   * And a tap that times out invites a second tap, which on money means
+   * recording it twice — so each intended payment carries a token, and
+   * the server returns the entry it already has rather than adding
+   * another. Retrying is therefore always safe.
+   */
   async function submitPayment(playerId, amount) {
+    const token = `${currentSeason.id}-${playerId}-${amount}-${Date.now()}`;
+    const row = balanceOf(playerId);
+    const before = { ...row };
+    balances[playerId] = {
+      ...row,
+      balance: String(Number(row.balance) + Number(amount)),
+      season_total: String(Number(row.season_total) + Number(amount)),
+    };
+    renderTabsFromBalances();
+
     try {
       await postJson(API_BASE, `/clubs/${currentClubId()}/players/${playerId}/payments`, {
         amount: String(amount),
         season_id: currentSeason.id,
         note: "帳務頁記錄",
+        client_token: token,
       });
-      loadLedger(currentSeason.id);
+      await loadBalances(currentSeason);
+      renderTabsFromBalances();
     } catch (e) {
+      balances[playerId] = before;
+      renderTabsFromBalances();
       alert("記錄失敗：" + e.message);
     }
   }
 
+  /** Redraws the three tabs from the balances already in hand — no
+   * network, so the screen keeps up with a tap. */
+  function renderTabsFromBalances() {
+    renderFeeTab();
+    renderDropInList();
+    renderClosingTab();
+  }
+
   // --- 季費 tab --------------------------------------------------------
 
-  async function renderFeeTab() {
+  function renderFeeTab() {
     const season = currentSeason;
-    const rows = await memberLedgers(season);
 
     let collected = 0;
     let total = 0;
-    const rowsHtml = rows
-      .map(({ member, ledger }) => {
-        const split = splitLedger(ledger, season.id);
-        const feeCharged = -sumByType(ledger, season.id, "season_fee_charged");
+    const rowsHtml = season.members
+      .map((member) => {
+        const split = splitLedger(balanceOf(member.id));
+        const feeCharged = -Number(balanceOf(member.id).season_fee_charged);
         total += feeCharged;
         // How much of *this season's* fee is paid — driven only by
         // entries tagged to this season, never by a carried balance
@@ -327,26 +373,22 @@
       })
       .join("");
 
-    document.getElementById("fee-list").innerHTML = rowsHtml || '<div class="empty">這一季還沒有固定成員</div>';
+    document.getElementById("fee-list").innerHTML =
+      rowsHtml || '<div class="empty">這一季還沒有固定成員</div>';
     document.getElementById("fee-collected").textContent = `$${Math.round(collected)} / $${Math.round(total)}`;
     document.getElementById("fee-progress").style.width = total > 0 ? `${Math.min(100, (collected / total) * 100)}%` : "0%";
-    const unpaidCount = rows.filter(({ ledger }) => ledger && Number(ledger.balance) < 0).length;
+    const unpaidCount = season.members.filter(
+      (m) => Number(balanceOf(m.id).balance) < 0
+    ).length;
     document.getElementById("fee-hint").textContent =
-      unpaidCount === 0 ? "全部已收" : `${rows.length - unpaidCount} 人已收・${unpaidCount} 人未收・季費於開季前收款`;
+      unpaidCount === 0
+        ? "全部已收"
+        : `${season.members.length - unpaidCount} 人已收・${unpaidCount} 人未收・季費於開季前收款`;
     document.getElementById("fee-share-label").textContent = `每人 $${season.share_per_game * seasonBillableGames(season)} · ${seasonBillableGames(season)} 場 × $${season.share_per_game}`;
   }
 
   function seasonBillableGames(season) {
     return season.games.filter((g) => g.status !== "cancelled_refunded").length;
-  }
-
-  function sumByType(ledger, seasonId, entryType) {
-    if (!ledger) return 0;
-    let sum = 0;
-    for (const e of ledger.entries) {
-      if (e.season_id === seasonId && e.entry_type === entryType) sum += Number(e.amount);
-    }
-    return sum;
   }
 
   // --- 當天臨打 tab -----------------------------------------------------
@@ -375,19 +417,17 @@
       list.innerHTML = '<div class="empty">這一場沒有臨打</div>';
       return;
     }
-    const ledgers = await Promise.all(
-      game.confirmed_drop_ins.map((d) =>
-        fetch(`${API_BASE}/clubs/${currentClubId()}/players/${d.player_id}/ledger`, {
-          headers: authHeader(),
-        }).then((r) => (r.ok ? r.json() : null))
-      )
-    );
     list.innerHTML = game.confirmed_drop_ins
-      .map((d, i) => {
-        const ledger = ledgers[i];
-        const split = splitLedger(ledger, currentSeason.id);
-        return moneyRowHtml(d.player_id, d.player_name, d.gender, split, null, null);
-      })
+      .map((d) =>
+        moneyRowHtml(
+          d.player_id,
+          d.player_name,
+          d.gender,
+          splitLedger(balanceOf(d.player_id)),
+          null,
+          null
+        )
+      )
       .join("");
   }
 
@@ -424,14 +464,14 @@
     }
 
     document.getElementById("closing-settled-at").textContent = season.settled_at.slice(0, 16).replace("T", " ");
-    const rows = await memberLedgers(season);
-    const unsettled = rows.filter(({ ledger }) => ledger && Number(ledger.balance) !== 0);
+    const unsettled = season.members.filter(
+      (m) => Number(balanceOf(m.id).balance) !== 0
+    );
     document.getElementById("closing-all-clear").hidden = unsettled.length > 0;
     document.getElementById("closing-list").innerHTML = unsettled
-      .map(({ member, ledger }) => {
-        const split = splitLedger(ledger, season.id);
-        return moneyRowHtml(member.id, member.name, member.gender, split, null, null);
-      })
+      .map((m) =>
+        moneyRowHtml(m.id, m.name, m.gender, splitLedger(balanceOf(m.id)), null, null)
+      )
       .join("");
   }
 
