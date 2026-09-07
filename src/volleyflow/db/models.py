@@ -274,6 +274,20 @@ class LedgerEntryRow(Base):
         Index("ix_ledger_entries_player_id", "player_id"),
         Index("ix_ledger_entries_season_id", "season_id"),
         Index("ix_ledger_entries_club_id", "club_id"),
+        # Makes recording a payment safe to repeat. A tap that times out
+        # on a phone, a double tap, a retry — all send the same
+        # client-generated token, and the database refuses the second
+        # row rather than recording the money twice. Partial, because
+        # only client-initiated entries carry a token; everything the
+        # server writes itself (fees, refunds, adjustments) leaves it
+        # NULL, and any number of NULLs coexist.
+        Index(
+            "uq_ledger_entries_client_token",
+            "client_token",
+            unique=True,
+            postgresql_where=text("client_token IS NOT NULL"),
+            sqlite_where=text("client_token IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Identity(), primary_key=True)
@@ -296,3 +310,7 @@ class LedgerEntryRow(Base):
     """Which season this relates to, when there is one — a manual cash
     payment might cover more than one season, so this stays optional."""
     note: Mapped[str | None] = mapped_column(default=None)
+    client_token: Mapped[str | None] = mapped_column(default=None)
+    """A token the caller generates once per intended action, so a
+    retried or double-tapped request lands as one entry. See the partial
+    unique index above."""
