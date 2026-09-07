@@ -44,7 +44,10 @@
   </p>
 
   <div id="create-season-form" class="settings-form" hidden>
-    <p class="empty-club-note">這個球隊還沒有任何一季，先建立第一季。</p>
+    <div class="empty-state" style="text-align:left">
+      <h3>建立第一季</h3>
+      <p>一季 = 一段時間內的一組場次 + 一筆場地費 + 一份固定成員名單。填完下面幾格，系統會把場地費平均分攤成每人每場的金額，並在開季時就把季費記到每個人的帳上。</p>
+    </div>
 
     <div class="field">
       <label for="c-cost">場地費總額</label>
@@ -217,6 +220,9 @@
     document.getElementById("no-club-note").hidden = hasClub;
     document.getElementById("create-season-form").hidden = !hasClub || !!id;
     document.getElementById("settings-form").hidden = !id;
+    // "尚無任何季別" in a picker is noise when creating the first season
+    // is the only thing you can do here.
+    document.getElementById("season-picker").hidden = !id;
     if (id) loadSettings(id);
   });
 

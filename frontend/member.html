@@ -52,8 +52,8 @@
     <span id="balance-value" class="balance-value"></span>
   </div>
 
-  <div class="section-label">本季場次</div>
-  <div id="month-cal" class="mcal"></div>
+  <div class="section-label" id="cal-label" hidden>本季場次</div>
+  <div id="month-cal" class="mcal" hidden></div>
 </div>
 
 <div id="club-sheet-backdrop" class="gsheet-backdrop" hidden>
@@ -123,10 +123,12 @@
     renderClubChip();
     renderJoinPrompt();
     if (currentSeasonId) loadSeason(currentSeasonId);
+    else renderNoSeason(); // now that allClubs/myClubs are known, name the club
   })();
 
   document.getElementById("player-name").addEventListener("change", () => {
     if (currentSeasonId) loadSeason(currentSeasonId);
+    else renderNoSeason(); // now that allClubs/myClubs are known, name the club
   });
 
   initClubAndSeasonPickers(
@@ -146,13 +148,48 @@
       renderClubChip();
       renderJoinPrompt();
       if (id) loadSeason(id);
-      else {
-        currentSeason = null;
-        document.getElementById("hero-wrap").innerHTML = "";
-        document.getElementById("month-cal").innerHTML = "";
-      }
+      else renderNoSeason();
     }
   );
+
+  /** No season to show — either this player is in no club at all, or the
+   * club they're looking at hasn't started one. Both are normal states on
+   * a fresh install, and both need to say what happens next rather than
+   * leaving empty cards on screen. */
+  function renderNoSeason() {
+    currentSeason = null;
+    document.getElementById("cal-label").hidden = true;
+    document.getElementById("month-cal").hidden = true;
+    document.getElementById("month-cal").innerHTML = "";
+    document.getElementById("balance-label").hidden = true;
+    document.getElementById("balance-card").hidden = true;
+    document.getElementById("season-picker").hidden = true;
+
+    const clubId = currentClubId();
+    const club = allClubs.find((c) => String(c.id) === String(clubId));
+    const mine = myClubs.find((c) => String(c.id) === String(clubId));
+
+    let html;
+    if (!club) {
+      html = emptyStateHtml(
+        "還沒有球隊",
+        "點左上角的球隊按鈕，可以建立一個新的球隊，或用主揪給你的連結加入。"
+      );
+    } else if (mine && mine.role === "organizer") {
+      html = emptyStateHtml(
+        `「${club.name}」還沒有開季`,
+        "先建立第一季：輸入場地費、場次日期和固定成員，系統會自動算出每個人的季費。",
+        { label: "建立第一季", href: "organizer-settings.html" }
+      );
+    } else {
+      html = emptyStateHtml(
+        `「${club.name}」還沒有開季`,
+        "主揪開季之後，這裡就會出現本季的場次、你的請假狀態和帳務。"
+      );
+    }
+    document.getElementById("hero-wrap").innerHTML = html;
+    document.getElementById("hero-wrap").onclick = null;
+  }
 
   async function refreshMyClubs() {
     const res = await fetch(`${API_BASE}/clubs`);
@@ -294,6 +331,9 @@
         selectedGameId = upcoming ? upcoming.id : null;
       }
       clubMembers = await fetchClubMembers(API_BASE, currentClubId());
+      document.getElementById("season-picker").hidden = false;
+      document.getElementById("cal-label").hidden = false;
+      document.getElementById("month-cal").hidden = false;
       renderHero(season);
       renderMonthCalendar(document.getElementById("month-cal"), season.games, selectGame);
       renderSelectedGameDetail();

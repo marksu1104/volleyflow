@@ -33,8 +33,8 @@
 
   <div id="hero-wrap" style="margin-top: 14px"></div>
 
-  <div class="section-label">本季場次</div>
-  <div id="month-cal" class="mcal"></div>
+  <div class="section-label" id="cal-label" hidden>本季場次</div>
+  <div id="month-cal" class="mcal" hidden></div>
 </div>
 
 <div id="game-sheet-backdrop" class="gsheet-backdrop" hidden>
@@ -74,7 +74,27 @@
 
   initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
     if (id) loadDashboard(id);
+    else renderNoSeason();
   });
+
+  function renderNoSeason() {
+    currentSeason = null;
+    document.getElementById("season-meta").innerHTML = "";
+    document.getElementById("cal-label").hidden = true;
+    document.getElementById("month-cal").hidden = true;
+    document.getElementById("season-picker").hidden = true;
+    document.getElementById("hero-wrap").innerHTML = currentClubId()
+      ? emptyStateHtml(
+          "這個球隊還沒有開季",
+          "建立第一季之後，這裡會顯示下一場的出席人數、男女比，以及需要你處理的事情。",
+          { label: "建立第一季", href: "organizer-settings.html" }
+        )
+      : emptyStateHtml("還沒有球隊", "請先到會員頁用 LINE 開啟，建立或加入一個球隊。", {
+          label: "前往會員頁",
+          href: "member.html",
+        });
+    document.getElementById("hero-wrap").onclick = null;
+  }
 
   async function loadDashboard(seasonId) {
     const errorEl = document.getElementById("error");
@@ -96,6 +116,9 @@
       }
 
       clubMembers = await fetchClubMembers(API_BASE, currentClubId());
+      document.getElementById("season-picker").hidden = false;
+      document.getElementById("cal-label").hidden = false;
+      document.getElementById("month-cal").hidden = false;
       renderMeta(season);
       renderHero(season);
       renderMonthCalendar(document.getElementById("month-cal"), season.games, selectGame);
