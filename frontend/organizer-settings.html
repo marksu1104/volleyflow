@@ -221,6 +221,19 @@
       </div>
       <p class="hint">結束後名單與場地費會鎖住，餘額結轉到下一季。</p>
     </div>
+
+    <div id="danger-section">
+      <div class="section-label">刪除</div>
+      <div class="set-row">
+        <span class="set-label">刪除這一季<span class="set-sub">場次、請假、臨打、已記的季費都會消失</span></span>
+        <button type="button" class="set-link" onclick="deleteSeason()">刪除</button>
+      </div>
+      <div class="set-row">
+        <span class="set-label">刪除整個球隊<span class="set-sub">連同底下所有季別一起刪除</span></span>
+        <button type="button" class="set-link" onclick="deleteClub()">刪除</button>
+      </div>
+      <p class="hint">只有主揪能刪除，而且已經結算過的季別不能刪——那是已經結清的帳。</p>
+    </div>
   </div>
 </div>
 
@@ -646,6 +659,43 @@
       loadSettings(currentSeasonId);
     } catch (e) {
       alert("取消失敗：" + e.message);
+    }
+  }
+
+  async function deleteSeason() {
+    if (!currentSeason) return;
+    const label = `${currentSeason.games.length} 場、${currentSeason.members.length} 位成員`;
+    if (!confirm(`確定要刪除這一季嗎？
+
+${label} 以及已經記在每個人帳上的季費都會一起消失，無法復原。`)) {
+      return;
+    }
+    try {
+      await deleteJson(API_BASE, `/seasons/${currentSeasonId}`);
+      localStorage.removeItem("vf_org_season");
+      alert("已刪除這一季");
+      location.reload();
+    } catch (e) {
+      alert("刪除失敗：" + e.message);
+    }
+  }
+
+  async function deleteClub() {
+    const warning =
+      "確定要刪除整個球隊嗎？\n\n" +
+      "底下所有季別、場次和帳務紀錄都會一起消失，無法復原。\n" +
+      "（成員本人的帳號不會被刪除，只是不再屬於這個球隊。）";
+    if (!confirm(warning)) {
+      return;
+    }
+    try {
+      await deleteJson(API_BASE, `/clubs/${currentClubId()}`);
+      localStorage.removeItem(CLUB_STORAGE_KEY);
+      localStorage.removeItem("vf_org_season");
+      alert("已刪除這個球隊");
+      location.href = "member.html";
+    } catch (e) {
+      alert("刪除失敗：" + e.message);
     }
   }
 

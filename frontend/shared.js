@@ -779,6 +779,21 @@ function emptyStateHtml(title, body, action) {
   `;
 }
 
+/** DELETE with the caller's token, throwing the API's own error detail —
+ * the mirror of postJson, including clearing the response cache so the
+ * next read doesn't paint from a copy of something just deleted. */
+async function deleteJson(apiBase, path) {
+  const res = await fetch(`${apiBase}${path}`, {
+    method: "DELETE",
+    headers: authHeader(),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || res.statusText);
+  }
+  clearResponseCache();
+}
+
 /** Everyone in a club (fixed member or not) — the pool the 指定代打
  * picker offers before falling back to typing a name. Public endpoint,
  * no auth needed. Returns [] rather than throwing on failure, since a
