@@ -1786,3 +1786,50 @@ def test_a_stranger_cannot_join_a_club_as_someone_they_are_not(
 
     assert response.status_code == 200
     assert response.json()["name"] == "Carol"  # the body's player_id was ignored
+
+
+# --- a player's own club list --------------------------------------------
+
+
+def test_list_player_clubs_spans_multiple_clubs_with_roles(client: TestClient) -> None:
+    club_a = create_club(client, name="Club A")
+    alice = identify(client, "Alice")
+    client.post(f"/clubs/{club_a['id']}/join", headers=auth_headers(alice["token"]))
+    club_b = create_club(client, name="Club B")
+    client.post(f"/clubs/{club_b['id']}/join", headers=auth_headers(alice["token"]))
+
+    response = client.get(
+        f"/players/{alice['id']}/clubs", headers=auth_headers(alice["token"])
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert {c["name"]: c["role"] for c in body} == {
+        "Club A": "member",
+        "Club B": "member",
+    }
+
+
+def test_list_player_clubs_includes_organizer_role(client: TestClient) -> None:
+    club = create_club(client)
+
+    response = client.get(
+        f"/players/{club['organizer_id']}/clubs",
+        headers=auth_headers(club["organizer_token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"id": club["id"], "name": club["name"], "role": "organizer"}
+    ]
+
+
+def test_list_player_clubs_for_someone_else_returns_403(client: TestClient) -> None:
+    alice = identify(client, "Alice")
+    bob = identify(client, "Bob")
+
+    response = client.get(
+        f"/players/{alice['id']}/clubs", headers=auth_headers(bob["token"])
+    )
+
+    assert response.status_code == 403

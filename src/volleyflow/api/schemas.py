@@ -31,6 +31,13 @@ class ClubOut(BaseModel):
     name: str
 
 
+class MyClubOut(BaseModel):
+    id: int
+    name: str
+    role: str
+    """"organizer" or "member" in this specific club."""
+
+
 class ClubMemberOut(BaseModel):
     id: int
     name: str

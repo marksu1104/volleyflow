@@ -40,6 +40,7 @@ from volleyflow.api.schemas import (
     MemberAdd,
     MemberOut,
     MemberSettlementOut,
+    MyClubOut,
     NameUpdate,
     PaymentCreate,
     PlayerIdentify,
@@ -574,6 +575,35 @@ def create_club(
 def list_clubs(db: Session = Depends(get_db)) -> list[ClubOut]:
     clubs = db.query(ClubRow).order_by(ClubRow.id).all()
     return [ClubOut(id=c.id, name=c.name) for c in clubs]
+
+
+@router.get("/players/{player_id}/clubs", response_model=list[MyClubOut])
+def list_player_clubs(
+    player_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> list[MyClubOut]:
+    """Every club this player belongs to and their role in each — what a
+    profile page's club list needs, spanning clubs the way a single
+    club's member list (GET /clubs/{id}/members) can't. Self only: which
+    clubs someone else belongs to isn't this app's business to hand to a
+    third party, including another club's organizer.
+    """
+    if current_player.id != player_id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "You can only list your own clubs"
+        )
+    rows = (
+        db.query(ClubRow, ClubMemberRow)
+        .join(ClubMemberRow, ClubMemberRow.club_id == ClubRow.id)
+        .filter(ClubMemberRow.player_id == player_id)
+        .order_by(ClubRow.id)
+        .all()
+    )
+    return [
+        MyClubOut(id=club.id, name=club.name, role=membership.role)
+        for club, membership in rows
+    ]
 
 
 @router.get("/clubs/{club_id}/members", response_model=list[ClubMemberOut])
