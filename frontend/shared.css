@@ -78,6 +78,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 .wrap { max-width: 520px; margin: 0 auto; }
+
+/* Wordmark. Every page should say what app you're in — quietly, above
+   the working area, not competing with the content. */
+.brand {
+  font-family: var(--font-num); font-size: .82rem; font-weight: 700;
+  letter-spacing: .08em; color: var(--ink-faint); margin-bottom: 10px;
+}
 .wrap.wide { max-width: 760px; }
 
 h1 { font-size: 1.2rem; margin: 0 0 4px; }
@@ -159,6 +166,11 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 /* app-top bar: club chip + avatar, echoed on every page */
 .app-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
 .app-top .avatar { cursor: pointer; }
+.app-top-right { display: flex; align-items: center; gap: 8px; }
+.manage-btn {
+  border: 1px solid var(--rule-strong); background: var(--surface); color: var(--ink);
+  font-size: .78rem; font-weight: 700; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+}
 .club-chip {
   display: inline-flex; align-items: center; gap: 7px; border: none; background: var(--surface-2);
   color: var(--ink); font-size: .86rem; font-weight: 700; padding: 7px 12px 7px 8px; border-radius: 999px;
@@ -173,7 +185,10 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 /* hero card: the next/selected game's headline facts */
 .hero { background: var(--surface); border-radius: 16px; padding: 16px; box-shadow: var(--shadow); border: 1px solid var(--rule); animation: fadeIn .18s ease both; }
 .hero-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.hero-date { font-family: var(--font-num); font-size: 1.35rem; font-weight: 800; letter-spacing: -.01em; }
+.hero-date { font-family: var(--font-num); font-size: 1.35rem; font-weight: 800; letter-spacing: -.01em; display: flex; align-items: baseline; gap: 7px; }
+/* "9/8" alone doesn't read as a date at a glance — the weekday is what
+   makes it land, and it's also the thing people actually plan around. */
+.hero-weekday { font-family: var(--font-cjk); font-size: .82rem; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 2px 8px; border-radius: 999px; }
 .hero-when { font-size: .8rem; color: var(--ink-soft); margin-top: 4px; }
 .hero-rel { font-size: .74rem; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
 .hero-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rule); }

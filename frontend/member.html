@@ -24,11 +24,15 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="brand">VolleyFlow</div>
   <div class="app-top">
     <button type="button" id="club-chip" class="club-chip">
       <i class="club-dot" id="club-dot">-</i><span id="club-chip-name">選擇球隊</span><span class="caret">▾</span>
     </button>
-    <button type="button" class="avatar" id="avatar-btn" title="個人資料">?</button>
+    <span class="app-top-right">
+      <button type="button" id="manage-btn" class="manage-btn" hidden>管理</button>
+      <button type="button" class="avatar" id="avatar-btn" title="個人資料">?</button>
+    </span>
   </div>
   <div id="identity" class="identity"></div>
 
@@ -124,6 +128,7 @@
     identityEl.textContent = "";
     await refreshMyClubs();
     renderClubChip();
+    renderManageButton();
     renderJoinPrompt();
     return identified;
   })();
@@ -162,6 +167,7 @@
     (id) => {
       stopLoadingEscalation();
       renderClubChip();
+      renderManageButton();
       renderJoinPrompt();
       if (id) loadSeason(id);
       else renderNoSeason();
@@ -231,6 +237,17 @@
       const res = await fetch(`${API_BASE}/clubs/${pending}`, { headers: authHeader() });
       if (res.ok) allClubs.push(await res.json());
     }
+  }
+
+  /** The way into 球隊管理. It lives in the top bar rather than in the
+   * club sheet because an organizer needs it constantly and shouldn't
+   * have to remember it's two taps deep — and it's simply absent for
+   * everyone else, which is also how they learn the app has nothing
+   * hidden from them. */
+  function renderManageButton() {
+    const clubId = currentClubId();
+    const mine = myClubs.find((c) => String(c.id) === String(clubId));
+    document.getElementById("manage-btn").hidden = !(mine && mine.role === "organizer");
   }
 
   function renderClubChip() {
@@ -327,6 +344,10 @@
 
   document.getElementById("avatar-btn").addEventListener("click", () => {
     location.href = "profile.html";
+  });
+
+  document.getElementById("manage-btn").addEventListener("click", () => {
+    location.href = "organizer.html";
   });
 
   [
@@ -447,14 +468,16 @@
   }
 
   async function cancelAbsence(absenceId, btn) {
-    try {
-      await withButtonFeedback(btn, "處理中...", async () => {
-        await postJson(API_BASE, `/absences/${absenceId}/cancel`, {});
-      });
-      loadSeason(currentSeasonId);
-    } catch (e) {
-      alert("取消請假失敗：" + e.message);
-    }
+    if (absenceId < 0) return;  // still saving; the real id isn't known yet
+    await optimistically(
+      (season) => {
+        for (const game of season.games) {
+          game.absences = game.absences.filter((a) => a.id !== absenceId);
+        }
+      },
+      () => postJson(API_BASE, `/absences/${absenceId}/cancel`, {}),
+      "取消請假失敗："
+    );
   }
 
   function buildMyActionHtml(season, game) {
@@ -519,39 +542,74 @@
     card.hidden = false;
   }
 
-  async function recordAbsence(gameId, btn) {
-    const name = playerName();
+  /**
+   * Applies the change to what's on screen straight away, then sends it.
+   * A round trip to a sleepy free-tier backend is long enough that a tap
+   * with no visible result reads as "nothing happened" and gets tapped
+   * again. The server is still the authority: on failure we put the
+   * screen back and say why, and every success re-reads it anyway.
+   */
+  async function optimistically(mutateLocally, request, failureMessage) {
+    const snapshot = JSON.parse(JSON.stringify(currentSeason));
+    mutateLocally(currentSeason);
+    renderHero(currentSeason);
+    renderSelectedGameDetail();
     try {
-      await withButtonFeedback(btn, "處理中...", async () => {
-        await postJson(API_BASE, "/absences", { player_name: name, game_id: gameId });
-      });
+      await request();
       loadSeason(currentSeasonId);
     } catch (e) {
-      alert("請假失敗：" + e.message);
+      currentSeason = snapshot;
+      renderHero(currentSeason);
+      renderSelectedGameDetail();
+      alert(failureMessage + e.message);
     }
+  }
+
+  async function recordAbsence(gameId, btn) {
+    const name = playerName();
+    await optimistically(
+      (season) => {
+        const game = season.games.find((g) => g.id === gameId);
+        // A placeholder id: the row it draws is replaced by the real one
+        // as soon as loadSeason comes back, and any control keyed off it
+        // is disabled in the meantime.
+        game.absences.push({ id: -1, player_name: name, covered_by: null });
+      },
+      () => postJson(API_BASE, "/absences", { player_name: name, game_id: gameId }),
+      "請假失敗："
+    );
   }
 
   async function signUp(gameId, btn) {
     const name = playerName();
-    try {
-      await withButtonFeedback(btn, "處理中...", async () => {
-        await postJson(API_BASE, "/drop-ins", { player_name: name, game_id: gameId });
-      });
-      loadSeason(currentSeasonId);
-    } catch (e) {
-      alert("報名失敗：" + e.message);
-    }
+    await optimistically(
+      (season) => {
+        const game = season.games.find((g) => g.id === gameId);
+        game.confirmed_drop_ins.push({
+          id: -1,
+          player_id: myPlayerId,
+          player_name: name,
+          gender: null,
+          covering: null,
+        });
+      },
+      () => postJson(API_BASE, "/drop-ins", { player_name: name, game_id: gameId }),
+      "報名失敗："
+    );
   }
 
   async function cancelDropIn(dropInId, btn) {
-    try {
-      await withButtonFeedback(btn, "處理中...", async () => {
-        await postJson(API_BASE, `/drop-ins/${dropInId}/cancel`, {});
-      });
-      loadSeason(currentSeasonId);
-    } catch (e) {
-      alert("取消失敗：" + e.message);
-    }
+    if (dropInId < 0) return;  // still saving; the real id isn't known yet
+    await optimistically(
+      (season) => {
+        for (const game of season.games) {
+          game.confirmed_drop_ins = game.confirmed_drop_ins.filter((d) => d.id !== dropInId);
+          game.waitlist_entries = game.waitlist_entries.filter((w) => w.id !== dropInId);
+        }
+      },
+      () => postJson(API_BASE, `/drop-ins/${dropInId}/cancel`, {}),
+      "取消失敗："
+    );
   }
 </script>
 </body>

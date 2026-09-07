@@ -4,6 +4,8 @@ or cost changes) instead of at season end — see docs/billing-rules.md
 inputs change".
 """
 
+from decimal import Decimal
+
 from fastapi.testclient import TestClient
 
 from tests.api.factories import start_season
@@ -200,3 +202,84 @@ def test_settling_a_season_does_not_recharge_the_season_fee(
     ledger = client.get(f"/clubs/{season['club_id']}/players/{alice_id}/ledger").json()
     entry_types = [e["entry_type"] for e in ledger["entries"]]
     assert entry_types.count("season_fee_charged") == 1
+
+
+def test_a_fixed_member_cannot_also_sign_up_as_a_drop_in(client: TestClient) -> None:
+    """They're expected at every game already — signing up would charge
+    the per-game share a second time and count them twice."""
+    season = start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+
+    response = client.post(
+        "/drop-ins", json={"player_name": "Alice", "game_id": game_id}
+    )
+
+    assert response.status_code == 400
+
+
+def test_adding_a_member_cancels_and_refunds_their_drop_ins(
+    client: TestClient,
+) -> None:
+    """The ordinary sequence for someone new: they join the club, tap the
+    signup button before anyone explains it, and the organizer adds them
+    to the roster afterwards. Their drop-in fee has to come back off,
+    or the same game is charged to them twice.
+    """
+    season = start_season(
+        client,
+        total_venue_cost="10000",
+        game_dates=["2026-08-18", "2026-08-25"],
+        member_names=["Alice"],
+    )
+    signup = client.post(
+        "/drop-ins", json={"player_name": "Bob", "game_id": season["games"][0]["id"]}
+    )
+    bob_id = signup.json()["player_id"]
+    charged = client.get(f"/clubs/{season['club_id']}/players/{bob_id}/ledger").json()
+    assert Decimal(charged["balance"]) < 0, "the drop-in fee should be on his ledger"
+
+    client.post(f"/seasons/{season['id']}/members", json={"player_name": "Bob"})
+
+    ledger = client.get(f"/clubs/{season['club_id']}/players/{bob_id}/ledger").json()
+    types = [e["entry_type"] for e in ledger["entries"]]
+    assert types.count("drop_in_fee_charged") == 2, "charged then reversed"
+    assert (
+        sum(
+            Decimal(e["amount"])
+            for e in ledger["entries"]
+            if e["entry_type"] == "drop_in_fee_charged"
+        )
+        == 0
+    )
+    # Left owing exactly one season fee: 2 members, 2 games, ceil(10000/2/2)=2500
+    assert ledger["balance"] == "-5000"
+
+
+def test_adding_a_member_drops_them_off_the_waitlist(client: TestClient) -> None:
+    season = start_season(client, member_names=["Alice"], capacity=1)
+    game_id = season["games"][0]["id"]
+    client.post("/drop-ins", json={"player_name": "Bob", "game_id": game_id})
+
+    client.post(f"/seasons/{season['id']}/members", json={"player_name": "Bob"})
+
+    game = next(
+        g
+        for g in client.get(f"/seasons/{season['id']}").json()["games"]
+        if g["id"] == game_id
+    )
+    assert game["waitlist_entries"] == []
+    assert game["confirmed_drop_ins"] == []
+
+
+def test_a_roster_marks_who_has_no_line_account(client: TestClient) -> None:
+    """Alice was typed in by hand and can't act for herself; the
+    organizer needs to see that on the roster."""
+    season = start_season(client, member_names=["Alice"])
+
+    members = client.get(f"/seasons/{season['id']}").json()["members"]
+
+    alice = next(m for m in members if m["name"] == "Alice")
+    assert alice["linked"] is False
+    club_members = client.get(f"/clubs/{season['club_id']}/members").json()
+    organizer = next(m for m in club_members if m["role"] == "organizer")
+    assert organizer["linked"] is True
