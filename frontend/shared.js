@@ -574,6 +574,22 @@ async function postJson(apiBase, path, body, method) {
   return data;
 }
 
+/**
+ * A *preview* of each member's cost for one game, mirroring
+ * pricing.share_per_game — see docs/billing-rules.md "Core formula".
+ *
+ * The server stays authoritative: this only exists so the 開新一季 wizard
+ * can show the effect of adding a date or a member as you type, which is
+ * the whole point of that screen. Anything actually written to a ledger
+ * is computed in Python, and the page re-reads the server's number right
+ * after creating the season. Integer inputs divide exactly in IEEE754
+ * below 2^53, so ceil here agrees with ROUND_CEILING on Decimal.
+ */
+function previewSharePerGame(totalVenueCost, totalGames, memberCount) {
+  if (!(totalGames > 0) || !(memberCount > 0)) return null;
+  return Math.ceil(Number(totalVenueCost) / (totalGames * memberCount));
+}
+
 let _loadingEscalation = null;
 
 /** Says "still loading" in the same box that will later hold either the
