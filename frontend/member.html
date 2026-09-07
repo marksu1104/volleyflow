@@ -106,17 +106,16 @@
     history.replaceState(null, "", location.pathname);
   }
 
-  (async function initIdentity() {
+  const identityReady = (async function initIdentity() {
     const identityEl = document.getElementById("identity");
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
     if (!identified) {
-      identityEl.textContent = "（非 LINE 環境，手動輸入名字測試）";
-      // Still needed for the club chip/sheet to work while testing
-      // outside LIFF — only the "which clubs am I in" half (needing a
-      // player id) is skipped.
-      await refreshMyClubs();
-      renderClubChip();
-      return;
+      // Nothing on this page is readable without a verified identity any
+      // more — the roster and the games belong to a club, and a club is
+      // only visible to its members.
+      identityEl.textContent = "";
+      document.getElementById("name-row").hidden = true;
+      return null;
     }
     myPlayerId = identified.id;
     document.getElementById("name-row").hidden = true;
@@ -126,8 +125,7 @@
     await refreshMyClubs();
     renderClubChip();
     renderJoinPrompt();
-    if (currentSeasonId) loadSeason(currentSeasonId);
-    else renderNoSeason(); // now that allClubs/myClubs are known, name the club
+    return identified;
   })();
 
   document.getElementById("player-name").addEventListener("change", () => {
@@ -135,6 +133,19 @@
     else renderNoSeason(); // now that allClubs/myClubs are known, name the club
   });
 
+  identityReady.then((identified) => {
+    if (!identified) {
+      stopLoadingEscalation();
+      document.getElementById("hero-wrap").innerHTML = emptyStateHtml(
+        "請用 LINE 開啟",
+        "球隊的名單和場次只有成員看得到，所以需要先用 LINE 登入。請從 LINE 裡的連結開啟這一頁。"
+      );
+      return;
+    }
+    startPickers();
+  });
+
+  function startPickers() {
   initClubAndSeasonPickers(
     API_BASE,
     (function () {
@@ -157,6 +168,7 @@
     },
     (e) => showPageError(document.getElementById("hero-wrap"), e.message)
   );
+  }
 
   /** No season to show — either this player is in no club at all, or the
    * club they're looking at hasn't started one. Both are normal states on
@@ -197,17 +209,28 @@
     document.getElementById("hero-wrap").onclick = null;
   }
 
+  /** GET /clubs is scoped to the caller now, so "every club" and "my
+   * clubs" are the same list — it just also carries my role in each.
+   * The one club that can be relevant without being mine is the target
+   * of an invite link, fetched by id below purely so the join prompt has
+   * a name to show. */
   async function refreshMyClubs() {
-    const res = await fetch(`${API_BASE}/clubs`);
-    allClubs = res.ok ? await res.json() : [];
     if (!myPlayerId) {
       myClubs = [];
+      allClubs = [];
       return;
     }
     const mine = await fetch(`${API_BASE}/players/${myPlayerId}/clubs`, {
       headers: authHeader(),
     });
     myClubs = mine.ok ? await mine.json() : [];
+    allClubs = myClubs.slice();
+
+    const pending = currentClubId();
+    if (pending && !myClubs.some((c) => String(c.id) === String(pending))) {
+      const res = await fetch(`${API_BASE}/clubs/${pending}`, { headers: authHeader() });
+      if (res.ok) allClubs.push(await res.json());
+    }
   }
 
   function renderClubChip() {
@@ -260,7 +283,7 @@
       return `
         <button type="button" class="club-row${String(c.id) === String(clubId) ? " on" : ""}" data-pick-club="${c.id}">
           <i class="club-dot">${escapeHtml(c.name.slice(0, 1))}</i>
-          <span class="cr-name">${escapeHtml(c.name)}${mine ? "" : '<span class="cr-sub">尚未加入</span>'}</span>
+          <span class="cr-name">${escapeHtml(c.name)}${mine ? "" : '<span class="cr-sub">邀請連結・尚未加入</span>'}</span>
           ${roleTag}${manageLink}
         </button>
       `;
@@ -330,7 +353,9 @@
       // Paints from the last-seen copy first, then corrects itself — see
       // getJsonSWR. render() runs once or twice; it rebuilds everything
       // it touches, so running twice is just a redraw.
-      await getJsonSWR(`${API_BASE}/seasons/${seasonId}`, (season) => render(season));
+      await getJsonSWR(`${API_BASE}/seasons/${seasonId}`, (season) => render(season), {
+        headers: authHeader(),
+      });
     } catch (e) {
       errorEl.textContent = "連不上伺服器：" + e.message;
     }
