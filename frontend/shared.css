@@ -435,6 +435,23 @@ textarea.control { resize: vertical; min-height: 90px; }
 }
 .empty { color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center; }
 
+/* Loading, said out loud. An empty screen has three possible meanings —
+   still fetching, genuinely empty, or broken — and they have to look
+   different or every one of them reads as broken. This covers the first;
+   .empty-state covers the second and third. */
+.page-state {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 44px 20px; color: var(--ink-soft); font-size: .85rem; text-align: center;
+}
+.page-state p { margin: 0; max-width: 34ch; line-height: 1.6; }
+.spinner {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 2.5px solid var(--rule); border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
 /* What a page shows before there's anything to show. Deliberately not a
    bare "沒有資料" line: an organizer opening a brand-new club needs to be
    told what the next step is and taken there, not left staring at empty

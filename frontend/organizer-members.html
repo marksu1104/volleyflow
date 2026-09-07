@@ -45,8 +45,8 @@
     <a href="organizer-settings.html" class="org-nav-link">設定</a>
   </nav>
 
-  <select id="club-picker" class="season-picker club-picker"></select>
-  <select id="season-picker" class="season-picker"></select>
+  <select id="club-picker" class="season-picker club-picker" hidden></select>
+  <select id="season-picker" class="season-picker" hidden></select>
   <div id="error"></div>
 
   <div class="section-label">加入連結</div>
@@ -101,7 +101,17 @@
     location.href = "profile.html";
   });
 
-  initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
+  showPageLoading(document.getElementById("no-season"));
+  document.getElementById("roster-section").hidden = true;
+
+  initClubAndSeasonPickers(
+    API_BASE,
+    document.getElementById("club-picker"),
+    document.getElementById("season-picker"),
+    "vf_org_season",
+    (id) => {
+    stopLoadingEscalation();
+    document.getElementById("club-picker").hidden = !currentClubId();
     renderJoinLink();
     // The join link stays useful with no season (people can join the club
     // and wait in the pool), so only the season roster half is swapped
@@ -115,8 +125,10 @@
           "固定成員名單是跟著一季走的。可以先把上面的連結分享出去讓大家加入球隊，等開季時再從待加入名單挑人。",
           { label: "建立第一季", href: "organizer-settings.html" }
         );
-    if (id) loadMembers(id);
-  });
+      if (id) loadMembers(id);
+    },
+    (e) => showPageError(document.getElementById("no-season"), e.message)
+  );
 
   function renderJoinLink() {
     const clubId = currentClubId();
