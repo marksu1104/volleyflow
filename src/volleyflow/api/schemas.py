@@ -36,6 +36,14 @@ class MyClubOut(BaseModel):
     name: str
     role: str
     """"organizer" or "member" in this specific club."""
+    wants_fixed_membership: bool | None = None
+    """See ClubMemberRow.wants_fixed_membership — null means this person
+    was never asked, which is what the member page uses to decide whether
+    to ask them."""
+
+
+class MembershipIntent(BaseModel):
+    wants_fixed_membership: bool
 
 
 class ClubMemberOut(BaseModel):
@@ -46,6 +54,10 @@ class ClubMemberOut(BaseModel):
     linked: bool
     """See MemberOut.linked."""
     role: str
+    wants_fixed_membership: bool | None = None
+    """See ClubMemberRow.wants_fixed_membership. Shown to the organizer so
+    the join pool distinguishes "waiting to be put on the roster" from
+    "here for the odd game"."""
     """"organizer" or "member" — see ClubMemberRow."""
 
 
@@ -79,6 +91,11 @@ class SeasonUpdate(BaseModel):
 
 class MemberAdd(BaseModel):
     player_name: str
+    gender: Gender | None = None
+    """Only used when this name is new to the club. Someone added by name
+    has no account to set it from themselves, and the roster's male/female
+    count needs it — so it's offered at the one moment the organizer is
+    already typing them in."""
 
 
 class GameOut(BaseModel):

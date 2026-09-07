@@ -402,7 +402,7 @@ function renderGameDetail(container, season, game, options) {
     const femaleSelected = covering && covering.gender === "female" ? " selected" : "";
     return `
       <div class="sub-form" data-sub-form="${absence.id}" hidden>
-        ${candidates.length ? `<div class="sub-pick">${pickRows}</div><div class="or-line"><span>不在名單上</span></div>` : ""}
+        ${candidates.length ? `<div class="sub-pick">${pickRows}</div><div class="or-line"><span>找不到人？直接輸入訪客姓名</span></div>` : ""}
         <input type="text" placeholder="直接輸入名字" data-sub-name="${absence.id}" value="${escapeHtml(absence.covered_by || "")}">
         <select data-sub-gender="${absence.id}">
           <option value="">性別</option>
@@ -467,7 +467,7 @@ function renderGameDetail(container, season, game, options) {
       // the roster tells them in person or in the group chat, and some
       // members have no LINE account to do it with at all.
       const mark = canEdit
-        ? `<button type="button" class="mini-action" data-mark-absent="${escapeHtml(m.name)}">代為請假</button>`
+        ? `<button type="button" class="mini-action" data-mark-absent="${escapeHtml(m.name)}">請假</button>`
         : "";
       return `<div class="roster-row present"><span>${escapeHtml(m.name)}${genderTag(m.gender)}${guestTag(m)}</span><span class="roster-note">${mark}</span></div>`;
     })
@@ -487,7 +487,7 @@ function renderGameDetail(container, season, game, options) {
     ${game.locked ? '<div class="gdetail-locked">已過更動期限，這一場無法再變更</div>' : ""}
     ${
       diffRows.length
-        ? `<div class="gdetail-section-label">異動</div><div class="gdetail-roster">${diffRows.join("")}</div>`
+        ? `<div class="gdetail-section-label">請假與臨打</div><div class="gdetail-roster">${diffRows.join("")}</div>`
         : ""
     }
     ${
