@@ -233,6 +233,7 @@ class AbsenceDetailOut(BaseModel):
 
 class DropInDetailOut(BaseModel):
     id: int
+    player_id: int
     player_name: str
     gender: Gender | None = None
     covering: str | None

@@ -37,6 +37,7 @@ function describeDate(dateStr) {
 
   return {
     label: `${date.getMonth() + 1}/${date.getDate()}（週${WEEKDAYS[date.getDay()]}）`,
+    month: date.getMonth() + 1,
     day: String(date.getDate()),
     weekday: `週${WEEKDAYS[date.getDay()]}`,
     relative,
@@ -48,6 +49,77 @@ function describeDate(dateStr) {
 /** How many people are expected at a game right now. */
 function expectedAttendance(season, game) {
   return season.members.length - game.absences.length + game.confirmed_drop_ins.length;
+}
+
+/** How many of the people expected at this game are each gender — for
+ * the hero card's 男/女 pills and capacity bar. A member who recorded an
+ * absence isn't attending directly (their substitute, if any, is
+ * already counted separately as a confirmed drop-in); a gender-less
+ * member or drop-in counts toward the total but not toward either pill,
+ * same as the roster elsewhere in this app never requires gender. */
+function computeGenderCounts(season, game) {
+  const absentNames = new Set(game.absences.map((a) => a.player_name));
+  let male = 0;
+  let female = 0;
+  for (const m of season.members) {
+    if (absentNames.has(m.name)) continue;
+    if (m.gender === "male") male++;
+    else if (m.gender === "female") female++;
+  }
+  for (const d of game.confirmed_drop_ins) {
+    if (d.gender === "male") male++;
+    else if (d.gender === "female") female++;
+  }
+  return { male, female };
+}
+
+/**
+ * The hero card shown at the top of the member/organizer home screen and
+ * inside a game's detail sheet: date, expected headcount with the
+ * male/female split, and a row of small meta facts. Returns markup, not
+ * a rendered container, so callers can place it above their own
+ * page-specific content (an action button, a status line).
+ *
+ * `opts.metaPills` — extra `<span class="meta-pill">` HTML beyond the
+ * per-game share, e.g. a change deadline or the minimum-roster count.
+ */
+function renderGameHero(season, game, opts) {
+  const o = opts || {};
+  const info = describeDate(game.date);
+  const expected = expectedAttendance(season, game);
+  const { male, female } = computeGenderCounts(season, game);
+  const capacity = season.capacity;
+  const full = expected >= capacity;
+
+  const whenParts = [info.weekday];
+  if (season.game_start_time && season.game_end_time) {
+    whenParts.push(escapeHtml(`${season.game_start_time.slice(0, 5)}–${season.game_end_time.slice(0, 5)}`));
+  }
+  if (season.location) whenParts.push(escapeHtml(season.location));
+
+  return `
+    <div class="hero">
+      <div class="hero-head">
+        <div>
+          <div class="hero-date">${info.month} / ${info.day}</div>
+          <div class="hero-when">${whenParts.join(" · ")}</div>
+        </div>
+        ${info.relative ? `<span class="hero-rel">${info.relative}</span>` : ""}
+      </div>
+      <div class="count-row">
+        <span class="count-big${full ? " full" : ""}">${expected}</span><span class="count-cap">/ ${capacity} 人</span>
+        <span class="gender-pill m">男 ${male}</span><span class="gender-pill f">女 ${female}</span>
+      </div>
+      <div class="capacity-bar">
+        <i class="fill-m" style="width:${Math.min(100, (male / capacity) * 100)}%"></i>
+        <i class="fill-f" style="width:${Math.min(100, (female / capacity) * 100)}%"></i>
+      </div>
+      <div class="hero-meta">
+        <span class="meta-pill">每場 <strong>$${season.share_per_game}</strong></span>
+        ${(o.metaPills || []).join("")}
+      </div>
+    </div>
+  `;
 }
 
 /** "2026年7月" / "2026年7~9月" / "2025年12月~2026年2月" — a season's
@@ -212,20 +284,27 @@ function renderMonthCalendar(container, games, onPick) {
 }
 
 /**
- * One game's full detail: time, location, per-game price, and how many
- * are expected are shown first; the whole roster (explicit absence ->
- * drop-in coverage, not two separate flat lists) is behind a toggle so
- * picking a day doesn't dump a wall of names on you immediately.
+ * One game's full detail: a hero card up top (same as the home screen's),
+ * then "異動" — only the rows that differ from a plain fixed member
+ * showing up (an absence, a substitute, a drop-in) — with the full
+ * roster folded away behind a button, since most members most weeks are
+ * just... there, and don't need to be read one by one.
  *
  * `options`:
- *   extraHtml — a page's own content (e.g. an action button), shown
- *     above the roster toggle.
- *   onAssignSubstitute(absenceId, name, gender) — if given, uncovered
- *     absent row gets a 設定代打/編輯代打 control that calls this —
- *     available any time, even once the game is locked, since swapping
- *     who covers a slot doesn't create the last-minute-understaffed
- *     risk the change deadline protects against; a body still fills
- *     it either way.
+ *   extraHtml — a page's own content (e.g. a request-leave button, a
+ *     cancelled-game status line), shown at the very end.
+ *   heroMetaPills — extra `<span class="meta-pill">` HTML for the hero
+ *     card (a change deadline, the minimum-roster count).
+ *   clubMembers — [{id, name, gender}], the pool a substitute is picked
+ *     from by tapping instead of typing; manual entry still works
+ *     underneath as a fallback for someone not in the list yet.
+ *   viewerName — the current viewer's resolved name, used only to mark
+ *     "(你)" on their own waitlist row.
+ *   onAssignSubstitute(absenceId, name, gender) — if given, an
+ *     uncovered absent row gets a 設定代打/編輯代打 control that calls
+ *     this — available any time, even once the game is locked, since
+ *     swapping who covers a slot doesn't create the last-minute-
+ *     understaffed risk the change deadline protects against.
  *   onCancelSubstitute(dropInId) — if given, a covered absence also
  *     gets a 取消代打 control, but only before the change deadline —
  *     removing coverage outright is exactly what that deadline guards.
@@ -237,19 +316,11 @@ function renderMonthCalendar(container, games, onPick) {
 function renderGameDetail(container, season, game, options) {
   const opts = options || {};
   const extraHtml = opts.extraHtml || "";
+  const clubMembers = opts.clubMembers || [];
+  const viewerName = opts.viewerName || "";
   const onAssignSubstitute = opts.onAssignSubstitute;
   const onCancelSubstitute = opts.onCancelSubstitute;
   const canAssignSubstitute = opts.canAssignSubstitute || (() => true);
-
-  const info = describeDate(game.date);
-  const expected = expectedAttendance(season, game);
-
-  const metaParts = [];
-  if (season.game_start_time && season.game_end_time) {
-    metaParts.push(`${season.game_start_time.slice(0, 5)}-${season.game_end_time.slice(0, 5)}`);
-  }
-  if (season.location) metaParts.push(season.location);
-  metaParts.push(`每人每場 $${season.share_per_game}`);
 
   function genderTag(g) {
     if (g === "male") return '<span class="gender-tag male">男</span>';
@@ -257,88 +328,110 @@ function renderGameDetail(container, season, game, options) {
     return "";
   }
 
-  const absenceByName = {};
-  for (const a of game.absences) absenceByName[a.player_name] = a;
+  function initial(name) {
+    return escapeHtml((name || "?").trim().slice(0, 1));
+  }
 
-  const rosterRows = season.members
+  function substituteForm(absence) {
+    const candidates = clubMembers.filter((m) => m.name !== absence.player_name);
+    const covering = game.confirmed_drop_ins.find((d) => d.covering === absence.player_name);
+    const pickRows = candidates
+      .map(
+        (m) => `
+          <div class="pick-row" data-pick="${absence.id}" data-pick-name="${escapeHtml(m.name)}" data-pick-gender="${m.gender || ""}">
+            <i class="radio"></i><span class="avatar sm">${initial(m.name)}</span>
+            <span class="pk-name">${escapeHtml(m.name)}</span>${genderTag(m.gender)}
+          </div>`
+      )
+      .join("");
+    const maleSelected = covering && covering.gender === "male" ? " selected" : "";
+    const femaleSelected = covering && covering.gender === "female" ? " selected" : "";
+    return `
+      <div class="sub-form" data-sub-form="${absence.id}" hidden>
+        ${candidates.length ? `<div class="sub-pick">${pickRows}</div><div class="or-line"><span>不在名單上</span></div>` : ""}
+        <input type="text" placeholder="直接輸入名字" data-sub-name="${absence.id}" value="${escapeHtml(absence.covered_by || "")}">
+        <select data-sub-gender="${absence.id}">
+          <option value="">性別</option>
+          <option value="male"${maleSelected}>男</option>
+          <option value="female"${femaleSelected}>女</option>
+        </select>
+        <button type="button" data-confirm-sub="${absence.id}">確認</button>
+      </div>
+    `;
+  }
+
+  const diffRows = [];
+  for (const absence of game.absences) {
+    const allowed = canAssignSubstitute(absence);
+    const covering = game.confirmed_drop_ins.find((d) => d.covering === absence.player_name);
+    const note = absence.covered_by ? `${escapeHtml(absence.covered_by)} 代打` : "無代打";
+
+    const offerAssign = !!onAssignSubstitute && allowed;
+    const assignLabel = absence.covered_by ? "編輯代打" : "指定代打";
+    const assignControl = offerAssign
+      ? `<button type="button" class="mini-action" data-toggle-sub="${absence.id}">${assignLabel}</button>`
+      : "";
+
+    const offerCancel = !!absence.covered_by && !game.locked && !!onCancelSubstitute && allowed && covering;
+    const cancelControl = offerCancel
+      ? `<button type="button" class="mini-action danger" data-cancel-sub="${covering.id}">取消代打</button>`
+      : "";
+
+    diffRows.push(`
+      <div class="roster-row absent">
+        <span><span class="avatar sm">${initial(absence.player_name)}</span> ${escapeHtml(absence.player_name)}</span>
+        <span class="roster-note">請假・${note}${assignControl}${cancelControl}</span>
+      </div>
+      ${offerAssign ? substituteForm(absence) : ""}
+    `);
+  }
+  for (const d of game.confirmed_drop_ins) {
+    const note = d.covering ? `代打・${escapeHtml(d.covering)}` : "臨打";
+    diffRows.push(`
+      <div class="roster-row dropin">
+        <span><span class="avatar sm">${initial(d.player_name)}</span> ${escapeHtml(d.player_name)}${genderTag(d.gender)}</span>
+        <span class="roster-note">${note}</span>
+      </div>
+    `);
+  }
+
+  const absentNames = new Set(game.absences.map((a) => a.player_name));
+  const fullRosterRows = season.members
     .map((m) => {
-      const absence = absenceByName[m.name];
-      if (!absence) {
-        return `<div class="roster-row present"><span>${m.name}${genderTag(m.gender)}</span></div>`;
+      if (absentNames.has(m.name)) {
+        return `<div class="roster-row absent"><span>${escapeHtml(m.name)}${genderTag(m.gender)}</span><span class="roster-note">請假</span></div>`;
       }
-
-      const allowed = canAssignSubstitute(absence);
-      const covering = game.confirmed_drop_ins.find((d) => d.covering === m.name);
-      const note = absence.covered_by ? `已由 ${absence.covered_by} 遞補` : "尚無人遞補";
-
-      const offerAssign = !!onAssignSubstitute && allowed;
-      const assignLabel = absence.covered_by ? "編輯代打" : "設定代打";
-      const assignControl = offerAssign
-        ? `<button class="mini-action" data-toggle-sub="${absence.id}">${assignLabel}</button>`
-        : "";
-
-      const offerCancel = !!absence.covered_by && !game.locked && !!onCancelSubstitute && allowed && covering;
-      const cancelControl = offerCancel
-        ? `<button class="mini-action danger" data-cancel-sub="${covering.id}">取消代打</button>`
-        : "";
-
-      const nameValue = absence.covered_by || "";
-      const maleSelected = covering && covering.gender === "male" ? " selected" : "";
-      const femaleSelected = covering && covering.gender === "female" ? " selected" : "";
-      const subForm = offerAssign
-        ? `<div class="sub-form" data-sub-form="${absence.id}" hidden>
-             <input type="text" placeholder="代打姓名" data-sub-name="${absence.id}" value="${nameValue}">
-             <select data-sub-gender="${absence.id}">
-               <option value="">性別</option>
-               <option value="male"${maleSelected}>男</option>
-               <option value="female"${femaleSelected}>女</option>
-             </select>
-             <button data-confirm-sub="${absence.id}">確認</button>
-           </div>`
-        : "";
-
-      return `
-        <div class="roster-row absent">
-          <span>${m.name}${genderTag(m.gender)}</span>
-          <span class="roster-note">${note}${assignControl}${cancelControl}</span>
-        </div>
-        ${subForm}
-      `;
+      return `<div class="roster-row present"><span>${escapeHtml(m.name)}${genderTag(m.gender)}</span></div>`;
     })
     .join("");
 
-  const dropInRows = game.confirmed_drop_ins
-    .map((d) => {
-      const note = d.covering ? `遞補 ${d.covering}` : "遞補開放名額";
-      return `<div class="roster-row dropin"><span>${d.player_name}${genderTag(d.gender)}</span><span class="roster-note">${note}</span></div>`;
-    })
-    .join("");
-
-  const waitlistText = game.waitlist_entries.length
-    ? game.waitlist_entries.map((w) => `${w.player_name}${genderTag(w.gender)}`).join("、")
-    : "無";
+  const waitlistRows = game.waitlist_entries.length
+    ? game.waitlist_entries
+        .map((w, i) => {
+          const isMe = viewerName && w.player_name === viewerName;
+          return `<div class="wl-row${isMe ? " me" : ""}"><span class="wl-num">${i + 1}</span><span class="wl-name">${escapeHtml(w.player_name)}${genderTag(w.gender)}${isMe ? "（你）" : ""}</span></div>`;
+        })
+        .join("")
+    : "";
 
   container.innerHTML = `
-    <div class="gdetail-head">
-      <span class="gdetail-date">${info.label}</span>
-      <span class="gdetail-when">${info.relative}</span>
-    </div>
-    <div class="gdetail-meta">${metaParts.join("　・　")}</div>
-    <div class="gdetail-count">預計出席 <strong>${expected}</strong> 人</div>
+    ${renderGameHero(season, game, { metaPills: opts.heroMetaPills })}
     ${game.locked ? '<div class="gdetail-locked">已過更動期限，這一場無法再變更</div>' : ""}
-    ${extraHtml}
-    <button type="button" class="gdetail-toggle" data-toggle-roster>出席名單 ▾</button>
+    ${
+      diffRows.length
+        ? `<div class="gdetail-section-label">異動</div><div class="gdetail-roster">${diffRows.join("")}</div>`
+        : ""
+    }
+    ${
+      waitlistRows
+        ? `<div class="gdetail-section-label">候補（${game.waitlist_entries.length} 人）</div><div class="gdetail-waitlist">${waitlistRows}</div>`
+        : ""
+    }
+    <button type="button" class="gdetail-toggle" data-toggle-roster>完整名單（${season.members.length} 人）▾</button>
     <div class="gdetail-roster-wrap" data-roster-wrap hidden>
-      <div class="gdetail-section-label">固定成員（${season.members.length} 人）</div>
-      <div class="gdetail-roster">${rosterRows}</div>
-      ${
-        game.confirmed_drop_ins.length
-          ? `<div class="gdetail-section-label">臨打確認</div><div class="gdetail-roster">${dropInRows}</div>`
-          : ""
-      }
-      <div class="gdetail-section-label">候補</div>
-      <div class="gdetail-waitlist">${waitlistText}</div>
+      <div class="gdetail-roster">${fullRosterRows}</div>
     </div>
+    ${extraHtml}
   `;
 
   // Assigned directly (not addEventListener) so re-rendering this same
@@ -349,13 +442,25 @@ function renderGameDetail(container, season, game, options) {
     if (toggleRoster) {
       const wrap = container.querySelector("[data-roster-wrap]");
       wrap.hidden = !wrap.hidden;
-      toggleRoster.textContent = wrap.hidden ? "出席名單 ▾" : "出席名單 ▴";
+      toggleRoster.textContent = `完整名單（${season.members.length} 人）${wrap.hidden ? "▾" : "▴"}`;
       return;
     }
     const toggleSub = e.target.closest("[data-toggle-sub]");
     if (toggleSub) {
       const form = container.querySelector(`[data-sub-form="${toggleSub.dataset.toggleSub}"]`);
       if (form) form.hidden = !form.hidden;
+      return;
+    }
+    const pick = e.target.closest("[data-pick]");
+    if (pick) {
+      const id = pick.dataset.pick;
+      const nameInput = container.querySelector(`[data-sub-name="${id}"]`);
+      const genderSelect = container.querySelector(`[data-sub-gender="${id}"]`);
+      if (nameInput) nameInput.value = pick.dataset.pickName;
+      if (genderSelect) genderSelect.value = pick.dataset.pickGender || "";
+      container
+        .querySelectorAll(`[data-pick="${id}"]`)
+        .forEach((row) => row.classList.toggle("on", row === pick));
       return;
     }
     const confirmSub = e.target.closest("[data-confirm-sub]");
@@ -452,4 +557,19 @@ async function postJson(apiBase, path, body, method) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || res.statusText);
   return data;
+}
+
+/** Everyone in a club (fixed member or not) — the pool the 指定代打
+ * picker offers before falling back to typing a name. Public endpoint,
+ * no auth needed. Returns [] rather than throwing on failure, since a
+ * missing picker list should just fall back to the manual text input,
+ * not break the page. */
+async function fetchClubMembers(apiBase, clubId) {
+  try {
+    const res = await fetch(`${apiBase}/clubs/${clubId}/members`);
+    return res.ok ? await res.json() : [];
+  } catch (e) {
+    console.warn("Could not load club members:", e);
+    return [];
+  }
 }

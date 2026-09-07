@@ -1014,9 +1014,9 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
     ):
         absences_by_game[absence.game_id].append((absence.id, player.name))
 
-    drop_ins_by_game: dict[int, list[tuple[int, str, Gender | None, int | None]]] = (
-        defaultdict(list)
-    )
+    drop_ins_by_game: dict[
+        int, list[tuple[int, int, str, Gender | None, int | None]]
+    ] = defaultdict(list)
     for drop_in, player in (
         db.query(DropInRow, PlayerRow)
         .join(PlayerRow, DropInRow.player_id == PlayerRow.id)
@@ -1025,7 +1025,13 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
         .all()
     ):
         drop_ins_by_game[drop_in.game_id].append(
-            (drop_in.id, player.name, _gender(player.gender), drop_in.covers_absence_id)
+            (
+                drop_in.id,
+                player.id,
+                player.name,
+                _gender(player.gender),
+                drop_in.covers_absence_id,
+            )
         )
 
     waitlist_by_game: dict[int, list[DropInSummary]] = defaultdict(list)
@@ -1046,7 +1052,7 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
     for game in game_rows:
         # (absence_id, name) pairs, FIFO order
         absences_list = absences_by_game[game.id]
-        # (drop_in_id, name, gender, covers_absence_id) tuples
+        # (drop_in_id, player_id, name, gender, covers_absence_id) tuples
         drop_ins = drop_ins_by_game[game.id]
 
         # Explicit substitutes claim their absence first; the remaining
@@ -1057,7 +1063,8 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
         covered_by_name: dict[str, str] = {}
         covering_name: dict[int, str] = {}
         claimed_absence_ids: set[int] = set()
-        for drop_in_id, name, _drop_in_gender, covers_absence_id in drop_ins:
+        for entry in drop_ins:
+            drop_in_id, _player_id, name, _drop_in_gender, covers_absence_id = entry
             if covers_absence_id in absence_name_by_id:
                 absence_name = absence_name_by_id[covers_absence_id]
                 covered_by_name[absence_name] = name
@@ -1069,8 +1076,8 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
         ]
         fifo_drop_ins = [
             (drop_in_id, name)
-            for drop_in_id, name, _drop_in_gender, covers_absence_id in drop_ins
-            if covers_absence_id is None
+            for drop_in_id, _player_id, name, _gender, covers in drop_ins
+            if covers is None
         ]
         for i, (_aid, absence_name) in enumerate(fifo_absences):
             if i < len(fifo_drop_ins):
@@ -1094,11 +1101,12 @@ def get_season(season_id: int, db: Session = Depends(get_db)) -> SeasonDetailOut
                 confirmed_drop_ins=[
                     DropInDetailOut(
                         id=drop_in_id,
+                        player_id=player_id,
                         player_name=name,
                         gender=gender,
                         covering=covering_name.get(drop_in_id),
                     )
-                    for drop_in_id, name, gender, _covers in drop_ins
+                    for drop_in_id, player_id, name, gender, _covers in drop_ins
                 ],
                 waitlist_entries=waitlist_by_game[game.id],
             )

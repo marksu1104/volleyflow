@@ -1,26 +1,66 @@
+/* Design tokens — mirrors the phone's own light/dark setting rather than
+   forcing one look, per the redesign review. Component classes below are
+   named for what they show (hero, roster, money), not what page uses
+   them, so member.html, the organizer pages, and profile.html can all
+   draw from the same vocabulary. */
 :root {
-  --ink: #1c2230;
-  --ink-soft: #5b6478;
-  --paper: #f4f5f7;
+  --ground: #eef1f5;
   --surface: #ffffff;
-  --accent: #1d6fa0;
-  --accent-soft: #e3eef5;
-  --good: #1d8a5f;
-  --good-soft: #e1f3ea;
-  --warn: #a8660a;
-  --warn-soft: #fbedd9;
-  --bad: #b73a3a;
-  --bad-soft: #fbe4e4;
-  --rule: #e2e5eb;
+  --surface-2: #f6f8fa;
+  --ink: #151b26;
+  --ink-soft: #5c667a;
+  --ink-faint: #8b94a5;
+  --accent: #15618f;
+  --accent-soft: #dfeaf3;
+  --good: #157a53;
+  --good-soft: #dcf0e7;
+  --warn: #9a5d09;
+  --warn-soft: #fbeed6;
+  --bad: #a83232;
+  --bad-soft: #fbe3e3;
+  --pink: #9c3f77;
+  --pink-soft: #f6e3ee;
+  --rule: #dde2ea;
+  --rule-strong: #c3cad6;
+  --shadow: 0 1px 2px rgba(21, 27, 38, .06), 0 6px 20px rgba(21, 27, 38, .07);
+  --scrim: rgba(12, 16, 22, .42);
+  --font-cjk: "Noto Sans TC", -apple-system, "PingFang TC", system-ui, sans-serif;
+  --font-num: "Outfit", "Noto Sans TC", system-ui, sans-serif;
 }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #0e1319;
+    --surface: #171e27;
+    --surface-2: #1e2731;
+    --ink: #e8edf4;
+    --ink-soft: #9aa5b6;
+    --ink-faint: #6b7688;
+    --accent: #6ab4e2;
+    --accent-soft: #1c3849;
+    --good: #5ecf9f;
+    --good-soft: #14342a;
+    --warn: #e0a94a;
+    --warn-soft: #382a12;
+    --bad: #ea8a8a;
+    --bad-soft: #3a1f1f;
+    --pink: #e9a3ca;
+    --pink-soft: #3a2130;
+    --rule: #2a333f;
+    --rule-strong: #3b4756;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 6px 20px rgba(0, 0, 0, .35);
+    --scrim: rgba(0, 0, 0, .6);
+  }
+}
+
 * { box-sizing: border-box; }
 body {
-  font-family: -apple-system, "PingFang TC", "Noto Sans TC", "Segoe UI", system-ui, sans-serif;
-  background: var(--paper);
+  font-family: var(--font-cjk);
+  background: var(--ground);
   color: var(--ink);
   margin: 0;
   padding: 20px 16px 60px;
   line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
 }
 .wrap { max-width: 520px; margin: 0 auto; }
 .wrap.wide { max-width: 760px; }
@@ -28,9 +68,15 @@ body {
 h1 { font-size: 1.2rem; margin: 0 0 4px; }
 h2 { font-size: .9rem; margin: 28px 0 10px; color: var(--ink-soft); font-weight: 600; }
 .sub { color: var(--ink-soft); font-size: .84rem; margin: 0 0 18px; }
+.section-label {
+  font-size: .74rem; color: var(--ink-soft); font-weight: 700; margin: 22px 0 8px;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.section-label:first-child { margin-top: 0; }
+.hint { font-size: .76rem; color: var(--ink-faint); margin-top: 6px; line-height: 1.5; }
 
 /* buttons — instant-feeling press state everywhere */
-button { transition: transform .08s ease, opacity .15s ease, background-color .15s ease; }
+button { transition: transform .08s ease, opacity .15s ease, background-color .15s ease; font-family: var(--font-cjk); }
 button:active:not(:disabled) { transform: scale(.96); }
 button:disabled { opacity: .6; cursor: default; }
 
@@ -38,145 +84,344 @@ button:disabled { opacity: .6; cursor: default; }
   * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
 
-/* content fade-in so a freshly loaded panel doesn't just snap into place */
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slideUp { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+.btn {
+  width: 100%; padding: 11px; border: none; border-radius: 10px; font-size: .9rem;
+  font-weight: 700; cursor: pointer; margin-top: 12px;
+}
+.btn:hover { filter: brightness(1.06); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn-primary { background: var(--accent); color: var(--surface); }
+.btn-danger { background: var(--bad-soft); color: var(--bad); }
+.btn-quiet { background: var(--surface); color: var(--ink-soft); border: 1px solid var(--rule-strong); }
+.btn-row { display: flex; gap: 8px; }
+.btn-row .btn { margin-top: 0; }
+
+/* generic small pill action (a game-detail row's own action, a payment
+   quick-action, etc.) — distinct from the full-width .btn above */
+button.action {
+  padding: 7px 14px; border: none; border-radius: 8px;
+  background: var(--accent-soft); color: var(--accent); font-size: .84rem;
+  font-weight: 700; cursor: pointer;
+}
+button.action.cancel { background: var(--bad-soft); color: var(--bad); }
+button.action.ghost { background: var(--surface); color: var(--ink-soft); border: 1px solid var(--rule-strong); }
 
 /* organizer section nav — 總覽 / 帳務管理 / 成員管理 / 設定 are separate
-   pages sharing one season picker (same localStorage key), not tabs on
-   one page: each page stays small and independently loadable. */
+   pages sharing one season picker (same localStorage key), styled as a
+   segmented control so it reads as one place with tabs, not four links. */
 .org-nav {
-  display: flex; gap: 4px; margin: 4px 0 16px; border-bottom: 1px solid var(--rule);
-  overflow-x: auto;
+  display: flex; gap: 3px; margin: 4px 0 16px; padding: 3px;
+  background: var(--surface-2); border-radius: 10px; overflow-x: auto;
 }
 .org-nav-link {
-  padding: 10px 14px; font-size: .86rem; color: var(--ink-soft); text-decoration: none;
-  font-weight: 600; border-bottom: 2px solid transparent; white-space: nowrap;
+  flex: 1; text-align: center; padding: 7px 8px; font-size: .82rem; color: var(--ink-soft);
+  text-decoration: none; font-weight: 600; border-radius: 8px; white-space: nowrap;
 }
-.org-nav-link.active { color: var(--accent); border-bottom-color: var(--accent); }
+.org-nav-link.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); font-weight: 700; }
 
-/* season picker */
+/* season/club picker */
 .season-picker {
-  width: 100%; padding: 11px 12px; border: 1px solid var(--rule); border-radius: 8px;
+  width: 100%; padding: 11px 12px; border: 1px solid var(--rule); border-radius: 10px;
   font-size: .95rem; background: var(--surface); color: var(--ink); appearance: none;
 }
-.club-picker { margin-bottom: 8px; font-weight: 600; }
-.identity { font-size: .82rem; color: var(--ink-soft); margin-bottom: 14px; min-height: 1.2em; }
+.club-picker { margin-bottom: 8px; font-weight: 700; }
+.identity { font-size: .8rem; color: var(--ink-soft); margin-bottom: 14px; min-height: 1.2em; }
 #error { color: var(--bad); font-size: .85rem; margin: 6px 0 0; min-height: 1em; }
 
-/* month calendar */
-.mcal { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; margin: 14px 0 4px; }
-.mcal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.mcal-title { font-weight: 600; font-size: .9rem; }
-.mcal-nav {
-  border: 1px solid var(--rule); background: var(--surface); border-radius: 8px;
-  width: 30px; height: 30px; font-size: 1.05rem; color: var(--ink-soft); cursor: pointer; line-height: 1;
+/* avatar — initial-letter circle, used on rosters, headers, and the
+   profile page (large variant) */
+.avatar {
+  width: 30px; height: 30px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
+  display: inline-flex; align-items: center; justify-content: center; font-size: .78rem; font-weight: 700;
+  flex: none; object-fit: cover;
 }
-.mcal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
-.mcal-weekdays { margin-bottom: 4px; }
-.mcal-weekdays div { text-align: center; font-size: .68rem; color: var(--ink-soft); }
+.avatar.sm { width: 24px; height: 24px; font-size: .66rem; }
+.avatar.lg { width: 52px; height: 52px; font-size: 1.1rem; }
+
+/* app-top bar: club chip + avatar, echoed on every page */
+.app-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+.app-top .avatar { cursor: pointer; }
+.club-chip {
+  display: inline-flex; align-items: center; gap: 7px; border: none; background: var(--surface-2);
+  color: var(--ink); font-size: .86rem; font-weight: 700; padding: 7px 12px 7px 8px; border-radius: 999px;
+  cursor: pointer; font-family: var(--font-cjk);
+}
+.club-chip .caret { color: var(--ink-faint); font-size: .7rem; }
+.club-dot {
+  width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--surface);
+  display: inline-flex; align-items: center; justify-content: center; font-size: .64rem; font-style: normal; font-weight: 700;
+}
+
+/* hero card: the next/selected game's headline facts */
+.hero { background: var(--surface); border-radius: 16px; padding: 16px; box-shadow: var(--shadow); border: 1px solid var(--rule); animation: fadeIn .18s ease both; }
+.hero-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.hero-date { font-family: var(--font-num); font-size: 1.35rem; font-weight: 800; letter-spacing: -.01em; }
+.hero-when { font-size: .8rem; color: var(--ink-soft); margin-top: 4px; }
+.hero-rel { font-size: .74rem; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.meta-pill { font-size: .76rem; color: var(--ink-soft); background: var(--surface-2); border-radius: 7px; padding: 4px 9px; }
+.meta-pill strong { color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.count-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.count-big { font-family: var(--font-num); font-size: 1.5rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.count-big.full { color: var(--warn); }
+.count-cap { font-size: .78rem; color: var(--ink-faint); }
+.gender-pill { font-size: .74rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.gender-pill.m { background: var(--accent-soft); color: var(--accent); }
+.gender-pill.f { background: var(--pink-soft); color: var(--pink); }
+
+.capacity-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; display: flex; margin-top: 10px; }
+.capacity-bar i { display: block; height: 100%; }
+.capacity-bar .fill-m { background: var(--accent); }
+.capacity-bar .fill-f { background: var(--pink); }
+
+.status-line { display: flex; align-items: center; gap: 7px; font-size: .84rem; font-weight: 700; padding: 9px 11px; border-radius: 9px; margin-top: 12px; }
+.status-line.absent { background: var(--bad-soft); color: var(--bad); }
+.status-line.confirmed { background: var(--good-soft); color: var(--good); }
+.status-line.waitlisted { background: var(--warn-soft); color: var(--warn); }
+
+/* balance line — a member's own running total, or a row in a settlement list */
+.balance { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; }
+.balance-label { font-size: .8rem; color: var(--ink-soft); }
+.balance-value, .balance-val { font-family: var(--font-num); font-weight: 800; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.balance-value.owe, .balance-val.owe { color: var(--bad); }
+.balance-value.owed, .balance-val.owed { color: var(--good); }
+.balance-value.even, .balance-val.clear { color: var(--ink-faint); }
+.progress { height: 7px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin-top: 9px; }
+.progress i { display: block; height: 100%; background: var(--good); }
+
+/* month calendar (shared.js renderMonthCalendar draws these classes) */
+.mcal { background: var(--surface); border: 1px solid var(--rule); border-radius: 13px; padding: 12px; }
+.mcal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: .84rem; font-weight: 700; }
+.mcal-nav {
+  width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--rule); background: var(--surface);
+  color: var(--ink-soft); cursor: pointer; line-height: 1;
+}
+.mcal-title { font-size: .84rem; font-weight: 700; }
+.mcal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.mcal-weekdays div { text-align: center; font-size: .64rem; color: var(--ink-faint); padding-bottom: 4px; font-weight: 600; }
 .mcal-cell {
   aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  border-radius: 8px; font-size: .8rem; color: var(--ink);
+  border-radius: 8px; font-size: .78rem; font-variant-numeric: tabular-nums; color: var(--ink-soft);
 }
 .mcal-cell.empty { visibility: hidden; }
 .mcal-cell.today { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
-.mcal-cell.has-game { cursor: pointer; font-weight: 700; background: var(--paper); }
-.mcal-cell.has-game.today { background: var(--accent-soft); }
+.mcal-cell.has-game { cursor: pointer; font-weight: 700; background: var(--surface-2); color: var(--ink); }
 .mcal-cell.has-game:active { transform: scale(.92); }
 .mcal-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); margin-top: 1px; }
 
 /* at-a-glance summary */
-.glance {
-  background: var(--surface); border: 1px solid var(--rule); border-radius: 12px;
-  padding: 14px 16px; margin: 4px 0 6px;
-}
+.glance { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; margin: 4px 0 6px; }
 .glance-label { font-size: .74rem; color: var(--ink-soft); margin-bottom: 4px; }
-.glance-main { font-size: 1rem; font-weight: 600; }
+.glance-main { font-size: 1rem; font-weight: 700; }
 .glance-sub { font-size: .8rem; color: var(--ink-soft); margin-top: 2px; }
 
-/* bottom sheet a tapped calendar day opens into — the calendar keeps
-   its own space either way, the sheet floats on top of it and closes
-   back to exactly the same calendar rather than pushing it around */
+/* bottom sheet a tapped calendar day (or a modal action) opens into */
 .gsheet-backdrop {
-  position: fixed; inset: 0; background: rgba(20, 22, 28, .45);
+  position: fixed; inset: 0; background: var(--scrim);
   display: flex; align-items: flex-end; justify-content: center;
   z-index: 50; animation: fadeIn .15s ease both;
 }
 .gsheet-backdrop[hidden] { display: none; }
 .gsheet {
   background: var(--surface); width: 100%; max-width: 560px;
-  max-height: 82vh; overflow-y: auto; border-radius: 16px 16px 0 0;
+  max-height: 86vh; overflow-y: auto; border-radius: 16px 16px 0 0;
   padding: 18px 16px 24px; position: relative;
   animation: slideUp .2s ease both;
 }
+.gsheet h3 { margin: 0 0 12px; font-size: .95rem; }
 .gsheet-close {
   position: absolute; top: 10px; right: 12px; width: 30px; height: 30px;
-  border: none; border-radius: 50%; background: var(--paper);
+  border: none; border-radius: 50%; background: var(--surface-2);
   color: var(--ink-soft); font-size: 1rem; line-height: 1; cursor: pointer;
 }
-@keyframes slideUp { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
-/* one game's full detail: time / location / price / roster — the
-   content that lives inside the sheet above */
+/* one game's full detail inside the sheet */
 .gdetail-head { display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px; }
-.gdetail-date { font-weight: 700; font-size: 1rem; }
+.gdetail-date { font-weight: 700; font-size: 1rem; font-family: var(--font-num); }
 .gdetail-when { font-size: .78rem; color: var(--ink-soft); }
 .gdetail-meta { font-size: .8rem; color: var(--ink-soft); margin-top: 2px; }
-.gdetail-section-label { font-size: .72rem; color: var(--ink-soft); font-weight: 600; margin: 14px 0 6px; }
-.gdetail-roster { display: flex; flex-direction: column; gap: 2px; }
-.roster-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; border-radius: 6px; font-size: .86rem; }
+.gdetail-section-label { font-size: .72rem; color: var(--ink-soft); font-weight: 700; margin: 14px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
+.gdetail-roster { display: flex; flex-direction: column; gap: 3px; }
+.roster-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 8px; font-size: .86rem; }
 .roster-row.present { color: var(--ink); }
 .roster-row.absent { background: var(--bad-soft); color: var(--bad); }
 .roster-row.dropin { background: var(--good-soft); color: var(--good); }
-.roster-note { font-size: .74rem; font-weight: 400; opacity: .85; }
-.gdetail-waitlist { font-size: .84rem; color: var(--ink-soft); }
-.gdetail-mystatus { font-size: .84rem; font-weight: 600; margin: 10px 0 4px; }
-.gdetail-mystatus.absent { color: var(--bad); }
-.gdetail-mystatus.confirmed { color: var(--good); }
-.gdetail-mystatus.waitlisted { color: var(--warn); }
+.roster-note { font-size: .74rem; font-weight: 400; opacity: .9; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.gdetail-waitlist { display: flex; flex-direction: column; gap: 3px; }
+.gdetail-mystatus { display: flex; align-items: center; gap: 7px; font-size: .84rem; font-weight: 700; padding: 9px 11px; border-radius: 9px; margin: 10px 0 4px; }
+.gdetail-mystatus.absent { background: var(--bad-soft); color: var(--bad); }
+.gdetail-mystatus.confirmed { background: var(--good-soft); color: var(--good); }
+.gdetail-mystatus.waitlisted { background: var(--warn-soft); color: var(--warn); }
 
 .gdetail-count { font-size: .86rem; margin-top: 8px; }
-.gdetail-count strong { font-variant-numeric: tabular-nums; }
+.gdetail-count strong { font-variant-numeric: tabular-nums; font-family: var(--font-num); }
 .gdetail-locked { font-size: .78rem; color: var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 6px 10px; margin-top: 8px; }
 
-/* roster stays collapsed until asked for — picking a day shouldn't
-   dump the whole member list on screen immediately */
 .gdetail-toggle {
-  display: block; width: 100%; margin-top: 12px; padding: 8px; border: 1px solid var(--rule);
-  border-radius: 8px; background: var(--paper); color: var(--ink-soft); font-size: .82rem;
-  font-weight: 600; cursor: pointer;
+  display: block; width: 100%; margin-top: 12px; padding: 9px; border: 1px solid var(--rule);
+  border-radius: 9px; background: var(--surface-2); color: var(--ink-soft); font-size: .82rem;
+  font-weight: 700; cursor: pointer;
 }
 .gdetail-roster-wrap { margin-top: 10px; }
 
-.gender-tag { font-size: .68rem; margin-left: 4px; opacity: .7; }
+.gender-tag { font-size: .68rem; margin-left: 4px; opacity: .8; }
 .gender-tag.male { color: var(--accent); }
-.gender-tag.female { color: #b0468a; }
+.gender-tag.female { color: var(--pink); }
+
+/* 候補 waitlist rows — numbered so the order (the thing people asked
+   about when several sign up at once) is the first thing the eye hits */
+.wl-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 8px; font-size: .84rem; }
+.wl-row.me { background: var(--warn-soft); color: var(--warn); font-weight: 700; }
+.wl-num { font-family: var(--font-num); font-size: .8rem; font-weight: 800; color: var(--ink-faint); width: 16px; font-variant-numeric: tabular-nums; }
+.wl-row.me .wl-num { color: var(--warn); }
+.wl-name { flex: 1; }
 
 /* 代打 (substitute) inline controls on an absence row */
 .mini-action {
   border: none; background: none; color: var(--accent); font-size: .74rem;
-  font-weight: 600; cursor: pointer; padding: 0 0 0 8px; text-decoration: underline;
+  font-weight: 700; cursor: pointer; padding: 0; text-decoration: underline;
 }
 .mini-action.danger { color: var(--bad); }
 .sub-form {
-  display: flex; gap: 6px; align-items: center; padding: 6px 8px 10px;
-  flex-wrap: wrap;
+  display: flex; flex-direction: column; gap: 8px; padding: 10px 9px 12px; margin: 2px 0 4px;
+  background: var(--surface-2); border-radius: 10px;
 }
-.sub-form input, .sub-form select {
-  padding: 5px 7px; border: 1px solid var(--rule); border-radius: 6px; font-size: .82rem;
+.sub-form[hidden] { display: none; }
+.sub-pick { display: flex; flex-direction: column; gap: 3px; max-height: 180px; overflow-y: auto; }
+.pick-row {
+  display: flex; align-items: center; gap: 8px; padding: 8px 9px; border-radius: 8px;
+  border: 1px solid var(--rule); background: var(--surface); cursor: pointer; font-size: .84rem;
 }
-.sub-form input { flex: 1; min-width: 90px; }
-.sub-form button {
-  padding: 5px 10px; border: none; border-radius: 6px; background: var(--accent-soft);
-  color: var(--accent); font-size: .8rem; font-weight: 600; cursor: pointer;
+.pick-row.on { border-color: var(--accent); background: var(--accent-soft); }
+.pick-row .pk-name { flex: 1; font-weight: 500; }
+.radio {
+  flex: none; width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--rule-strong);
+  background: var(--surface); box-sizing: border-box;
+}
+.pick-row.on .radio, .choice-card.on .radio { border: 4.5px solid var(--accent); }
+.or-line { display: flex; align-items: center; gap: 10px; margin: 2px 0; }
+.or-line::before, .or-line::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+.or-line span { font-size: .72rem; color: var(--ink-faint); }
+.sub-form input[type="text"], .sub-form select {
+  padding: 8px 9px; border: 1px solid var(--rule); border-radius: 8px; font-size: .84rem;
+  background: var(--surface); color: var(--ink); font-family: var(--font-cjk);
+}
+.sub-form button[data-confirm-sub] {
+  padding: 8px; border: none; border-radius: 8px; background: var(--accent); color: var(--surface);
+  font-size: .84rem; font-weight: 700; cursor: pointer;
 }
 
-/* member.html's self-service gender picker */
-.gender-row { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
-.gender-row[hidden] { display: none; }
-.gender-label { font-size: .8rem; color: var(--ink-soft); }
-.gender-btn {
-  padding: 5px 14px; border: 1px solid var(--rule); border-radius: 20px; background: var(--surface);
-  color: var(--ink-soft); font-size: .82rem; cursor: pointer;
+/* choice cards — two mutually exclusive actions with different money
+   outcomes (cancel-game refunded/unrefunded) */
+.choice { display: flex; flex-direction: column; gap: 7px; }
+.choice-card {
+  display: flex; gap: 10px; padding: 12px; border-radius: 11px; border: 1px solid var(--rule);
+  background: var(--surface); cursor: pointer; text-align: left; width: 100%; font-family: var(--font-cjk); color: var(--ink);
 }
-.gender-btn.selected { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 600; }
+.choice-card.on { border-color: var(--accent); background: var(--accent-soft); }
+.choice-card .radio { margin-top: 3px; }
+.ch-title { font-size: .86rem; font-weight: 700; display: block; }
+.ch-body { font-size: .76rem; color: var(--ink-soft); margin-top: 3px; line-height: 1.55; display: block; }
+.ch-body b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* profile page */
+.prof { display: flex; align-items: center; gap: 13px; padding: 2px 0 16px; }
+.prof-name { font-size: 1.05rem; font-weight: 700; }
+.prof-sub { font-size: .76rem; color: var(--ink-soft); margin-top: 3px; }
+.field { margin-bottom: 13px; }
+.field label { display: block; font-size: .76rem; font-weight: 700; color: var(--ink-soft); margin-bottom: 5px; }
+.control {
+  width: 100%; padding: 10px 11px; border-radius: 9px; border: 1px solid var(--rule-strong);
+  background: var(--surface); color: var(--ink); font-family: var(--font-cjk); font-size: .88rem;
+}
+.control:disabled { background: var(--surface-2); color: var(--ink-soft); }
+textarea.control { resize: vertical; min-height: 90px; }
+.field-pair { display: flex; gap: 10px; }
+.field-pair .field { flex: 1; min-width: 0; margin-bottom: 0; }
+.seg-pick { display: flex; gap: 6px; }
+.seg-pick button {
+  flex: 1; padding: 9px; border-radius: 9px; border: 1px solid var(--rule); background: var(--surface);
+  color: var(--ink-soft); font-size: .82rem; font-weight: 600; cursor: pointer;
+}
+.seg-pick button.selected { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+/* club rows — the switcher sheet and the profile page's club list share this */
+.club-row {
+  display: flex; align-items: center; gap: 10px; padding: 11px; border-radius: 11px;
+  border: 1px solid var(--rule); margin-bottom: 7px; background: var(--surface); text-align: left; width: 100%; cursor: pointer;
+}
+.club-row.on { border-color: var(--accent); background: var(--accent-soft); }
+.club-row.display { cursor: default; }
+.club-row .cr-name { flex: 1; font-weight: 700; font-size: .88rem; }
+.club-row .cr-sub { font-size: .74rem; color: var(--ink-soft); font-weight: 400; display: block; margin-top: 1px; }
+.role-tag { font-size: .68rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); }
+.bal { font-size: .78rem; font-weight: 700; font-variant-numeric: tabular-nums; font-family: var(--font-num); white-space: nowrap; }
+.bal.plus { color: var(--good); }
+.bal.minus { color: var(--bad); }
+
+/* a join-pool / not-yet-a-fixed-member row */
+.pool-row { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--rule); margin-bottom: 5px; }
+.pool-who { display: flex; align-items: center; gap: 8px; flex: 1; }
+.pool-promote, .p-add {
+  border: none; background: var(--good-soft); color: var(--good); font-size: .76rem;
+  font-weight: 700; padding: 6px 11px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+}
+
+.link-box {
+  display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--rule);
+  border-radius: 10px; padding: 10px 12px;
+}
+.link-box code { flex: 1; font-size: .74rem; color: var(--ink-soft); font-family: var(--font-num); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-box button { border: none; background: var(--accent); color: var(--surface); font-size: .76rem; font-weight: 700; padding: 7px 12px; border-radius: 7px; cursor: pointer; }
+
+/* 帳務 · 季費 money rows */
+.money { display: flex; flex-direction: column; gap: 6px; }
+.m-row { background: var(--surface); border: 1px solid var(--rule); border-radius: 11px; padding: 11px 12px; }
+.m-top { display: flex; align-items: center; gap: 9px; }
+.m-name { flex: 1; font-weight: 700; font-size: .88rem; }
+.m-net { font-family: var(--font-num); font-weight: 800; font-size: 1rem; font-variant-numeric: tabular-nums; }
+.m-net.owe { color: var(--bad); }
+.m-net.owed { color: var(--good); }
+.m-net.clear { color: var(--ink-faint); }
+.m-break { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--rule); font-size: .74rem; color: var(--ink-soft); }
+.m-break span { font-variant-numeric: tabular-nums; }
+.m-break b { color: var(--ink); font-weight: 700; }
+.m-act { display: flex; gap: 6px; margin-top: 9px; }
+.m-act input { flex: 1; min-width: 0; padding: 7px 8px; border: 1px solid var(--rule); border-radius: 8px; font-size: .82rem; }
+.m-act button { flex: none; padding: 7px 12px; border-radius: 8px; font-size: .78rem; font-weight: 700; cursor: pointer; border: none; }
+.m-act .paid { background: var(--good); color: var(--surface); flex: 1; }
+.m-act .later { background: var(--surface-2); color: var(--ink-soft); border: 1px solid var(--rule); flex: 1; }
+.m-act .confirm-partial { background: var(--accent); color: var(--surface); }
+.m-done { display: flex; align-items: center; gap: 6px; font-size: .76rem; color: var(--good); font-weight: 700; margin-top: 8px; }
+.m-keep { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 9px; font-size: .78rem; color: var(--ink-soft); }
+.m-alt { border: none; background: none; color: var(--accent); font-size: .78rem; font-weight: 700; cursor: pointer; padding: 0; text-decoration: underline; }
+
+/* 主揪 · 設定 rows */
+.set-row { display: flex; align-items: center; gap: 10px; padding: 11px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 11px; margin-bottom: 5px; }
+.set-label { flex: 1; font-size: .85rem; }
+.set-sub { display: block; font-size: .73rem; color: var(--ink-faint); margin-top: 1px; }
+.set-link { border: none; background: none; color: var(--bad); font-size: .76rem; font-weight: 700; cursor: pointer; padding: 0; }
+.set-go { color: var(--ink-faint); font-size: .85rem; }
+.warn-box { font-size: .75rem; color: var(--warn); background: var(--warn-soft); border-radius: 9px; padding: 9px 11px; margin-top: 11px; line-height: 1.55; }
+
+.fold {
+  display: block; width: 100%; margin-top: 8px; padding: 8px; border: 1px dashed var(--rule);
+  border-radius: 9px; background: none; color: var(--ink-soft); font-size: .8rem; cursor: pointer;
+}
+.empty { color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center; }
+
+/* inner segmented control — 季費 / 當天臨打 / 季末結算 within the 帳務 page */
+.seg { display: flex; gap: 3px; background: var(--surface-2); padding: 3px; border-radius: 9px; margin-bottom: 14px; }
+.seg span { flex: 1; text-align: center; font-size: .8rem; font-weight: 600; padding: 7px 4px; border-radius: 7px; color: var(--ink-soft); cursor: pointer; }
+.seg span.on { background: var(--accent); color: var(--surface); font-weight: 700; }
+
+/* small pill summary row, used by the organizer overview/settings pages
+   to show season parameters at a glance */
+.season-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.pill { background: var(--surface); border: 1px solid var(--rule); border-radius: 20px; padding: 5px 12px; font-size: .78rem; color: var(--ink-soft); }
+.pill strong { color: var(--ink); font-weight: 700; }
+.pill.settled { background: var(--good-soft); color: var(--good); border-color: transparent; }

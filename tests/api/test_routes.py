@@ -344,6 +344,7 @@ def test_get_season_reflects_absences_signups_and_waitlist(
     assert game["confirmed_drop_ins"] == [
         {
             "id": bob_signup.json()["id"],
+            "player_id": bob_signup.json()["player_id"],
             "player_name": "Bob",
             "gender": None,
             "covering": "Alice",

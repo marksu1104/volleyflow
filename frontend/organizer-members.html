@@ -5,58 +5,43 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VolleyFlow 成員管理</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
 <link rel="stylesheet" href="shared.css">
 <style>
-  .warn-note {
-    font-size: .78rem; color: var(--warn); background: var(--warn-soft);
-    border-radius: 8px; padding: 8px 10px; margin: 12px 0;
-  }
   .add-member-row { display: flex; gap: 6px; margin: 12px 0; }
   .add-member-row[hidden] { display: none; }
-  .add-member-row input {
-    flex: 1; padding: 9px 12px; border: 1px solid var(--rule); border-radius: 8px; font-size: .9rem;
-  }
+  .add-member-row input { flex: 1; }
   .add-member-row button {
-    padding: 9px 16px; border: none; border-radius: 8px; background: var(--ink); color: white;
-    font-size: .86rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+    padding: 0 16px; border: none; border-radius: 9px; background: var(--accent); color: var(--surface);
+    font-size: .86rem; font-weight: 700; cursor: pointer; white-space: nowrap; font-family: var(--font-cjk);
   }
-  .member-list { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+  .member-list { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
   .member-row {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 10px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    padding: 10px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
   }
   .member-remove {
     border: none; background: var(--bad-soft); color: var(--bad); font-size: .78rem;
-    font-weight: 600; padding: 5px 10px; border-radius: 6px; cursor: pointer;
+    font-weight: 700; padding: 5px 10px; border-radius: 7px; cursor: pointer;
   }
   .settled-note { font-size: .82rem; color: var(--ink-soft); padding: 16px 0; }
-  .empty { color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center; }
-
-  .pool-section { margin-bottom: 22px; }
-  .pool-row {
-    display: flex; justify-content: space-between; align-items: center; gap: 10px;
-    padding: 10px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
-  }
-  .pool-who { display: flex; align-items: center; gap: 8px; }
-  .pool-avatar {
-    width: 26px; height: 26px; border-radius: 50%; object-fit: cover; background: var(--paper);
-  }
-  .pool-promote {
-    border: none; background: var(--good-soft); color: var(--good); font-size: .78rem;
-    font-weight: 600; padding: 5px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap;
-  }
 </style>
 </head>
 <body>
 <div class="wrap wide">
-  <h1>成員管理</h1>
-  <p class="sub">這一季的固定成員名單</p>
+  <div class="app-top">
+    <div>
+      <h1 style="margin-bottom:2px">名單</h1>
+      <p class="sub" style="margin-bottom:0">這一季的固定成員，以及等待加入的球隊成員</p>
+    </div>
+    <button type="button" class="avatar" id="avatar-btn" title="個人資料">?</button>
+  </div>
   <div id="identity" class="identity"></div>
 
   <nav class="org-nav">
     <a href="organizer.html" class="org-nav-link">總覽</a>
-    <a href="organizer-ledger.html" class="org-nav-link">帳務管理</a>
-    <a href="organizer-members.html" class="org-nav-link active">成員管理</a>
+    <a href="organizer-members.html" class="org-nav-link active">名單</a>
+    <a href="organizer-ledger.html" class="org-nav-link">帳務</a>
     <a href="organizer-settings.html" class="org-nav-link">設定</a>
   </nav>
 
@@ -64,23 +49,30 @@
   <select id="season-picker" class="season-picker"></select>
   <div id="error"></div>
 
+  <div class="section-label">加入連結</div>
+  <div class="link-box">
+    <code id="join-link"></code>
+    <button type="button" onclick="copyJoinLink()">複製</button>
+  </div>
+  <p class="hint">用 LINE 開啟這個連結，會自動選到這個球隊並提示加入。</p>
+
   <div id="settled-note" class="settled-note" hidden>
     這一季已經結算，成員名單不能再變動。
   </div>
 
-  <div id="pool-section" class="pool-section" hidden>
-    <h2>待加入名單</h2>
-    <p class="sub">已經用 LINE 開過會員頁、但還不是這一季固定成員的人</p>
+  <div id="pool-section" hidden>
+    <div class="section-label">球隊成員・未加入本季</div>
     <div id="pool-list" class="member-list"></div>
   </div>
 
+  <div class="section-label">本季固定成員</div>
   <div id="add-member-row" class="add-member-row">
-    <input id="new-member-name" type="text" placeholder="新成員姓名">
-    <button type="button" onclick="addMember()">新增成員</button>
+    <input id="new-member-name" class="control" type="text" placeholder="新成員姓名">
+    <button type="button" onclick="addMember()">新增</button>
   </div>
-  <div id="warn-note" class="warn-note">
+  <p id="warn-note" class="hint" style="color: var(--warn)">
     新增或移除成員會重新計算整季每人每場的金額，包含已經打過的場次。
-  </div>
+  </p>
 
   <div id="member-list" class="member-list"></div>
 </div>
@@ -94,14 +86,37 @@
   (async function initIdentity() {
     const identityEl = document.getElementById("identity");
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
-    identityEl.textContent = identified
-      ? `已用 LINE 身分登入：${identified.name}`
-      : "（非 LINE 環境，僅能瀏覽公開資訊）";
+    if (identified) {
+      document.getElementById("avatar-btn").textContent = identified.name.slice(0, 1);
+      identityEl.textContent = `已用 LINE 身分登入：${identified.name}`;
+    } else {
+      identityEl.textContent = "（非 LINE 環境，僅能瀏覽公開資訊）";
+    }
   })();
+  document.getElementById("avatar-btn").addEventListener("click", () => {
+    location.href = "profile.html";
+  });
 
   initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
+    renderJoinLink();
     if (id) loadMembers(id);
   });
+
+  function renderJoinLink() {
+    const clubId = currentClubId();
+    document.getElementById("join-link").textContent = clubId
+      ? `https://liff.line.me/${LIFF_ID}?club=${clubId}`
+      : "";
+  }
+
+  function copyJoinLink() {
+    const text = document.getElementById("join-link").textContent;
+    if (!text) return;
+    navigator.clipboard
+      .writeText(text)
+      .then(() => alert("已複製連結"))
+      .catch(() => alert("複製失敗，請手動選取文字"));
+  }
 
   async function loadMembers(seasonId) {
     const errorEl = document.getElementById("error");
@@ -146,10 +161,12 @@
         (p) => `
           <div class="pool-row">
             <span class="pool-who">
-              ${p.avatar_url ? `<img class="pool-avatar" src="${escapeHtml(p.avatar_url)}" alt="">` : ""}
+              ${p.avatar_url
+                ? `<img class="avatar sm" src="${escapeHtml(p.avatar_url)}" alt="">`
+                : `<span class="avatar sm">${escapeHtml((p.name || "?").slice(0, 1))}</span>`}
               <span>${escapeHtml(p.name)}${genderLabel(p.gender)}</span>
             </span>
-            <button type="button" class="pool-promote" onclick="promoteFromPool(${p.id})">加入固定名單</button>
+            <button type="button" class="pool-promote" onclick="promoteFromPool(${p.id})">加入本季</button>
           </div>
         `
       )
@@ -197,7 +214,7 @@
       .map(
         (m) => `
           <div class="member-row">
-            <span>${m.name}${genderLabel(m.gender)}</span>
+            <span>${escapeHtml(m.name)}${genderLabel(m.gender)}</span>
             ${settled ? "" : `<button type="button" class="member-remove" onclick="removeMember(${m.id})">移除</button>`}
           </div>
         `
