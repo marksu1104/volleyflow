@@ -171,6 +171,19 @@ class GenderUpdate(BaseModel):
     gender: Gender
 
 
+class NameUpdate(BaseModel):
+    name: str
+
+
+class GameCancel(BaseModel):
+    refunded: bool
+    """True: CANCELLED_REFUNDED — the venue returned this game's cost, so
+    billable_games drops by one and every current member is credited
+    share_per_game back. False: CANCELLED_UNREFUNDED — the venue cost
+    was already paid regardless, so nobody's charge changes. See
+    docs/billing-rules.md "Game cancellation"."""
+
+
 class PlayerIdentify(BaseModel):
     """What the LIFF page sends right after LIFF resolves. id_token
     (from liff.getIDToken()) is verified server-side — see

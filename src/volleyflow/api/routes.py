@@ -31,6 +31,7 @@ from volleyflow.api.schemas import (
     DropInDetailOut,
     DropInOut,
     DropInSummary,
+    GameCancel,
     GameDetailOut,
     GameOut,
     Gender,
@@ -39,6 +40,7 @@ from volleyflow.api.schemas import (
     MemberAdd,
     MemberOut,
     MemberSettlementOut,
+    NameUpdate,
     PaymentCreate,
     PlayerIdentify,
     PlayerIdentifyOut,
@@ -66,6 +68,7 @@ from volleyflow.db.models import (
 )
 from volleyflow.ledger import EntryType, balance
 from volleyflow.pricing import share_per_game
+from volleyflow.schedule import GameStatus
 from volleyflow.settlement import MemberSettlement, covered_absences, settle_member
 
 router = APIRouter()
@@ -464,6 +467,74 @@ def _gather_member_settlements(
     return season_row, settlements
 
 
+def _sync_season_fee_ledger(db: Session, season_row: SeasonRow) -> None:
+    """Bring every current member's season_fee_charged total up to date
+    with what settle_member says they should owe right now, writing one
+    adjustment entry per player for the difference — never editing a
+    past entry. Call this after anything that can change the target: the
+    initial roster at season creation, adding/removing a member, editing
+    total_venue_cost, or cancelling a game with a refund.
+
+    See docs/billing-rules.md "Keeping the charge in sync when the
+    inputs change". A no-op for anyone whose target hasn't moved (e.g.
+    editing the venue's location touches nothing here).
+    """
+    _, settlements = _gather_member_settlements(db, season_row.id)
+    now = _now()
+
+    charged_by_player: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+    for player_id, amount in (
+        db.query(LedgerEntryRow.player_id, LedgerEntryRow.amount)
+        .filter(
+            LedgerEntryRow.season_id == season_row.id,
+            LedgerEntryRow.entry_type == EntryType.SEASON_FEE_CHARGED,
+        )
+        .all()
+    ):
+        charged_by_player[player_id] += amount
+
+    current_member_ids = set()
+    for ms in settlements:
+        current_member_ids.add(ms.player.id)
+        target = -ms.season_fee
+        already_charged = charged_by_player.get(ms.player.id, Decimal("0"))
+        adjustment = target - already_charged
+        if adjustment == 0:
+            continue
+        db.add(
+            LedgerEntryRow(
+                player_id=ms.player.id,
+                club_id=season_row.club_id,
+                entry_type=EntryType.SEASON_FEE_CHARGED,
+                amount=adjustment,
+                recorded_at=now,
+                season_id=season_row.id,
+                note=(
+                    f"Season {season_row.id} fee"
+                    if already_charged == 0
+                    else f"Season {season_row.id} fee adjustment"
+                ),
+            )
+        )
+
+    # Anyone charged before but no longer a member (removed from the
+    # roster) gets their charge reversed to zero — see docs/billing-rules.md.
+    for player_id, already_charged in charged_by_player.items():
+        if player_id in current_member_ids or already_charged == 0:
+            continue
+        db.add(
+            LedgerEntryRow(
+                player_id=player_id,
+                club_id=season_row.club_id,
+                entry_type=EntryType.SEASON_FEE_CHARGED,
+                amount=-already_charged,
+                recorded_at=now,
+                season_id=season_row.id,
+                note=f"Season {season_row.id} fee reversed — no longer a member",
+            )
+        )
+
+
 def _member_settlement_out(ms: MemberSettlement) -> MemberSettlementOut:
     return MemberSettlementOut(
         player_id=ms.player.id,
@@ -640,6 +711,9 @@ def start_season(
         db.add(SeasonMemberRow(season_id=season.id, player_id=player.id))
         member_ids.append(player.id)
 
+    db.flush()
+    _sync_season_fee_ledger(db, season)
+
     db.commit()
     for game in games:
         db.refresh(game)
@@ -693,6 +767,8 @@ def update_season(
     included, since there's one season-wide split, not a per-period
     one) — the frontend warns about this before calling in; once
     settled, the ledger already reflects the old cost, so it's locked.
+    Each current member's season_fee_charged total is corrected with an
+    adjustment entry — see _sync_season_fee_ledger.
     """
     season = db.get(SeasonRow, season_id)
     if season is None:
@@ -709,9 +785,52 @@ def update_season(
     for field, value in updates.items():
         setattr(season, field, value)
 
+    if "total_venue_cost" in updates:
+        db.flush()
+        _sync_season_fee_ledger(db, season)
+
     db.commit()
     db.refresh(season)
     return _season_out(db, season)
+
+
+@router.post("/games/{game_id}/cancel", response_model=GameOut)
+def cancel_game(
+    game_id: int,
+    payload: GameCancel,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> GameOut:
+    """Calls off one scheduled game entirely — distinct from a member
+    recording an absence, which leaves the game itself on. See
+    docs/billing-rules.md "Game cancellation": `refunded=True`
+    (CANCELLED_REFUNDED) lowers every current member's billable_games by
+    one and credits share_per_game back to each of them right away;
+    `refunded=False` (CANCELLED_UNREFUNDED) changes nobody's charge,
+    since the venue cost was already paid either way. Existing
+    absence/drop-in rows for this game are left alone — the refund
+    calculation already ignores CANCELLED_REFUNDED games.
+    """
+    game = _get_game_or_404(db, game_id)
+    season = db.get(SeasonRow, game.season_id)
+    assert season is not None
+    _require_organizer(db, season.club_id, current_player)
+    if season.settled_at is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is already settled")
+    if game.status != GameStatus.SCHEDULED:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Game is already cancelled")
+
+    game.status = (
+        GameStatus.CANCELLED_REFUNDED
+        if payload.refunded
+        else GameStatus.CANCELLED_UNREFUNDED
+    )
+    db.flush()
+    if payload.refunded:
+        _sync_season_fee_ledger(db, season)
+    db.commit()
+    db.refresh(game)
+    return GameOut(id=game.id, date=game.date, status=game.status)
 
 
 @router.post("/seasons/{season_id}/members", response_model=MemberOut)
@@ -724,7 +843,10 @@ def add_member(
     """Adding a member changes everyone's per-game share for the whole
     season, same reasoning as changing the venue cost — the frontend
     warns before calling this. Blocked once settled: the ledger already
-    reflects the season fee computed from the roster at that time.
+    reflects the season fee computed from the roster at that time. The
+    new member is charged their full season fee immediately, and every
+    other current member's charge is corrected for the new, lower share
+    — see _sync_season_fee_ledger.
     """
     season = db.get(SeasonRow, season_id)
     if season is None:
@@ -741,6 +863,8 @@ def add_member(
         )
 
     db.add(SeasonMemberRow(season_id=season_id, player_id=player.id))
+    db.flush()
+    _sync_season_fee_ledger(db, season)
     db.commit()
     db.refresh(player)
     return MemberOut(
@@ -761,7 +885,9 @@ def remove_member(
     """Same retroactive-share caveat as adding one. Doesn't touch this
     player's past absence/drop-in rows for this season — they simply
     stop counting toward anyone's settlement once removed, since that
-    only ever iterates the current member list.
+    only ever iterates the current member list. Their season-fee charge
+    is reversed to zero and every remaining member's charge is corrected
+    for the new, higher share — see _sync_season_fee_ledger.
     """
     season = db.get(SeasonRow, season_id)
     if season is None:
@@ -777,6 +903,8 @@ def remove_member(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not a member of this season")
 
     db.delete(membership)
+    db.flush()
+    _sync_season_fee_ledger(db, season)
     db.commit()
 
 
@@ -1268,9 +1396,11 @@ def settle_season(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> SeasonSettleOut:
-    """Charges every member's season fee and credits their absence refund
-    to the ledger, once. See CLAUDE.md 2.4: settlement happens at season
-    end; a season can't be settled twice.
+    """Credits every member's absence refund to the ledger and locks the
+    season, once. Doesn't charge the season fee — that already happened
+    when each member joined the roster (see _sync_season_fee_ledger) —
+    so this is purely the refund half of CLAUDE.md 2.4's settlement.
+    A season can't be settled twice.
     """
     season_row, settlements = _gather_member_settlements(db, season_id)
     _require_organizer(db, season_row.club_id, current_player)
@@ -1279,17 +1409,6 @@ def settle_season(
 
     now = _now()
     for ms in settlements:
-        db.add(
-            LedgerEntryRow(
-                player_id=ms.player.id,
-                club_id=season_row.club_id,
-                entry_type=EntryType.SEASON_FEE_CHARGED,
-                amount=-ms.season_fee,
-                recorded_at=now,
-                season_id=season_id,
-                note=f"Season {season_id} fee",
-            )
-        )
         if ms.refund > 0:
             db.add(
                 LedgerEntryRow(
@@ -1392,6 +1511,39 @@ def set_player_gender(
             status.HTTP_403_FORBIDDEN, "You can only set your own gender"
         )
     player.gender = payload.gender
+    db.commit()
+    db.refresh(player)
+    return MemberOut(
+        id=player.id,
+        name=player.name,
+        gender=_gender(player.gender),
+        avatar_url=player.avatar_url,
+    )
+
+
+@router.put("/players/{player_id}/name", response_model=MemberOut)
+def set_player_name(
+    player_id: int,
+    payload: NameUpdate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> MemberOut:
+    """What a player is called on the roster is theirs to set, same
+    self-only reasoning as set_player_gender. Ledger entries and season
+    membership key off player_id, never off this string, so renaming
+    never touches billing history — CLAUDE.md 2.1's "one person, one
+    name, for life" tracks the id; this is just the label. Runs through
+    _unique_display_name so a rename can't collide with someone else's
+    current name (excluding the player's own row, so keeping the name
+    they already have is always allowed).
+    """
+    player = _get_player_or_404(db, player_id)
+    if current_player.id != player_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only rename yourself")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Name can't be empty")
+    player.name = _unique_display_name(db, name, exclude_player_id=player.id)
     db.commit()
     db.refresh(player)
     return MemberOut(

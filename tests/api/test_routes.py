@@ -695,6 +695,88 @@ def test_set_player_gender_rejects_an_invalid_value(client: TestClient) -> None:
     assert response.status_code == 422
 
 
+# --- player display name ------------------------------------------------
+
+
+def test_set_player_name_updates_it(client: TestClient) -> None:
+    alice = identify(client, "Alice")
+
+    response = client.put(
+        f"/players/{alice['id']}/name",
+        json={"name": "阿慬"},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "阿慬"
+
+
+def test_set_player_name_disambiguates_a_collision(client: TestClient) -> None:
+    identify(client, "Bob")
+    alice = identify(client, "Alice")
+
+    response = client.put(
+        f"/players/{alice['id']}/name",
+        json={"name": "Bob"},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Bob (2)"
+
+
+def test_set_player_name_keeping_your_own_current_name_is_allowed(
+    client: TestClient,
+) -> None:
+    alice = identify(client, "Alice")
+
+    response = client.put(
+        f"/players/{alice['id']}/name",
+        json={"name": "Alice"},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Alice"
+
+
+def test_set_player_name_rejects_blank(client: TestClient) -> None:
+    alice = identify(client, "Alice")
+
+    response = client.put(
+        f"/players/{alice['id']}/name",
+        json={"name": "   "},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 400
+
+
+def test_set_player_name_for_someone_else_returns_403(client: TestClient) -> None:
+    alice = identify(client, "Alice")
+    bob = identify(client, "Bob")
+
+    response = client.put(
+        f"/players/{alice['id']}/name",
+        json={"name": "New Name"},
+        headers=auth_headers(bob["token"]),
+    )
+
+    assert response.status_code == 403
+
+
+def test_set_player_name_for_unknown_player_returns_404(client: TestClient) -> None:
+    alice = identify(client, "Alice")
+
+    response = client.put(
+        "/players/999999/name",
+        json={"name": "New Name"},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 404
+
+
 # --- LINE identity binding -------------------------------------------------
 
 
@@ -1456,6 +1538,23 @@ def test_a_member_cannot_update_season_settings(client: TestClient) -> None:
     response = client.patch(
         f"/seasons/{season['id']}",
         json={"capacity": 20},
+        headers=auth_headers(carol["token"]),
+    )
+
+    assert response.status_code == 403
+
+
+def test_a_member_cannot_cancel_a_game(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    carol = identify(client, "Carol")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+    )
+
+    response = client.post(
+        f"/games/{game_id}/cancel",
+        json={"refunded": True},
         headers=auth_headers(carol["token"]),
     )
 

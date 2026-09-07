@@ -4,7 +4,7 @@ Defines every rule the billing engine implements. The code translates this
 document, not the other way around. To change a rule, change this file first,
 then the code and tests.
 
-Status: milestone 1. Last updated 2026-07-31.
+Status: milestone 1 core, milestone 6 charge-timing update. Last updated 2026-09-07.
 
 ## Terms
 
@@ -99,9 +99,14 @@ billable_games = total_games - count(CANCELLED_REFUNDED)
 ```
 
 `share_per_game` divides by `total_games`, not `billable_games`, so cancelling
-a game never changes it — only the multiplier changes. Payments already
-recorded never need recalculating; a cancellation only affects the final
-settlement.
+a game never changes it — only the multiplier changes. Since season fees are
+now charged up front (see "Ledger" below), marking a game
+`CANCELLED_REFUNDED` lowers every current member's `billable_games` by one
+and writes a `+share_per_game` adjustment entry to each of their ledgers —
+the organizer chooses this over `CANCELLED_UNREFUNDED` specifically to give
+that credit back. Already-recorded absence/drop-in rows for that game are
+otherwise untouched; the refund rule simply ignores `CANCELLED_REFUNDED`
+games when totaling covered absences.
 
 `CANCELLED_UNREFUNDED` needs no special-case code. It stays billable, nobody
 attends, so no drop-in covers it, so by the refund rule nobody is refunded.
@@ -177,6 +182,48 @@ season, which writes a carry-out entry here and a carry-in entry there that
 sum to zero.
 
 Entries are never modified, and each records who, when, and why.
+
+### When the season fee is charged
+
+The organizer's real collection flow (confirmed 2026-09-06) is: season fees
+are collected **before the season starts**, drop-in fees are collected **on
+the day, in person**. The engine matches that: a member's `season_fee_charged`
+entry is written the moment they become a fixed member of a season with games
+already scheduled — at season creation for the initial roster, at the moment
+`POST /seasons/{id}/members` adds someone mid-season — not at season end.
+
+Season end (`Settlement`) no longer charges the season fee; it only computes
+and records each member's `absence_refund` for the season just finished, then
+locks the season. This matches the organizer's real mental model: by the time
+a season ends, everyone's season fee is already settled one way or another —
+the only open question left is who gets refunded for a covered absence.
+
+### Keeping the charge in sync when the inputs change
+
+`share_per_game` depends on `total_venue_cost`, `total_games`, and
+`member_count` — any of which can change after members have already been
+charged: the organizer adds or removes a member, edits the venue cost, or
+cancels a game with a refund (which lowers `billable_games`). Each of these
+recomputes every current member's correct `season_fee_charged` total and
+writes **one adjustment entry** per member for the difference between that
+target and what's already on their ledger for this season — never edits or
+deletes the original entry. This keeps the append-only guarantee (CLAUDE.md
+2.5) intact: the full history of "what this person was charged, and why it
+changed" stays on the ledger, not just the final number.
+
+A member removed from the season gets their season-fee charge reversed to
+zero the same way — one adjustment entry equal to the negative of whatever
+they'd already been charged for this season. Their past absence/drop-in
+ledger entries (if any) are untouched; only the season-fee portion reverses.
+
+```
+target_charge(player)   = -share_per_game * billable_games   # via settle_member
+already_charged(player) = sum of this season's season_fee_charged entries
+adjustment               = target_charge - already_charged
+```
+
+No adjustment entry is written when `adjustment == 0` — an edit that doesn't
+change anyone's math (e.g. changing the venue location) writes nothing.
 
 ## Open questions
 
