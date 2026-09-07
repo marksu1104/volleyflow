@@ -8,7 +8,7 @@ from decimal import Decimal
 
 from fastapi.testclient import TestClient
 
-from tests.api.factories import start_season
+from tests.api.factories import auth_headers, identify, start_season
 
 
 def test_starting_a_season_charges_each_members_season_fee(
@@ -283,3 +283,19 @@ def test_a_roster_marks_who_has_no_line_account(client: TestClient) -> None:
     club_members = client.get(f"/clubs/{season['club_id']}/members").json()
     organizer = next(m for m in club_members if m["role"] == "organizer")
     assert organizer["linked"] is True
+
+
+def test_a_member_who_logged_in_is_not_marked_a_guest(client: TestClient) -> None:
+    """The negative case alone passed while every member was wrongly
+    marked a guest — get_season built its roster without the field and
+    the default filled in False. This is the case that fails then.
+    """
+    season = start_season(client, member_names=["Alice"])
+    bob = identify(client, "Bob")
+    client.post(f"/clubs/{season['club_id']}/join", headers=auth_headers(bob["token"]))
+    client.post(f"/seasons/{season['id']}/members", json={"player_name": bob["name"]})
+
+    members = client.get(f"/seasons/{season['id']}").json()["members"]
+
+    assert next(m for m in members if m["name"] == bob["name"])["linked"] is True
+    assert next(m for m in members if m["name"] == "Alice")["linked"] is False

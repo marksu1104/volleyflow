@@ -90,12 +90,12 @@
 
   <div id="roster-section">
     <div class="section-label">本季固定成員</div>
-    <div id="add-member-row" class="add-member-row">
-      <input id="new-member-name" class="control" type="text" placeholder="新成員姓名">
-      <button type="button" onclick="addMember()">新增</button>
-    </div>
     <p id="warn-note" class="hint" style="color: var(--warn)">
       新增或移除成員會重新計算整季每人每場的金額，包含已經打過的場次。
+    </p>
+    <p class="hint">
+      固定成員從上面的「球隊成員」挑，他們都是用 LINE 開過連結的人，可以自己請假。
+      臨時來打的人不必加進這裡，在該場次直接新增臨打即可。
     </p>
 
     <div id="member-list" class="member-list"></div>
@@ -355,7 +355,6 @@
   function renderMembers(season) {
     const settled = season.settled_at !== null;
     document.getElementById("settled-note").hidden = !settled;
-    document.getElementById("add-member-row").hidden = settled;
     document.getElementById("warn-note").hidden = settled;
 
     const list = document.getElementById("member-list");
@@ -378,27 +377,6 @@
       .join("");
   }
 
-  async function addMember() {
-    const input = document.getElementById("new-member-name");
-    const name = input.value.trim();
-    if (!name) return;
-    if (
-      !confirm(
-        `新增「${name}」會重新計算整季每人每場的金額，包含已經打過的場次，確定要新增嗎？`
-      )
-    ) {
-      return;
-    }
-    try {
-      await postJson(API_BASE, `/seasons/${currentSeason.id}/members`, {
-        player_name: name,
-      });
-      input.value = "";
-      loadMembers(currentSeason.id);
-    } catch (e) {
-      alert("新增失敗：" + e.message);
-    }
-  }
 
   async function removeMember(playerId) {
     const member = currentSeason.members.find((m) => m.id === playerId);
