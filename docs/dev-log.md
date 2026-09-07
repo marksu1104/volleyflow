@@ -1044,3 +1044,75 @@ fresh ID token against LINE, which is simple and correct but means every
 write costs one extra outbound call.
 
 174 tests (2 postgres-only), 100% coverage on billing modules.
+
+## 2026-09-07 (cont'd) — Season fees charged at season start; a full frontend redesign
+
+A phone-in-hand walkthrough of the deployed app surfaced two problems at
+once: the interface looked and read like a first draft, and the
+`/settle` flow charged season fees at season end — but the organizer's
+real collection habit is season fees *before* the season starts, drop-in
+fees on the day. Fixing the timing had to come first, since the new
+design's billing screens assume it.
+
+**Charge timing**: `_sync_season_fee_ledger` (routes.py) recomputes every
+current member's target `season_fee_charged` total from `settle_member`
+and writes one adjustment entry for the delta — never edits a past
+entry. Called from season creation (the initial charge), `add_member`/
+`remove_member` (the new share), `update_season` when `total_venue_cost`
+changes, and the new `POST /games/{id}/cancel` when a game is marked
+`refunded` (which lowers `billable_games`). `settle_season` now only
+writes `absence_refund` entries and locks the season — the fee itself is
+already on the ledger by the time settlement runs. See
+`docs/billing-rules.md` "When the season fee is charged" for the full
+rule and CLAUDE.md 2.4 for the one-line summary.
+
+**Two new small endpoints and one exposed field**: `PUT /players/{id}/name`
+(self-only, `_unique_display_name`-safe rename — ledger and season
+membership key off player_id, never the name string, so renaming never
+touches billing history) and `GET /players/{id}/clubs` (a player's own
+clubs and role in each, spanning clubs the way no existing endpoint
+could — the profile page's whole reason for existing). `DropInDetailOut`
+gained `player_id`: the 當天臨打 tab needs to look up a specific drop-in's
+ledger, and matching by name alone is exactly the kind of ambiguity
+CLAUDE.md's identity model warns about.
+
+**The redesign**: `shared.css` gained a full light/dark token system
+(mirrors the phone's own `prefers-color-scheme` rather than forcing a
+look) and a shared vocabulary of components — hero card, money rows,
+choice cards, waitlist rows — used across every page. `shared.js`
+gained `renderGameHero` (date, headcount, male/female split, capacity
+bar) and a rebuilt `renderGameDetail`: diff-first ("異動" — who's out, who
+subbed) with the full roster folded away, a numbered waitlist so a
+multi-person race for a slot is legible, and a substitute picker that
+lists club members to tap instead of requiring a typed name (typing
+still works underneath, as a fallback for someone not in the list yet).
+
+New `profile.html` (name, gender, a list of every club the player
+belongs to with its own balance) replaces the gender picker that used to
+live at the top of member.html. `organizer-settings.html` gained a
+per-game 取消這場 action with a refunded/unrefunded choice, explained in
+plain language rather than a predicted dollar figure — the actual
+number stays server-computed, never duplicated into frontend math.
+`organizer-ledger.html` split into three tabs (季費/當天臨打/季末結算) to
+match the new charge timing, sharing one `moneyRowHtml` row renderer
+across all three (a member's ledger balance and the matching action —
+collect what's owed, or hand back a credit — look and behave the same
+wherever they appear).
+
+Caught two bugs while building this, both worth remembering: a
+`?club=<id>` deep-link (for "用連結加入球隊") set localStorage from
+inside the async LIFF-identity flow at first, which could lose a race
+against `initClubAndSeasonPickers` reading it first, since LIFF
+resolution is the slower of the two — moved to run synchronously before
+either async flow starts. And the ledger page's per-row payment
+controls first used the player's id as a page-wide DOM selector, which
+breaks the moment the same player has a row in more than one tab (a
+fixed member who also signed up as a drop-in) — switched to scoping
+every lookup to the clicked button's own row via `closest()` instead.
+
+No browser to test in here — every inline `<script>` was syntax-checked
+with `node --check`, HTML tag structure verified for balance, and every
+`getElementById` cross-checked against its element existing. Actual
+LIFF/phone testing is still the next step before merging.
+
+193 tests (2 postgres-only).
