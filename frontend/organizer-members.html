@@ -65,16 +65,20 @@
     <div id="pool-list" class="member-list"></div>
   </div>
 
-  <div class="section-label">本季固定成員</div>
-  <div id="add-member-row" class="add-member-row">
-    <input id="new-member-name" class="control" type="text" placeholder="新成員姓名">
-    <button type="button" onclick="addMember()">新增</button>
-  </div>
-  <p id="warn-note" class="hint" style="color: var(--warn)">
-    新增或移除成員會重新計算整季每人每場的金額，包含已經打過的場次。
-  </p>
+  <div id="no-season"></div>
 
-  <div id="member-list" class="member-list"></div>
+  <div id="roster-section">
+    <div class="section-label">本季固定成員</div>
+    <div id="add-member-row" class="add-member-row">
+      <input id="new-member-name" class="control" type="text" placeholder="新成員姓名">
+      <button type="button" onclick="addMember()">新增</button>
+    </div>
+    <p id="warn-note" class="hint" style="color: var(--warn)">
+      新增或移除成員會重新計算整季每人每場的金額，包含已經打過的場次。
+    </p>
+
+    <div id="member-list" class="member-list"></div>
+  </div>
 </div>
 
 <script src="shared.js"></script>
@@ -99,6 +103,18 @@
 
   initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
     renderJoinLink();
+    // The join link stays useful with no season (people can join the club
+    // and wait in the pool), so only the season roster half is swapped
+    // out for the empty state here.
+    document.getElementById("roster-section").hidden = !id;
+    document.getElementById("season-picker").hidden = !id;
+    document.getElementById("no-season").innerHTML = id
+      ? ""
+      : emptyStateHtml(
+          "這個球隊還沒有開季",
+          "固定成員名單是跟著一季走的。可以先把上面的連結分享出去讓大家加入球隊，等開季時再從待加入名單挑人。",
+          { label: "建立第一季", href: "organizer-settings.html" }
+        );
     if (id) loadMembers(id);
   });
 

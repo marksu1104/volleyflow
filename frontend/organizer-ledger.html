@@ -37,6 +37,8 @@
   <select id="season-picker" class="season-picker"></select>
   <div id="error"></div>
 
+  <div id="no-season"></div>
+
   <div class="seg" id="ledger-tabs">
     <span class="on" data-tab="fee">季費</span>
     <span data-tab="dropin">當天臨打</span>
@@ -115,8 +117,28 @@
   if (location.hash === "#settle") showTab("closing");
 
   initClubAndSeasonPickers(API_BASE, document.getElementById("club-picker"), document.getElementById("season-picker"), "vf_org_season", (id) => {
+    setHasSeason(!!id);
     if (id) loadLedger(id);
   });
+
+  /** The three tabs are meaningless without a season — there are no fees
+   * to collect and nothing to settle — so hide them entirely rather than
+   * showing three empty money screens. */
+  function setHasSeason(hasSeason) {
+    document.getElementById("ledger-tabs").hidden = !hasSeason;
+    document.getElementById("season-picker").hidden = !hasSeason;
+    document.querySelectorAll(".tab").forEach((el) => {
+      if (!hasSeason) el.hidden = true;
+    });
+    document.getElementById("no-season").innerHTML = hasSeason
+      ? ""
+      : emptyStateHtml(
+          "這個球隊還沒有開季",
+          "季費、當天臨打和季末結算都是跟著一季走的。建立第一季之後，每個人的應收金額就會出現在這裡。",
+          { label: "建立第一季", href: "organizer-settings.html" }
+        );
+    if (hasSeason) showTab(location.hash === "#settle" ? "closing" : "fee");
+  }
 
   async function loadLedger(seasonId) {
     const errorEl = document.getElementById("error");
