@@ -1943,3 +1943,168 @@ def test_an_invite_link_can_name_a_club_you_have_not_joined(
 
     assert response.status_code == 200
     assert response.json() == {"id": club["id"], "name": "啪排郎"}
+
+
+# --- deleting things -----------------------------------------------------
+#
+# Test clubs and mistaken seasons need to be removable, but settled books
+# do not: CLAUDE.md 2.5 wants every data change auditable, and destroying
+# finished accounts is the one change that can't be.
+
+
+def test_delete_season_removes_it_and_its_games(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+
+    response = client.delete(f"/seasons/{season['id']}")
+
+    assert response.status_code == 204
+    assert client.get(f"/seasons/{season['id']}").status_code == 404
+    assert client.get(f"/clubs/{season['club_id']}/seasons").json() == []
+
+
+def test_delete_season_clears_the_fees_it_charged(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    alice_id = season["member_ids"][0]
+    before = client.get(f"/clubs/{season['club_id']}/players/{alice_id}/ledger").json()
+    assert before["entries"], "the season fee should have been charged up front"
+
+    client.delete(f"/seasons/{season['id']}")
+
+    after = client.get(f"/clubs/{season['club_id']}/players/{alice_id}/ledger").json()
+    assert after["entries"] == []
+    assert after["balance"] == "0"
+
+
+def test_delete_season_rejects_a_settled_one(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    client.post(f"/seasons/{season['id']}/settle")
+
+    response = client.delete(f"/seasons/{season['id']}")
+
+    assert response.status_code == 400
+
+
+def test_a_member_cannot_delete_a_season(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    carol = identify(client, "Carol")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+    )
+
+    response = client.delete(
+        f"/seasons/{season['id']}", headers=auth_headers(carol["token"])
+    )
+
+    assert response.status_code == 403
+
+
+def test_delete_club_removes_its_seasons_too(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+
+    response = client.delete(f"/clubs/{season['club_id']}")
+
+    assert response.status_code == 204
+    assert client.get("/clubs").json() == []
+    assert client.get(f"/seasons/{season['id']}").status_code == 404
+
+
+def test_delete_club_rejects_when_a_season_is_settled(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    client.post(f"/seasons/{season['id']}/settle")
+
+    response = client.delete(f"/clubs/{season['club_id']}")
+
+    assert response.status_code == 400
+
+
+def test_delete_club_keeps_the_players_themselves(client: TestClient) -> None:
+    """A Player is global and outlives any one club — CLAUDE.md 2.1."""
+    club = create_club(client)
+    alice = identify(client, "Alice")
+    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(alice["token"]))
+
+    client.delete(f"/clubs/{club['id']}")
+
+    still_there = client.put(
+        f"/players/{alice['id']}/gender",
+        json={"gender": "female"},
+        headers=auth_headers(alice["token"]),
+    )
+    assert still_there.status_code == 200
+
+
+def test_remove_club_member_takes_them_out_of_the_club(client: TestClient) -> None:
+    club = create_club(client)
+    carol = identify(client, "Carol")
+    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"]))
+
+    response = client.delete(f"/clubs/{club['id']}/members/{carol['id']}")
+
+    assert response.status_code == 204
+    assert [m["name"] for m in client.get(f"/clubs/{club['id']}/members").json()] == [
+        "Test Organizer"
+    ]
+
+
+def test_remove_club_member_refuses_while_they_are_on_a_roster(
+    client: TestClient,
+) -> None:
+    """Their season membership drives everyone's share; that removal has
+    to go through the season endpoint, which corrects the charges."""
+    season = _start_season(client, member_names=["Alice", "Bob"])
+    bob_id = season["member_ids"][1]
+
+    response = client.delete(f"/clubs/{season['club_id']}/members/{bob_id}")
+
+    assert response.status_code == 400
+
+
+def test_remove_club_member_refuses_the_last_organizer(client: TestClient) -> None:
+    club = create_club(client)
+
+    response = client.delete(f"/clubs/{club['id']}/members/{club['organizer_id']}")
+
+    assert response.status_code == 400
+
+
+def test_an_organizer_can_set_gender_for_someone_with_no_line_account(
+    client: TestClient,
+) -> None:
+    """Alice was typed in by hand, so she has no way to open the app and
+    set this herself, and the roster's male/female count would never be
+    right without it."""
+    season = _start_season(client, member_names=["Alice"])
+    alice_id = season["member_ids"][0]
+
+    response = client.put(f"/players/{alice_id}/gender", json={"gender": "female"})
+
+    assert response.status_code == 200
+    assert response.json()["gender"] == "female"
+
+
+def test_an_organizer_cannot_set_gender_for_someone_with_a_line_account(
+    client: TestClient,
+) -> None:
+    club = create_club(client)
+    carol = identify(client, "Carol")
+    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"]))
+
+    response = client.put(f"/players/{carol['id']}/gender", json={"gender": "female"})
+
+    assert response.status_code == 403
+
+
+def test_a_stranger_cannot_set_gender_for_an_accountless_player(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    alice_id = season["member_ids"][0]
+    stranger = identify(client, "Stranger")
+
+    response = client.put(
+        f"/players/{alice_id}/gender",
+        json={"gender": "female"},
+        headers=auth_headers(stranger["token"]),
+    )
+
+    assert response.status_code == 403
