@@ -57,7 +57,7 @@
   // manage members) is enforced server-side against this identity —
   // this just resolves it once so postJson's authHeader() has a LIFF
   // session to read from.
-  (async function initIdentity() {
+  const identityReady = (async function initIdentity() {
     const identityEl = document.getElementById("identity");
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
     if (identified) {
@@ -67,6 +67,7 @@
     } else {
       identityEl.textContent = "（非 LINE 環境，僅能瀏覽公開資訊）";
     }
+    return identified;
   })();
   document.getElementById("avatar-btn").addEventListener("click", () => {
     location.href = "profile.html";
@@ -74,19 +75,32 @@
 
   showPageLoading(document.getElementById("hero-wrap"));
 
-  initClubAndSeasonPickers(
-    API_BASE,
-    document.getElementById("club-picker"),
-    document.getElementById("season-picker"),
-    "vf_org_season",
-    (id) => {
+  // Every club-scoped read carries the caller's token now, so nothing may
+  // fetch before LIFF identity has resolved — otherwise authHeader() is
+  // empty and the server correctly says 401.
+  identityReady.then((identified) => {
+    if (!identified) {
       stopLoadingEscalation();
-      document.getElementById("club-picker").hidden = !currentClubId();
-      if (id) loadDashboard(id);
-      else renderNoSeason();
-    },
-    (e) => showPageError(document.getElementById("hero-wrap"), e.message)
-  );
+      document.getElementById("hero-wrap").innerHTML = emptyStateHtml(
+        "請用 LINE 開啟",
+        "名單和帳務只有球隊成員看得到，所以需要先用 LINE 登入。請從 LINE 裡的連結開啟這一頁。"
+      );
+      return;
+    }
+    initClubAndSeasonPickers(
+      API_BASE,
+      document.getElementById("club-picker"),
+      document.getElementById("season-picker"),
+      "vf_org_season",
+      (id) => {
+        stopLoadingEscalation();
+        document.getElementById("club-picker").hidden = !currentClubId();
+        if (id) loadDashboard(id);
+        else renderNoSeason();
+      },
+      (e) => showPageError(document.getElementById("hero-wrap"), e.message)
+    );
+  });
 
   function renderNoSeason() {
     currentSeason = null;
@@ -112,7 +126,9 @@
     errorEl.textContent = "";
     try {
       // Cached copy first, network second — see getJsonSWR.
-      await getJsonSWR(`${API_BASE}/seasons/${seasonId}`, (season) => render(season));
+      await getJsonSWR(`${API_BASE}/seasons/${seasonId}`, (season) => render(season), {
+        headers: authHeader(),
+      });
     } catch (e) {
       errorEl.textContent = "連不上伺服器：" + e.message;
     }

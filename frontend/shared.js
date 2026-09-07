@@ -182,12 +182,15 @@ async function initClubAndSeasonPickers(
     // twice (cache then network) — its rejection has to be caught here
     // rather than escaping as an unhandled rejection, which is exactly
     // the silent-blank-page failure this whole path is meant to prevent.
+    // These reads are club-scoped now, so they carry the caller's token.
+    // Callers must resolve identity (initLiffIdentity) before starting
+    // the pickers, or authHeader() is empty and the server says 401.
     await getJsonSWR(`${apiBase}/clubs`, (clubs, meta) => {
       applyClubs(clubs, meta).catch((e) => {
         console.error("Could not load seasons:", e);
         if (onError) onError(e);
       });
-    });
+    }, { headers: authHeader() });
   }
 
   async function applyClubs(clubs, meta) {
@@ -220,8 +223,10 @@ async function initClubAndSeasonPickers(
   localStorage.setItem(CLUB_STORAGE_KEY, clubEl.value);
 
   async function loadSeasons() {
-    await getJsonSWR(`${apiBase}/clubs/${clubEl.value}/seasons`, (seasons) =>
-      applySeasons(seasons)
+    await getJsonSWR(
+      `${apiBase}/clubs/${clubEl.value}/seasons`,
+      (seasons) => applySeasons(seasons),
+      { headers: authHeader() }
     );
   }
 
@@ -781,7 +786,9 @@ function emptyStateHtml(title, body, action) {
  * not break the page. */
 async function fetchClubMembers(apiBase, clubId) {
   try {
-    const res = await fetch(`${apiBase}/clubs/${clubId}/members`);
+    const res = await fetch(`${apiBase}/clubs/${clubId}/members`, {
+      headers: authHeader(),
+    });
     return res.ok ? await res.json() : [];
   } catch (e) {
     console.warn("Could not load club members:", e);
