@@ -362,7 +362,6 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 
 /* 候補 waitlist rows — numbered so the order (the thing people asked
    about when several sign up at once) is the first thing the eye hits */
-.wl-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 8px; font-size: .84rem; }
 
 /* 代打 (substitute) inline controls on an absence row */
 .mini-action {
