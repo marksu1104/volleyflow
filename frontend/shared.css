@@ -273,7 +273,17 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 .mcal-cell.today { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 .mcal-cell.has-game { cursor: pointer; font-weight: 700; background: var(--surface-2); color: var(--ink); }
 .mcal-cell.has-game:active { transform: scale(.92); }
-.mcal-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); margin-top: 1px; }
+/* The selected day, which the card above the calendar is showing. */
+.mcal-cell.on { box-shadow: inset 0 0 0 1.5px var(--accent); background: var(--accent-soft); color: var(--accent); }
+/* One dot, four meanings: has a game / short of players / full / you're
+   away. A cell is ~40px across, so a word in it is unreadable — and the
+   colour is doing the same job a label would. */
+.mcal-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); margin-top: 1px; flex: none; }
+.mcal-dot.short { background: var(--warn); }
+.mcal-dot.full { background: var(--good); }
+.mcal-dot.away { background: none; border: 1.5px solid currentColor; width: 6px; height: 6px; opacity: .5; }
+.mcal-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--rule); }
+.mcal-legend span { display: inline-flex; align-items: center; gap: 4px; font-size: .64rem; color: var(--ink-faint); }
 
 /* at-a-glance summary */
 .glance { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; margin: 4px 0 6px; }
@@ -481,6 +491,11 @@ textarea.control { resize: vertical; min-height: 90px; }
 .m-row { background: var(--surface); border: 1px solid var(--rule); border-radius: 11px; padding: 11px 12px; }
 .m-top { display: flex; align-items: center; gap: 9px; }
 .m-name { flex: 1; font-weight: 700; font-size: .88rem; }
+/* Money screen only — who to collect a guest's cash from. */
+.m-brought {
+  margin-left: 6px; font-size: .66rem; font-weight: 700; color: var(--ink-soft);
+  background: var(--surface-2); border-radius: 999px; padding: 2px 7px; white-space: nowrap;
+}
 .m-net { font-family: var(--font-num); font-weight: 800; font-size: 1rem; font-variant-numeric: tabular-nums; }
 .m-net.owe { color: var(--bad); }
 .m-net.owed { color: var(--good); }
@@ -612,3 +627,63 @@ select,
 textarea {
   font-size: 16px !important;
 }
+
+/* ---- the signup sheet: "+1, and I'm bringing two friends" ----
+   Everything here lives in its own sheet rather than inline under a
+   game, because the roster below a game runs to 18 names and anything
+   placed after it is effectively hidden. */
+.su-when { margin: 3px 0 0; font-size: .76rem; color: var(--ink-soft); }
+.su-cap { margin: 14px 0 4px; }
+.su-cap-line { display: flex; justify-content: space-between; align-items: baseline; font-size: .8rem; margin-bottom: 6px; }
+.su-cap-line strong { font-family: var(--font-num); }
+.su-cap-note { color: var(--ink-faint); font-size: .74rem; }
+.su-bar { height: 7px; border-radius: 6px; background: var(--surface-2); overflow: hidden; display: flex; }
+.su-bar i { display: block; height: 100%; transition: width .18s ease; }
+.su-bar .now { background: var(--accent); }
+.su-bar .adding { background: var(--good); }
+.su-bar .over { background: var(--warn); }
+.su-q { font-size: .76rem; font-weight: 700; color: var(--ink-soft); margin: 16px 0 6px; }
+.su-seg { display: flex; gap: 6px; }
+.su-seg button {
+  flex: 1; padding: 11px 0; border-radius: 10px; border: 1.5px solid var(--rule);
+  background: var(--surface); color: var(--ink); cursor: pointer;
+  font-family: var(--font-num); font-size: 1rem; font-weight: 800;
+}
+.su-seg button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.su-who { display: flex; flex-direction: column; gap: 7px; margin-top: 12px; }
+.su-row {
+  display: flex; align-items: center; gap: 7px; padding: 7px 8px;
+  border-radius: 10px; background: var(--surface-2);
+}
+.su-row.wait { background: var(--warn-soft); }
+.su-row .n { font-family: var(--font-num); font-size: .76rem; font-weight: 800; color: var(--ink-faint); width: 13px; flex: none; }
+.su-row input {
+  flex: 1; min-width: 0; padding: 8px 9px; border-radius: 8px; border: 1px solid var(--rule);
+  background: var(--surface); color: var(--ink); font-family: var(--font-cjk);
+}
+.su-row input:disabled { color: var(--ink-soft); }
+.su-g { display: flex; gap: 3px; flex: none; }
+.su-g button {
+  border: 1px solid var(--rule); background: var(--surface); color: var(--ink-soft);
+  border-radius: 7px; width: 31px; height: 34px; cursor: pointer;
+  font-family: var(--font-cjk); font-size: .78rem; font-weight: 700;
+}
+.su-g button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.su-g button.f[aria-pressed="true"] { border-color: var(--pink); background: var(--pink-soft); color: var(--pink); }
+.su-wait-tag {
+  font-size: .64rem; font-weight: 700; color: var(--warn); background: var(--surface);
+  border-radius: 999px; padding: 2px 7px; white-space: nowrap; flex: none;
+}
+/* Offered, never applied on its own: a typed name always means a new
+   person, because putting one player's fee on another's ledger can't be
+   undone while a duplicate row merely looks untidy. */
+.su-same {
+  border: none; background: none; color: var(--accent); font-size: .7rem; font-weight: 700;
+  text-align: left; padding: 0 0 0 20px; cursor: pointer; font-family: var(--font-cjk);
+}
+.su-total {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin: 15px 0 11px; padding-top: 12px; border-top: 1px solid var(--rule); font-size: .82rem;
+}
+.su-amt { font-family: var(--font-num); font-size: 1.2rem; font-weight: 800; }
+.su-breakdown { color: var(--ink-faint); font-size: .72rem; }

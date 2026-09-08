@@ -417,6 +417,14 @@ class PlayerBalanceOut(BaseModel):
     season_fee_charged: Decimal
     """Just the season-fee entries for that season, before any payment,
     which is what "本季季費" means on screen."""
+    brought_by: str | None = None
+    """Who signed this player up, when they're a guest somebody brought.
+
+    Only meaningful on the money screen: the fee is on this player's
+    ledger but a guest has no account to pay from, so this names the
+    member who actually hands over the cash. None for anyone who signed
+    themselves up.
+    """
 
 
 class PlayerLedgerOut(BaseModel):

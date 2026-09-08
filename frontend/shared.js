@@ -275,7 +275,12 @@ async function initClubAndSeasonPickers(
  * upcoming game, marks every day that has one, and lets you page
  * between months. Tapping a marked day calls onPick(gameId).
  */
-function renderMonthCalendar(container, games, onPick) {
+/** `opts.stateOf(game)` returns "", "short", "full" or "away", which
+ * colours that day's dot; `opts.selectedId` draws the ring. A dot rather
+ * than a label on purpose — a calendar cell on a phone is about 40px
+ * across, and anything with words in it is unreadable at that size. */
+function renderMonthCalendar(container, games, onPick, opts) {
+  const { stateOf = () => "", selectedId = null } = opts || {};
   const gamesByDate = {};
   for (const g of games) gamesByDate[g.date] = g;
 
@@ -298,8 +303,9 @@ function renderMonthCalendar(container, games, onPick) {
       const cls = ["mcal-cell"];
       if (key === todayKey) cls.push("today");
       if (game) cls.push("has-game");
+      if (game && String(game.id) === String(selectedId)) cls.push("on");
       cells += `<div class="${cls.join(" ")}" ${game ? `data-game-id="${game.id}"` : ""}>
-        <span>${d}</span>${game ? '<div class="mcal-dot"></div>' : ""}
+        <span>${d}</span>${game ? `<div class="mcal-dot ${stateOf(game)}"></div>` : ""}
       </div>`;
     }
 

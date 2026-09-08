@@ -199,10 +199,14 @@
       `${API_BASE}/clubs/${currentClubId()}/balances?season_id=${season.id}`,
       { headers: authHeader() }
     );
+    applyBalances(res.ok ? await res.json() : []);
+  }
+
+  /** Kept apart from the fetch above so the rows every money figure is
+   * derived from can be set directly, without a network stub. */
+  function applyBalances(rows) {
     balances = {};
-    if (res.ok) {
-      for (const row of await res.json()) balances[row.player_id] = row;
-    }
+    for (const row of rows) balances[row.player_id] = row;
   }
 
   /** The zero row for someone with no ledger entries at all — a member
@@ -214,6 +218,7 @@
         balance: "0",
         season_total: "0",
         season_fee_charged: "0",
+        brought_by: null,
       }
     );
   }
@@ -259,11 +264,21 @@
       actionHtml = '<div class="m-done">✓ 已結清</div>';
     }
 
+    // The one place this is ever shown. A guest's fee sits on their own
+    // ledger, but they have no account and pay nothing — the member who
+    // brought them hands over the cash — so without this the row says
+    // "小明 應收 $235" with no way to know who to ask. Kept off the
+    // roster, where it would be noise rather than an answer.
+    const brought = balanceOf(playerId).brought_by;
+    const broughtTag = brought
+      ? `<span class="m-brought">${escapeHtml(brought)} 帶</span>`
+      : "";
+
     return `
       <div class="m-row">
         <div class="m-top">
           <span class="avatar sm">${escapeHtml((name || "?").slice(0, 1))}</span>
-          <span class="m-name">${escapeHtml(name)}${genderTagFor(gender)}</span>
+          <span class="m-name">${escapeHtml(name)}${genderTagFor(gender)}${broughtTag}</span>
           <span class="m-net ${netCls}">${netText}</span>
         </div>
         ${breakParts.length ? `<div class="m-break">${breakParts.join("")}</div>` : ""}

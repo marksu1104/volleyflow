@@ -2806,3 +2806,29 @@ def test_a_cancelled_absence_stops_freeing_up_a_slot(client: TestClient) -> None
 
     assert response.status_code == 200
     assert response.json()["results"][0]["status"] == "waitlisted"
+
+
+def test_the_money_screen_names_who_brought_each_guest(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    club_id = season["club_id"]
+    game_id = season["games"][0]["id"]
+    carol = identify(client, "Carol")
+    client.post(f"/clubs/{club_id}/join", headers=auth_headers(carol["token"]))
+
+    results = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={
+            "people": [
+                {"player_name": "Carol", "player_id": carol["id"]},
+                {"player_name": "小明", "gender": "male"},
+            ]
+        },
+        headers=auth_headers(carol["token"]),
+    ).json()["results"]
+    guest_id = next(r["player_id"] for r in results if r["player_id"] != carol["id"])
+
+    balances = client.get(f"/clubs/{club_id}/balances").json()
+    by_player = {b["player_id"]: b for b in balances}
+
+    assert by_player[guest_id]["brought_by"] == "Carol"
+    assert by_player[carol["id"]]["brought_by"] is None
