@@ -680,17 +680,20 @@
     const deadlinePill = season.change_deadline_days !== null
       ? `<span class="meta-pill">請假期限 <strong>賽前 ${season.change_deadline_days} 天</strong></span>`
       : "";
-    wrap.innerHTML =
-      renderGameHero(season, game, { metaPills: [deadlinePill] }) +
-      buildMyActionHtml(season, game) +
-      `<button type="button" class="btn btn-quiet" style="width:100%;margin-top:8px"
-         onclick="openGameSheet()">看名單（${countPlaying(season, game)} 人）</button>`;
+    const mine = myActions(season, game);
+    // Everything about this date lives in this one card — including the
+    // way into the full roster. Floating those controls underneath made
+    // them read as page-level buttons that happened to be nearby.
+    wrap.innerHTML = renderGameHero(season, game, {
+      metaPills: [deadlinePill],
+      statusHtml: mine.status,
+      actionsHtml: mine.actions,
+      moreHtml: `<button type="button" class="hero-more" onclick="openGameSheet()">
+          <span>看名單（${expectedAttendance(season, game)} 人）</span><span class="chev">›</span>
+        </button>`,
+    });
     wrap.dataset.heroGameId = game.id;
     wrap.onclick = null;
-  }
-
-  function countPlaying(season, game) {
-    return season.members.length - game.absences.length + game.confirmed_drop_ins.length;
   }
 
   /** Which colour that day's dot gets. Ordered by what you most need to
@@ -699,7 +702,7 @@
   function calendarState(game) {
     const name = playerName();
     if (game.absences.some((a) => a.player_name === name)) return "away";
-    const playing = countPlaying(currentSeason, game);
+    const playing = expectedAttendance(currentSeason, game);
     if (playing >= currentSeason.capacity) return "full";
     if (playing < currentSeason.minimum_roster) return "short";
     return "";
@@ -729,8 +732,10 @@
       heroMetaPills: [deadlinePill],
       clubMembers,
       viewerName: playerName(),
-      extraHtml: buildMyActionHtml(currentSeason, game),
+      statusHtml: myActions(currentSeason, game).status,
+      actionsHtml: myActions(currentSeason, game).actions,
       onAssignSubstitute: (absenceId, name, gender) => assignSubstitute(absenceId, name, gender),
+      onLeaveWaitlist: (entryId, btn) => leaveWaitlist(entryId, btn),
       onCancelSubstitute: (dropInId, btn) => cancelDropIn(dropInId, btn),
       canAssignSubstitute: (absence) => absence.player_name === playerName(),
     });
@@ -761,80 +766,95 @@
     );
   }
 
-  function buildMyActionHtml(season, game) {
+  /** What this viewer can do about this game, as a status line and a row
+   * of equal-weight buttons.
+   *
+   * Returned as two pieces rather than one blob because they sit in
+   * different places in the card: where you stand goes above the rule,
+   * what you can do about it goes below, and every button in that row is
+   * the same size whatever state you're in. The old version emitted a
+   * full-width danger button, a small left-aligned pill and a
+   * full-width outline button in a stack, which read as three unrelated
+   * controls.
+   */
+  function myActions(season, game) {
     const name = playerName();
     const blocked = currentViewingOnlyReason();
     if (blocked) {
-      return `<div class="gdetail-mystatus waitlisted">${escapeHtml(blocked)}</div>`;
+      return { status: `<div class="hero-status">${escapeHtml(blocked)}</div>`, actions: "" };
     }
     if (game.locked) {
-      return '<div class="gdetail-mystatus absent">已過更動期限，這一場無法再變更</div>';
+      return {
+        status: '<div class="hero-status">已過更動期限，這一場無法再變更</div>',
+        actions: "",
+      };
     }
+    if (!name) return { status: "", actions: "" };
+
     const isMember = season.members.some((m) => m.name === name);
     const myAbsence = game.absences.find((a) => a.player_name === name);
     const myDropIn = game.confirmed_drop_ins.find((d) => d.player_name === name);
-    const myWaitlistIndex = game.waitlist_entries.findIndex((d) => d.player_name === name);
-    // Signing people up isn't a state you're in — you can do it whether
-    // you're playing, on leave, already covered, or not going at all —
-    // so it hangs off every branch below rather than being one more
-    // mutually exclusive case.
-    const guest = name ? buildGuestSignupHtml(season, game) : "";
+    const myWaitIndex = game.waitlist_entries.findIndex((d) => d.player_name === name);
+    const playing = (isMember && !myAbsence) || !!myDropIn;
+    const full = isGameFull(season, game);
 
-    if (isMember) {
-      if (myAbsence) {
-        if (myAbsence.covered_by) {
-          // The substitute has to go before the absence can: cancelling
-          // leave that someone is covering is refused server-side, and
-          // without this button there was no way to undo either — you
-          // were stuck the moment you arranged a 代打.
-          const covering = game.confirmed_drop_ins.find((d) => d.covering === name);
-          const undoSub = covering
-            ? `<button class="action cancel" onclick="cancelDropIn(${covering.id}, this)">取消代打</button>`
-            : "";
-          return (
-            `<div class="gdetail-mystatus absent">已請假，由 ${escapeHtml(myAbsence.covered_by)} 代打</div>` +
-            undoSub +
-            guest
-          );
-        }
-        return (
-          '<div class="gdetail-mystatus absent">已請假這一場</div>' +
-          `<button class="action cancel" onclick="cancelAbsence(${myAbsence.id}, this)">取消請假</button>` +
-          guest
-        );
+    // Honest about what the button does: if you're already on the sheet,
+    // the signup panel is for the people you're bringing, not for you.
+    const bring = `<button type="button" class="hact${playing ? " quiet" : ""}" onclick="openSignup(${game.id})">${
+      playing ? "＋ 帶朋友" : "＋ 報名"
+    }${full ? "候補" : ""}</button>`;
+
+    if (isMember && myAbsence) {
+      if (myAbsence.covered_by) {
+        // The substitute has to go before the absence can: the server
+        // refuses to cancel leave someone is covering.
+        const covering = game.confirmed_drop_ins.find((d) => d.covering === name);
+        return {
+          status: `<div class="hero-status absent">已請假・由 ${escapeHtml(myAbsence.covered_by)} 代打</div>`,
+          actions:
+            (covering
+              ? `<button type="button" class="hact danger" onclick="cancelDropIn(${covering.id}, this)">取消代打</button>`
+              : "") + bring,
+        };
       }
-      return (
-        `<button class="btn btn-danger" onclick="recordAbsence(${game.id}, this)">請假</button>` +
-        guest
-      );
+      return {
+        status: '<div class="hero-status absent">已請假這一場</div>',
+        actions:
+          `<button type="button" class="hact danger" onclick="cancelAbsence(${myAbsence.id}, this)">取消請假</button>` +
+          bring,
+      };
+    }
+    if (isMember) {
+      return {
+        status: "",
+        actions:
+          `<button type="button" class="hact danger" onclick="recordAbsence(${game.id}, this)">請假</button>` +
+          bring,
+      };
     }
     if (myDropIn) {
-      return (
-        '<div class="gdetail-mystatus confirmed">已報名這一場</div>' +
-        `<button class="action cancel" onclick="cancelDropIn(${myDropIn.id}, this)">取消報名</button>` +
-        guest
-      );
+      return {
+        status: '<div class="hero-status confirmed">已報名這一場</div>',
+        actions:
+          `<button type="button" class="hact danger" onclick="cancelDropIn(${myDropIn.id}, this)">取消報名</button>` +
+          bring,
+      };
     }
-    if (myWaitlistIndex >= 0) {
-      return (
-        `<div class="gdetail-mystatus waitlisted">候補中・第 ${myWaitlistIndex + 1} 順位</div>` +
-        `<button class="action cancel" onclick="cancelDropIn(${game.waitlist_entries[myWaitlistIndex].id}, this)">取消候補</button>` +
-        guest
-      );
+    if (myWaitIndex >= 0) {
+      return {
+        status: `<div class="hero-status waiting">候補中・第 ${myWaitIndex + 1} 順位</div>`,
+        actions:
+          `<button type="button" class="hact danger" onclick="leaveWaitlist(${game.waitlist_entries[myWaitIndex].id}, this)">取消候補</button>` +
+          bring,
+      };
     }
-    // No separate "sign myself up" button: the signup sheet's first row
-    // is already you, so one control covers "just me", "me and a
-    // friend", and "two friends, I'm not playing".
-    return guest;
+    return { status: "", actions: bring };
   }
 
-  function buildGuestSignupHtml(season, game) {
-    const full = isGameFull(season, game);
-    return `<button type="button" class="action" onclick="openSignup(${game.id})">＋ 報名${full ? "候補" : ""}</button>`;
-  }
+
 
   function isGameFull(season, game) {
-    return countPlaying(season, game) >= season.capacity;
+    return expectedAttendance(season, game) >= season.capacity;
   }
 
   /* ---- the signup sheet ----
@@ -871,7 +891,7 @@
   function closeSignup() { document.getElementById("signup-backdrop").hidden = true; }
 
   function renderSignup() {
-    const playing = countPlaying(currentSeason, suGame);
+    const playing = expectedAttendance(currentSeason, suGame);
     const slots = Math.max(0, currentSeason.capacity - playing);
     const confirmed = Math.min(suPeople.length, slots);
     const waiting = suPeople.length - confirmed;
@@ -1018,18 +1038,26 @@
    * again. The server is still the authority: on failure we put the
    * screen back and say why, and every success re-reads it anyway.
    */
+  /** Everything that shows the selected game's state. The calendar
+   * belongs here too: taking leave changes that day's dot, and leaving
+   * it out let the card say 已請假 while the calendar still showed the
+   * day as ordinary until the server answered. */
+  function repaintGame() {
+    renderHero(currentSeason);
+    renderCalendar();
+    renderSelectedGameDetail();
+  }
+
   async function optimistically(mutateLocally, request, failureMessage) {
     const snapshot = JSON.parse(JSON.stringify(currentSeason));
     mutateLocally(currentSeason);
-    renderHero(currentSeason);
-    renderSelectedGameDetail();
+    repaintGame();
     try {
       await request();
       loadSeason(currentSeasonId);
     } catch (e) {
       currentSeason = snapshot;
-      renderHero(currentSeason);
-      renderSelectedGameDetail();
+      repaintGame();
       alert(failureMessage + e.message);
     }
   }
@@ -1049,21 +1077,21 @@
     );
   }
 
-  async function signUp(gameId, btn) {
-    const name = playerName();
+
+  /** A queue place is a different row in a different table from a
+   * confirmed signup, and the two id sequences overlap. Sending a
+   * waitlist id to /drop-ins/{id}/cancel — which this used to do —
+   * either 404s or cancels an unrelated person's signup. */
+  async function leaveWaitlist(entryId, btn) {
+    if (entryId < 0) return;
     await optimistically(
       (season) => {
-        const game = season.games.find((g) => g.id === gameId);
-        game.confirmed_drop_ins.push({
-          id: -1,
-          player_id: myPlayerId,
-          player_name: name,
-          gender: null,
-          covering: null,
-        });
+        for (const game of season.games) {
+          game.waitlist_entries = game.waitlist_entries.filter((w) => w.id !== entryId);
+        }
       },
-      () => postJson(API_BASE, "/drop-ins", { player_name: name, game_id: gameId }),
-      "報名失敗："
+      () => postJson(API_BASE, `/waitlist/${entryId}/cancel`, {}),
+      "取消候補失敗："
     );
   }
 
@@ -1073,7 +1101,6 @@
       (season) => {
         for (const game of season.games) {
           game.confirmed_drop_ins = game.confirmed_drop_ins.filter((d) => d.id !== dropInId);
-          game.waitlist_entries = game.waitlist_entries.filter((w) => w.id !== dropInId);
         }
       },
       () => postJson(API_BASE, `/drop-ins/${dropInId}/cancel`, {}),

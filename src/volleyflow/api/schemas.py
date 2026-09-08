@@ -213,6 +213,16 @@ class DropInBatchOut(BaseModel):
     results: list[DropInOut]
 
 
+class WaitlistCancelOut(BaseModel):
+    """A queue place is deleted outright, not marked cancelled — it
+    carries no money and no history worth keeping, so there is no
+    cancelled_at to report."""
+
+    id: int
+    player_id: int
+    game_id: int
+
+
 class DropInCancelOut(BaseModel):
     id: int
     cancelled_at: datetime

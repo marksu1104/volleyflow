@@ -2863,3 +2863,64 @@ def test_an_organizer_still_cannot_rename_someone_with_an_account(
     response = client.put(f"/players/{carol['id']}/name", json={"name": "Renamed"})
 
     assert response.status_code == 403
+
+
+def test_someone_can_give_up_their_place_in_the_queue(client: TestClient) -> None:
+    # There was no endpoint for this at all: the frontend sent waitlist
+    # ids to /drop-ins/{id}/cancel, whose ids are a separate sequence.
+    season = _start_season(client, member_names=["A", "B"], capacity=2)
+    game_id = season["games"][0]["id"]
+    entry_id = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={"people": [{"player_name": "測試", "gender": "male"}]},
+    ).json()["results"][0]["id"]
+
+    response = client.post(f"/waitlist/{entry_id}/cancel")
+
+    assert response.status_code == 200
+    detail = client.get(f"/seasons/{season['id']}").json()
+    game = next(g for g in detail["games"] if g["id"] == game_id)
+    assert game["waitlist_entries"] == []
+
+
+def test_leaving_the_queue_frees_the_name_to_sign_up_again(client: TestClient) -> None:
+    # The state the bug left people in: stuck in the queue, unable to
+    # leave, and told "already on the waitlist" when trying again.
+    season = _start_season(client, member_names=["A", "B"], capacity=2)
+    game_id = season["games"][0]["id"]
+    first = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={"people": [{"player_name": "測試", "gender": "male"}]},
+    ).json()["results"][0]
+
+    client.post(f"/waitlist/{first['id']}/cancel")
+    again = client.post("/drop-ins", json={"player_name": "測試", "game_id": game_id})
+
+    assert again.status_code == 200
+
+
+def test_a_waitlist_id_cannot_cancel_someone_elses_drop_in(client: TestClient) -> None:
+    # The two tables number independently, so waitlist entry 1 and
+    # drop-in 1 are different people. Cancelling by the wrong route must
+    # not reach across.
+    season = _start_season(client, member_names=["A"], capacity=2)
+    game_id = season["games"][0]["id"]
+    results = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={
+            "people": [
+                {"player_name": "有位子的", "gender": "male"},
+                {"player_name": "排隊的", "gender": "male"},
+            ]
+        },
+    ).json()["results"]
+    confirmed = next(r for r in results if r["status"] == "confirmed")
+    queued = next(r for r in results if r["status"] == "waitlisted")
+
+    client.post(f"/waitlist/{queued['id']}/cancel")
+
+    detail = client.get(f"/seasons/{season['id']}").json()
+    game = next(g for g in detail["games"] if g["id"] == game_id)
+    assert [d["player_id"] for d in game["confirmed_drop_ins"]] == [
+        confirmed["player_id"]
+    ], "the confirmed signup must be untouched"
