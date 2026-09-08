@@ -636,12 +636,19 @@ function authHeader() {
  * LINE Login web redirect outside the app, so this one flow covers both
  * member.html and the organizer pages.
  *
- * Returns the identified player ({id, name, avatar_url, gender}), or
- * null if LIFF genuinely isn't available (login declined, or a real
- * error) — callers should degrade to a read-only view in that case,
- * since nothing requiring identity will succeed anyway.
+ * Returns the identified player ({id, name, avatar_url, gender}), or a
+ * falsy value that says which half failed, because the two need
+ * different words on screen and only one is worth retrying:
+ *   null  — LINE's side. No LIFF, login declined, token rejected.
+ *           Nothing to retry; tell them to open it in LINE.
+ *   false — our backend didn't answer after three tries. Almost always
+ *           a sleeping free-tier instance. Tell them that, and offer
+ *           to reload.
+ * Callers that don't care can keep testing falsiness and degrade to a
+ * read-only view either way.
  */
 async function initLiffIdentity(apiBase, liffId) {
+  let profile;
   try {
     await liff.init({ liffId });
     if (!liff.isLoggedIn()) {
@@ -663,22 +670,46 @@ async function initLiffIdentity(apiBase, liffId) {
         sessionStorage.removeItem("vf_identity");
       }
     }
-    const profile = await liff.getProfile();
-    const identified = await postJson(apiBase, "/players/identify", {
-      id_token: liff.getIDToken(),
-      display_name: profile.displayName,
-      picture_url: profile.pictureUrl,
-    });
-    try {
-      sessionStorage.setItem("vf_identity", JSON.stringify(identified));
-    } catch (e) {
-      // Private mode — just means we identify again next page.
-    }
-    return identified;
+    profile = await liff.getProfile();
   } catch (e) {
-    console.warn("LIFF/identify unavailable:", e);
+    // Everything above is LINE's side: no LIFF SDK, a bad liff id, login
+    // declined. Nothing we retry will change that, and the caller should
+    // say "open this in LINE".
+    console.warn("LIFF unavailable:", e);
     return null;
   }
+
+  // Identifying is our own backend, and on a free Render instance the
+  // first request of the day wakes it from sleep — 30 seconds, often a
+  // 502 on the way. Treating that like a LINE login failure is what put
+  // "請用 LINE 開啟" on screen for someone who was perfectly logged in,
+  // and it happened constantly. So: retry a cold start, and if it still
+  // won't answer, report a *server* failure (false), not a login one.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const identified = await postJson(apiBase, "/players/identify", {
+        id_token: liff.getIDToken(),
+        display_name: profile.displayName,
+        picture_url: profile.pictureUrl,
+      });
+      try {
+        sessionStorage.setItem("vf_identity", JSON.stringify(identified));
+      } catch (e) {
+        // Private mode — just means we identify again next page.
+      }
+      return identified;
+    } catch (e) {
+      // A rejected token is a real answer, not a cold start; retrying it
+      // just delays the same 401 three times over.
+      if (e.status === 401 || e.status === 403) {
+        console.warn("Identity rejected:", e);
+        return null;
+      }
+      console.warn(`identify attempt ${attempt + 1} failed:`, e);
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    }
+  }
+  return false;
 }
 
 async function postJson(apiBase, path, body, method) {
@@ -688,7 +719,14 @@ async function postJson(apiBase, path, body, method) {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || res.statusText);
+  if (!res.ok) {
+    const error = new Error(data.detail || res.statusText);
+    // Callers that retry need to tell "the server didn't answer" from
+    // "the server answered no" — see initLiffIdentity, which must not
+    // retry a rejected token three times over.
+    error.status = res.status;
+    throw error;
+  }
   // Anything that writes invalidates every cached read: taking leave
   // changes the season detail, adding a member changes the season list,
   // creating a club changes the club list. Dropping the lot is cheap
@@ -842,9 +880,33 @@ function emptyStateHtml(title, body, action) {
     <div class="empty-state">
       <h3>${escapeHtml(title)}</h3>
       <p>${escapeHtml(body)}</p>
-      ${action ? `<a class="btn btn-primary" href="${action.href}">${escapeHtml(action.label)}</a>` : ""}
+      ${
+        !action
+          ? ""
+          : action.href
+            ? `<a class="btn btn-primary" href="${action.href}">${escapeHtml(action.label)}</a>`
+            : `<button type="button" class="btn btn-primary" onclick="${escapeHtml(action.onclick)}">${escapeHtml(action.label)}</button>`
+      }
     </div>
   `;
+}
+
+/** What to show when initLiffIdentity came back falsy. Its two failures
+ * need different words: one is the reader's to fix by opening the page
+ * in LINE, the other is the server being asleep and fixes itself. Every
+ * page shows the same thing, so it's written once here. */
+function signInFailureHtml(identified) {
+  if (identified === false) {
+    return emptyStateHtml(
+      "連不上伺服器",
+      "伺服器可能正在喚醒中，這通常要等 30 秒左右。稍等一下再重新載入就好。",
+      { label: "重新載入", onclick: "location.reload()" }
+    );
+  }
+  return emptyStateHtml(
+    "請用 LINE 開啟",
+    "名單和帳務只有球隊成員看得到，所以需要先用 LINE 登入。請從 LINE 裡的連結開啟這一頁。"
+  );
 }
 
 /** DELETE with the caller's token, throwing the API's own error detail —

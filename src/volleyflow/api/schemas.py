@@ -156,6 +156,10 @@ class SubstituteCreate(BaseModel):
 class DropInCreate(BaseModel):
     player_name: str
     game_id: int
+    # Only ever fills a gender in, never overwrites one — a guest being
+    # brought by a member is usually a brand new name, and the roster
+    # shows 男/女 because team balance is decided off it.
+    gender: Gender | None = None
 
 
 class DropInOut(BaseModel):
@@ -344,6 +348,10 @@ class ProblemReport(BaseModel):
     because "it broke" is only actionable with the where."""
     user_agent: str | None = None
     club_id: int | None = None
+    screenshot: str | None = None
+    """A data URL (`data:image/jpeg;base64,...`). The page shrinks the
+    picture before sending — a raw phone screenshot is several megabytes,
+    and a bad connection is exactly the situation someone reports from."""
 
 
 class PlayerBalanceOut(BaseModel):
