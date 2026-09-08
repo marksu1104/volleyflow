@@ -119,6 +119,9 @@ function renderGameHero(season, game, opts) {
         <span class="meta-pill">每場 <strong>$${season.share_per_game}</strong></span>
         ${(o.metaPills || []).join("")}
       </div>
+      ${o.statusHtml || ""}
+      ${o.actionsHtml ? `<div class="hero-actions">${o.actionsHtml}</div>` : ""}
+      ${o.moreHtml || ""}
     </div>
   `;
 }
@@ -497,14 +500,27 @@ function renderGameDetail(container, season, game, options) {
     `);
   }
 
-  const waitlistRows = game.waitlist_entries.length
-    ? game.waitlist_entries
-        .map((w, i) => {
-          const isMe = viewerName && w.player_name === viewerName;
-          return `<div class="wl-row${isMe ? " me" : ""}"><span class="wl-num">${i + 1}</span><span class="wl-name">${escapeHtml(w.player_name)}${genderTag(w.gender)}${isMe ? "（你）" : ""}</span></div>`;
-        })
-        .join("")
-    : "";
+  // Same row as the attendance list, deliberately. These were borderless
+  // text next to eighteen bordered cards, which made a queue of three
+  // read as nothing at all — reported more than once as "the waitlist
+  // disappeared" when it had been on screen the whole time. A dashed
+  // edge and a 候補 note carry "not in yet" without leaving the shape.
+  const waitlistRows = game.waitlist_entries
+    .map((w, i) => {
+      const isMe = viewerName && w.player_name === viewerName;
+      const remove = opts.onLeaveWaitlist
+        ? `<button type="button" class="mini-action danger" data-remove-waitlist="${w.id}">移除</button>`
+        : "";
+      return `
+        <div class="att-row queued${isMe ? " me" : ""}">
+          <span class="att-num">${i + 1}</span>
+          <span class="avatar sm">${initial(w.player_name)}</span>
+          <span class="att-name">${escapeHtml(w.player_name)}${genderTag(w.gender)}${isMe ? "（你）" : ""}</span>
+          <span class="att-note">候補</span>
+          <span class="roster-note">${remove}</span>
+        </div>`;
+    })
+    .join("");
 
   // Order matters, and it used to be wrong: every control sat *after*
   // the attendance, absence and waitlist lists. With a full roster
@@ -539,7 +555,7 @@ function renderGameDetail(container, season, game, options) {
     }
     ${
       waitlistRows
-        ? `<div class="gdetail-section-label">候補（${game.waitlist_entries.length} 人）</div><div class="gdetail-waitlist">${waitlistRows}</div>`
+        ? `<div class="gdetail-section-label">候補（${game.waitlist_entries.length} 人）</div><div class="att-list">${waitlistRows}</div>`
         : ""
     }
   `;
@@ -594,6 +610,14 @@ function renderGameDetail(container, season, game, options) {
     const removeDropIn = e.target.closest("[data-remove-drop-in]");
     if (removeDropIn && opts.onRemoveDropIn) {
       opts.onRemoveDropIn(Number(removeDropIn.dataset.removeDropIn), removeDropIn);
+      return;
+    }
+    // Separate hook, not a shared one: a queue place lives in its own
+    // table with its own id sequence, and routing it through the
+    // drop-in handler cancels whoever happens to hold that number.
+    const removeWaitlist = e.target.closest("[data-remove-waitlist]");
+    if (removeWaitlist && opts.onLeaveWaitlist) {
+      opts.onLeaveWaitlist(Number(removeWaitlist.dataset.removeWaitlist), removeWaitlist);
       return;
     }
     const addDropIn = e.target.closest("[data-add-dropin]");

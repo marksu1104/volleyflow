@@ -76,6 +76,7 @@ from volleyflow.api.schemas import (
     SeasonUpdate,
     SettlementOut,
     SubstituteCreate,
+    WaitlistCancelOut,
 )
 from volleyflow.db.models import (
     AbsenceRow,
@@ -2088,6 +2089,42 @@ def _sign_up_each(
                 )
             )
     return results
+
+
+@router.post("/waitlist/{entry_id}/cancel", response_model=WaitlistCancelOut)
+def leave_waitlist(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> WaitlistCancelOut:
+    """Give up a place in the queue.
+
+    This did not exist, and the frontend was sending waitlist entry ids
+    to /drop-ins/{id}/cancel instead. `waitlist_entries.id` and
+    `drop_ins.id` are independent sequences, so that either 404'd, or —
+    when the numbers happened to line up — cancelled a completely
+    different person's confirmed signup. Queued people were stuck: they
+    could not leave, and signing up again was refused as a duplicate.
+
+    Deleted rather than marked cancelled, unlike a drop-in: a queue
+    place carries no money and no history worth keeping, and the
+    position of everyone behind them is simply their `queued_at` order.
+    """
+    entry = db.get(WaitlistEntryRow, entry_id)
+    if entry is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"No waitlist entry with id {entry_id}"
+        )
+    game = _get_game_or_404(db, entry.game_id)
+    season = db.get(SeasonRow, game.season_id)
+    assert season is not None  # game.season_id is a foreign key, always valid
+    _require_self_or_organizer(db, season.club_id, current_player, entry.player_id)
+    _require_within_change_deadline(db, game, season, current_player)
+
+    player_id = entry.player_id
+    db.delete(entry)
+    db.commit()
+    return WaitlistCancelOut(id=entry_id, player_id=player_id, game_id=game.id)
 
 
 @router.post("/drop-ins/{drop_in_id}/cancel", response_model=DropInCancelOut)

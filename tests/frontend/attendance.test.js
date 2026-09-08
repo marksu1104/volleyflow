@@ -173,3 +173,35 @@ test("controls come before the lists, never after them", () => {
   assert.ok(action < roster, "my own action is above the roster");
   assert.ok(addDropIn < roster, "the organizer's 新增臨打 is above the roster too");
 });
+
+test("the queue is a roster too, and removable through its own route", () => {
+  // Two bugs at once. The rows were borderless text beside eighteen
+  // bordered cards, so a queue of three read as nothing and got
+  // reported as missing. And the remove control routed through the
+  // drop-in handler, whose ids are a separate sequence — pressing it
+  // could cancel a different person's confirmed signup.
+  const { season, game } = fixture();
+  const el = makeElement();
+  const removed = { dropIn: [], waitlist: [] };
+  renderGameDetail(el, season, game, {
+    viewerName: "蘇慬",
+    onRemoveDropIn: (id) => removed.dropIn.push(id),
+    onLeaveWaitlist: (id) => removed.waitlist.push(id),
+  });
+
+  assert.match(el.innerHTML, /att-row queued/, "same row shape as the attendance list");
+  assert.doesNotMatch(el.innerHTML, /wl-row/);
+  assert.match(el.innerHTML, /data-remove-waitlist="300"/);
+  assert.doesNotMatch(
+    el.innerHTML,
+    /data-remove-drop-in="300"/,
+    "a queue id must never reach the drop-in handler"
+  );
+});
+
+test("without a waitlist handler the queue shows no remove button", () => {
+  const { season, game } = fixture();
+  const el = makeElement();
+  renderGameDetail(el, season, game, { viewerName: "蘇慬", onRemoveDropIn() {} });
+  assert.doesNotMatch(el.innerHTML, /data-remove-waitlist/);
+});
