@@ -41,6 +41,9 @@ from volleyflow.api.schemas import (
     ClubCreate,
     ClubMemberOut,
     ClubOut,
+    DropInBatchCreate,
+    DropInBatchEntry,
+    DropInBatchOut,
     DropInCancelOut,
     DropInCreate,
     DropInDetailOut,
@@ -328,6 +331,59 @@ def _require_may_sign_up(
     )
 
 
+def _reject_if_already_playing(
+    db: Session, game: GameRow, season: SeasonRow, player: PlayerRow
+) -> None:
+    """The three ways a signup would double-book someone for one game.
+
+    Shared by the single and batch signup routes so the two can't drift
+    apart on what counts as a duplicate — the batch route in particular
+    must reject the whole group rather than let one bad entry through.
+    """
+    already_signed_up = (
+        db.query(DropInRow)
+        .filter(
+            DropInRow.player_id == player.id,
+            DropInRow.game_id == game.id,
+            DropInRow.cancelled_at.is_(None),
+        )
+        .first()
+    )
+    if already_signed_up is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"{player.name} is already signed up for this game",
+        )
+    already_waitlisted = (
+        db.query(WaitlistEntryRow)
+        .filter(
+            WaitlistEntryRow.player_id == player.id,
+            WaitlistEntryRow.game_id == game.id,
+        )
+        .first()
+    )
+    if already_waitlisted is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"{player.name} is already on the waitlist for this game",
+        )
+
+    # A fixed member is expected at every game already (CLAUDE.md 2.3);
+    # signing up as a drop-in on top of that would charge them the
+    # per-game share a second time, on top of the season fee that
+    # already covers this game, and count them twice against capacity.
+    # Easy to do by accident: someone new joins the club, sees a signup
+    # button, taps it, and only afterwards gets added to the roster.
+    fixed_member = db.get(
+        SeasonMemberRow, {"season_id": season.id, "player_id": player.id}
+    )
+    if fixed_member is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"{player.name} is a fixed member of this season — no need to sign up",
+        )
+
+
 def _get_game_or_404(db: Session, game_id: int) -> GameRow:
     """Locks the game row for the rest of this transaction.
 
@@ -369,7 +425,15 @@ def _has_open_slot(db: Session, game: GameRow, season: SeasonRow) -> bool:
     member_count = (
         db.query(SeasonMemberRow).filter(SeasonMemberRow.season_id == season.id).count()
     )
-    absences = db.query(AbsenceRow).filter(AbsenceRow.game_id == game.id).count()
+    # cancelled_at matters: a member who took leave and then cancelled it
+    # is expected again. Counting their cancelled absence made `expected`
+    # too low and the game look emptier than it is, so capacity admitted
+    # one drop-in too many for every absence that had ever been undone.
+    absences = (
+        db.query(AbsenceRow)
+        .filter(AbsenceRow.game_id == game.id, AbsenceRow.cancelled_at.is_(None))
+        .count()
+    )
     active_drop_ins = (
         db.query(DropInRow)
         .filter(DropInRow.game_id == game.id, DropInRow.cancelled_at.is_(None))
@@ -1893,48 +1957,7 @@ def sign_up(
     if player.gender is None and payload.gender is not None:
         player.gender = payload.gender
 
-    already_signed_up = (
-        db.query(DropInRow)
-        .filter(
-            DropInRow.player_id == player.id,
-            DropInRow.game_id == game.id,
-            DropInRow.cancelled_at.is_(None),
-        )
-        .first()
-    )
-    if already_signed_up is not None:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "This player is already signed up for this game",
-        )
-    already_waitlisted = (
-        db.query(WaitlistEntryRow)
-        .filter(
-            WaitlistEntryRow.player_id == player.id,
-            WaitlistEntryRow.game_id == game.id,
-        )
-        .first()
-    )
-    if already_waitlisted is not None:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "This player is already on the waitlist for this game",
-        )
-
-    # A fixed member is expected at every game already (CLAUDE.md 2.3);
-    # signing up as a drop-in on top of that would charge them the
-    # per-game share a second time, on top of the season fee that
-    # already covers this game, and count them twice against capacity.
-    # Easy to do by accident: someone new joins the club, sees a signup
-    # button, taps it, and only afterwards gets added to the roster.
-    fixed_member = db.get(
-        SeasonMemberRow, {"season_id": season.id, "player_id": player.id}
-    )
-    if fixed_member is not None:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Already a fixed member of this season — no need to sign up",
-        )
+    _reject_if_already_playing(db, game, season, player)
 
     if _has_open_slot(db, game, season):
         drop_in = DropInRow(player_id=player.id, game_id=game.id, signed_up_at=_now())
@@ -1953,6 +1976,118 @@ def sign_up(
     return DropInOut(
         status="waitlisted", id=entry.id, player_id=player.id, game_id=game.id
     )
+
+
+@router.post("/games/{game_id}/drop-ins", response_model=DropInBatchOut)
+def sign_up_several(
+    game_id: int,
+    payload: DropInBatchCreate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> DropInBatchOut:
+    """ "+1, and I'm bringing two friends" — the whole group in one go.
+
+    Everything happens inside the one transaction and behind the one
+    `SELECT ... FOR UPDATE` that _get_game_or_404 takes, which is the
+    reason this exists rather than the caller looping over POST
+    /drop-ins: three separate requests can interleave with somebody
+    else's signup and push the game past capacity, and they can also
+    half-succeed, leaving some of a group charged and the rest not.
+
+    Capacity is spent in list order, so the people who overflow are the
+    ones the caller listed last — the app shows that before sending, so
+    nobody is surprised by which of their friends got the waitlist.
+    """
+    game = _get_game_or_404(db, game_id)
+    season = db.get(SeasonRow, game.season_id)
+    assert season is not None  # game.season_id is a foreign key, always valid
+    _require_within_change_deadline(db, game, season, current_player)
+
+    try:
+        results = _sign_up_each(db, game, season, payload.people, current_player)
+    except Exception:
+        # Rows are flushed as we go, so that capacity sees each person as
+        # it's added. That makes "all or nothing" this route's own job:
+        # relying on the request-scoped session being closed to discard
+        # them would leave the guarantee resting on something outside
+        # the route, and any caller holding the session open — the tests
+        # do — would see a half-finished group.
+        db.rollback()
+        raise
+
+    db.commit()
+    return DropInBatchOut(results=results)
+
+
+def _sign_up_each(
+    db: Session,
+    game: GameRow,
+    season: SeasonRow,
+    people: list[DropInBatchEntry],
+    current_player: PlayerRow,
+) -> list[DropInOut]:
+    results: list[DropInOut] = []
+    for entry in people:
+        if entry.player_id is None:
+            # A bare name is always a new person; see DropInBatchEntry.
+            player = PlayerRow(name=entry.player_name.strip(), gender=entry.gender)
+            db.add(player)
+            db.flush()  # assigns player.id without ending the transaction
+            db.add(
+                ClubMemberRow(
+                    club_id=season.club_id,
+                    player_id=player.id,
+                    role="member",
+                    joined_at=_now(),
+                )
+            )
+        else:
+            player = _get_player_or_404(db, entry.player_id)
+            _require_club_access(db, season.club_id, player)
+            if player.gender is None and entry.gender is not None:
+                player.gender = entry.gender
+        _require_may_sign_up(db, season.club_id, current_player, player)
+        _reject_if_already_playing(db, game, season, player)
+
+        # Null for anyone signing themselves up: the field answers "who
+        # do I collect this from", and for yourself that's already you.
+        brought_by = None if player.id == current_player.id else current_player.id
+
+        if _has_open_slot(db, game, season):
+            drop_in = DropInRow(
+                player_id=player.id,
+                game_id=game.id,
+                signed_up_at=_now(),
+                brought_by_player_id=brought_by,
+            )
+            db.add(drop_in)
+            _record_drop_in_charge(db, drop_in, season, reverse=False)
+            # _has_open_slot counts rows, so the next person in this
+            # batch only sees the slot as taken once this one is flushed.
+            db.flush()
+            results.append(
+                DropInOut(
+                    status="confirmed",
+                    id=drop_in.id,
+                    player_id=player.id,
+                    game_id=game.id,
+                )
+            )
+        else:
+            wait = WaitlistEntryRow(
+                player_id=player.id, game_id=game.id, queued_at=_now()
+            )
+            db.add(wait)
+            db.flush()
+            results.append(
+                DropInOut(
+                    status="waitlisted",
+                    id=wait.id,
+                    player_id=player.id,
+                    game_id=game.id,
+                )
+            )
+    return results
 
 
 @router.post("/drop-ins/{drop_in_id}/cancel", response_model=DropInCancelOut)

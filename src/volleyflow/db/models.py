@@ -248,6 +248,22 @@ class DropInRow(Base):
     """Set when this drop-in is a member's own named substitute ("代打")
     for that specific absence, rather than a general signup matched by
     FIFO order — see attendance.DropIn.covers."""
+    brought_by_player_id: Mapped[int | None] = mapped_column(
+        ForeignKey("players.id"), default=None
+    )
+    """Who signed this person up, when it wasn't themselves.
+
+    The fee is charged to the guest's own ledger, but a guest has no
+    LINE account and will never open the app or pay from it — the member
+    who brought them hands over the cash. Without this, the organizer's
+    money screen says "Ricky owes $235" with nothing to say who to ask,
+    and on a night when three different members each bring someone it is
+    guesswork. Shown only on the money screen, never on the roster: it
+    answers "who do I collect from", which is a question only asked
+    there.
+
+    Null when somebody signed themselves up, and for every drop-in
+    recorded before this column existed."""
 
 
 class WaitlistEntryRow(Base):
