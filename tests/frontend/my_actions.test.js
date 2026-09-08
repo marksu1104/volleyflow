@@ -84,9 +84,9 @@ test("cancelling the substitute then leaves ordinary leave to cancel", () => {
   assert.match(buildMyActionHtml(season, game), /取消請假/);
 });
 
-test("everyone in the club can bring a friend, in every state", () => {
-  // Signing a friend up is not a state you're in — it's something you
-  // can do whether you're playing, on leave, or already covered.
+test("signing people up is offered in every state", () => {
+  // Not a state you're in — you can do it whether you're playing, on
+  // leave, already covered, or not going at all.
   as("蘇慬");
   const states = [
     fixture(),
@@ -100,18 +100,20 @@ test("everyone in the club can bring a friend, in every state", () => {
   ];
 
   for (const { season, game } of states) {
-    assert.match(buildMyActionHtml(season, game), /幫朋友報名/);
+    assert.match(buildMyActionHtml(season, game), /openSignup/);
   }
 });
 
-test("a non-member sees both signing themselves up and bringing someone", () => {
+test("a non-member gets one control, not two that overlap", () => {
+  // The signup sheet's first row is already you, so a separate
+  // "sign myself up" button would just be a second way in.
   const { season, game } = fixture();
   as("Ricky"); // not on the roster
 
   const html = buildMyActionHtml(season, game);
 
-  assert.match(html, /＋1 報名/);
-  assert.match(html, /幫朋友報名/);
+  assert.equal(html.match(/openSignup/g).length, 1);
+  assert.doesNotMatch(html, /＋1 報名/);
 });
 
 test("a full game offers the waitlist rather than pretending there's room", () => {
@@ -120,8 +122,7 @@ test("a full game offers the waitlist rather than pretending there's room", () =
 
   const html = buildMyActionHtml(season, game);
 
-  assert.match(html, /幫朋友報名候補/);
-  assert.match(html, /加入候補/);
+  assert.match(html, /報名候補/, "a full game must not look like it has room");
 });
 
 test("a game with room says 報名, not 候補", () => {
@@ -130,8 +131,7 @@ test("a game with room says 報名, not 候補", () => {
 
   const html = buildMyActionHtml(season, game);
 
-  assert.match(html, /幫朋友報名(?!候補)/);
-  assert.match(html, /確認報名/);
+  assert.match(html, /報名(?!候補)/);
 });
 
 test("a locked game offers nothing at all", () => {
@@ -141,7 +141,7 @@ test("a locked game offers nothing at all", () => {
   const html = buildMyActionHtml(season, game);
 
   assert.match(html, /已過更動期限/);
-  assert.doesNotMatch(html, /幫朋友報名/);
+  assert.doesNotMatch(html, /openSignup/);
   assert.doesNotMatch(html, /請假/);
 });
 

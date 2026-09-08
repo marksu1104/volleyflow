@@ -60,6 +60,12 @@
 
   <div class="section-label" id="cal-label" hidden>本季場次</div>
   <div id="month-cal" class="mcal" hidden></div>
+  <div class="mcal-legend" id="cal-legend" hidden>
+    <span><i class="mcal-dot"></i>有場次</span>
+    <span><i class="mcal-dot short"></i>人數不足</span>
+    <span><i class="mcal-dot full"></i>已滿</span>
+    <span><i class="mcal-dot away"></i>你請假</span>
+  </div>
 </div>
 
 <div id="club-sheet-backdrop" class="gsheet-backdrop" hidden>
@@ -78,6 +84,34 @@
   <div class="gsheet">
     <button class="gsheet-close" aria-label="關閉" data-close-sheet="game">✕</button>
     <div id="game-detail"></div>
+  </div>
+</div>
+
+<div id="signup-backdrop" class="gsheet-backdrop" hidden>
+  <div class="gsheet">
+    <button class="gsheet-close" aria-label="關閉" data-close-sheet="signup">✕</button>
+    <h3 style="margin:0">報名</h3>
+    <p id="su-when" class="su-when"></p>
+
+    <div class="su-cap">
+      <div class="su-cap-line">
+        <span><strong id="su-now"></strong> / <span id="su-cap"></span> 人</span>
+        <span id="su-note" class="su-cap-note"></span>
+      </div>
+      <div class="su-bar"><i class="now" id="su-bar-now"></i><i class="adding" id="su-bar-add"></i><i class="over" id="su-bar-over"></i></div>
+    </div>
+
+    <div class="su-q">報幾位？</div>
+    <div class="su-seg" id="su-seg"></div>
+
+    <div class="su-who" id="su-who"></div>
+
+    <div class="su-total">
+      <span>合計 <span class="su-breakdown" id="su-breakdown"></span></span>
+      <span class="su-amt" id="su-amt"></span>
+    </div>
+
+    <button type="button" class="btn btn-primary" style="width:100%" id="su-go">確認報名</button>
   </div>
 </div>
 
@@ -186,6 +220,36 @@
     );
   }
 
+  /** Step two of joining, and still the whole screen.
+   *
+   * This used to be asked *after* dropping you into the app, which put
+   * the question on screen with a ＋1 報名 button live underneath it —
+   * you were being asked what kind of member you are while already able
+   * to act as one. Joining and saying which you are is one decision, so
+   * it's one flow, finished before anything else is reachable. */
+  function renderInviteIntent() {
+    const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
+    if (!mine || mine.wants_fixed_membership !== null) {
+      enterApp();
+      return;
+    }
+    document.getElementById("hero-wrap").innerHTML = `
+      <div class="empty-state" style="text-align:left">
+        <h3>已加入「${escapeHtml(mine.name)}」</h3>
+        <p>請問你是這一季的固定成員嗎？主揪確認後才會加入名單。</p>
+        <div class="btn-row" style="margin-top:12px">
+          <button type="button" class="btn btn-primary" onclick="answerIntent(true, true)">我是固定成員</button>
+          <button type="button" class="btn btn-quiet" onclick="answerIntent(false, true)">我只是臨打</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function enterApp() {
+    showPageLoading(document.getElementById("hero-wrap"));
+    startPickers();
+  }
+
   /** The invite went nowhere. Drop it and boot normally, rather than
    * leaving them looking at a club that doesn't exist with the app
    * apparently broken. */
@@ -228,6 +292,7 @@
     seasonSettled = true;
     document.getElementById("cal-label").hidden = true;
     document.getElementById("month-cal").hidden = true;
+    document.getElementById("cal-legend").hidden = true;
     document.getElementById("month-cal").innerHTML = "";
     document.getElementById("balance-label").hidden = true;
     document.getElementById("balance-card").hidden = true;
@@ -358,7 +423,7 @@
     `;
   }
 
-  async function answerIntent(wantsFixed) {
+  async function answerIntent(wantsFixed, thenEnterApp) {
     try {
       const updated = await postJson(
         API_BASE,
@@ -368,6 +433,10 @@
       );
       const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
       if (mine) mine.wants_fixed_membership = updated.wants_fixed_membership;
+      if (thenEnterApp) {
+        enterApp();
+        return;
+      }
       renderIntentAsk();
       if (currentSeasonId) loadSeason(currentSeasonId);
       else renderNoSeason();
@@ -376,16 +445,38 @@
     }
   }
 
-  /** Whether this viewer may act on a game at all. Someone waiting to be
-   * approved as a fixed member can look but not touch: signing up as a
-   * drop-in would contradict what they just said they are, and taking
-   * leave from a roster they're not on means nothing. */
-  function viewingOnly() {
+  /** Why this viewer may look but not act, or null if they may act.
+   *
+   * Returns the reason rather than a boolean because the two cases need
+   * different words, and showing the wrong one is most of what made
+   * this confusing: "waiting for the organizer" said to somebody who
+   * simply hasn't answered a question yet is nonsense.
+   */
+  function viewingOnlyReason(membership, onRoster) {
+    if (!membership) return null; // not in this club at all
+    // Anyone who joined before the question moved into the join flow
+    // still has no answer on file. Letting them press ＋1 報名 while the
+    // question is on screen is exactly the contradiction that was
+    // reported, so the buttons wait for the answer too.
+    if (membership.wants_fixed_membership === null) {
+      return "請先回答你是固定成員還是臨打，才能報名或請假";
+    }
+    // Said they're a fixed member, but the organizer hasn't put them on
+    // the roster yet: signing up as a drop-in would contradict what
+    // they just said, and taking leave from a roster they're not on
+    // means nothing.
+    if (membership.wants_fixed_membership === true && !onRoster) {
+      return "等待主揪把你加入本季名單，在那之前只能查看";
+    }
+    return null;
+  }
+
+  function currentViewingOnlyReason() {
     const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
-    if (!mine) return false;
-    const onRoster =
-      currentSeason && currentSeason.members.some((m) => m.name === playerName());
-    return mine.wants_fixed_membership === true && !onRoster;
+    const onRoster = !!(
+      currentSeason && currentSeason.members.some((m) => m.name === playerName())
+    );
+    return viewingOnlyReason(mine, onRoster);
   }
 
   async function joinFromPrompt() {
@@ -395,10 +486,8 @@
       pendingInviteClubId = null;
       renderManageButton();
       renderClubChip();
-      // Now a member: the seasons this club has are readable, so start
-      // the pickers that the invite screen was holding back.
-      showPageLoading(document.getElementById("hero-wrap"));
-      startPickers();
+      // Not into the app yet — ask which kind of member they are first.
+      renderInviteIntent();
     } catch (e) {
       alert("加入失敗：" + e.message);
     }
@@ -488,6 +577,7 @@
   document.querySelectorAll("[data-close-sheet]").forEach((btn) => {
     btn.addEventListener("click", () => {
       if (btn.dataset.closeSheet === "club") closeClubSheet();
+      else if (btn.dataset.closeSheet === "signup") closeSignup();
       else closeGameSheet();
     });
   });
@@ -518,9 +608,10 @@
       document.getElementById("season-picker").hidden = false;
       document.getElementById("cal-label").hidden = false;
       document.getElementById("month-cal").hidden = false;
+      document.getElementById("cal-legend").hidden = false;
       renderIntentAsk();
       renderHero(season);
-      renderMonthCalendar(document.getElementById("month-cal"), season.games, selectGame);
+      renderCalendar();
       renderSelectedGameDetail();
       // These two are independent of the season document and each other,
       // so they run in parallel rather than blocking the paint above.
@@ -539,27 +630,62 @@
   function selectGame(gameId) {
     selectedGameId = gameId;
     renderSelectedGameDetail();
-    openGameSheet();
+    // Deliberately does *not* open the roster sheet any more. Tapping a
+    // date now means "show me that game" — the card above the calendar
+    // switches to it and its buttons come with it, so taking leave or
+    // signing up for any date is two taps and no modal. The full
+    // 18-name roster is behind 看名單, which is the rarer thing to want.
+    renderHero(currentSeason);
+    renderCalendar();
   }
 
   function renderHero(season) {
     const wrap = document.getElementById("hero-wrap");
-    const upcoming = season.games.find((g) => !describeDate(g.date).isPast) || season.games[season.games.length - 1];
-    if (!upcoming) {
+    const game =
+      season.games.find((g) => g.id === selectedGameId) ||
+      season.games.find((g) => !describeDate(g.date).isPast) ||
+      season.games[season.games.length - 1];
+    if (!game) {
       wrap.innerHTML = '<div class="empty">這一季還沒有場次</div>';
       return;
     }
+    selectedGameId = game.id;
     const deadlinePill = season.change_deadline_days !== null
       ? `<span class="meta-pill">請假期限 <strong>賽前 ${season.change_deadline_days} 天</strong></span>`
       : "";
     wrap.innerHTML =
-      renderGameHero(season, upcoming, { metaPills: [deadlinePill] }) +
-      buildMyActionHtml(season, upcoming);
-    wrap.dataset.heroGameId = upcoming.id;
-    wrap.onclick = (e) => {
-      if (e.target.closest("button")) return;
-      selectGame(upcoming.id);
-    };
+      renderGameHero(season, game, { metaPills: [deadlinePill] }) +
+      buildMyActionHtml(season, game) +
+      `<button type="button" class="btn btn-quiet" style="width:100%;margin-top:8px"
+         onclick="openGameSheet()">看名單（${countPlaying(season, game)} 人）</button>`;
+    wrap.dataset.heroGameId = game.id;
+    wrap.onclick = null;
+  }
+
+  function countPlaying(season, game) {
+    return season.members.length - game.absences.length + game.confirmed_drop_ins.length;
+  }
+
+  /** Which colour that day's dot gets. Ordered by what you most need to
+   * know at a glance: your own absence first, then whether the game can
+   * actually go ahead. */
+  function calendarState(game) {
+    const name = playerName();
+    if (game.absences.some((a) => a.player_name === name)) return "away";
+    const playing = countPlaying(currentSeason, game);
+    if (playing >= currentSeason.capacity) return "full";
+    if (playing < currentSeason.minimum_roster) return "short";
+    return "";
+  }
+
+  function renderCalendar() {
+    if (!currentSeason) return;
+    renderMonthCalendar(
+      document.getElementById("month-cal"),
+      currentSeason.games,
+      selectGame,
+      { stateOf: calendarState, selectedId: selectedGameId }
+    );
   }
 
   function renderSelectedGameDetail() {
@@ -610,8 +736,9 @@
 
   function buildMyActionHtml(season, game) {
     const name = playerName();
-    if (viewingOnly()) {
-      return '<div class="gdetail-mystatus waitlisted">等待主揪把你加入本季名單，在那之前只能查看</div>';
+    const blocked = currentViewingOnlyReason();
+    if (blocked) {
+      return `<div class="gdetail-mystatus waitlisted">${escapeHtml(blocked)}</div>`;
     }
     if (game.locked) {
       return '<div class="gdetail-mystatus absent">已過更動期限，這一場無法再變更</div>';
@@ -620,9 +747,10 @@
     const myAbsence = game.absences.find((a) => a.player_name === name);
     const myDropIn = game.confirmed_drop_ins.find((d) => d.player_name === name);
     const myWaitlistIndex = game.waitlist_entries.findIndex((d) => d.player_name === name);
-    // Anyone in the club can bring a friend, whether they're playing
-    // themselves or sitting this one out — so this hangs off every
-    // branch below rather than being one more mutually exclusive state.
+    // Signing people up isn't a state you're in — you can do it whether
+    // you're playing, on leave, already covered, or not going at all —
+    // so it hangs off every branch below rather than being one more
+    // mutually exclusive case.
     const guest = name ? buildGuestSignupHtml(season, game) : "";
 
     if (isMember) {
@@ -667,67 +795,172 @@
         guest
       );
     }
-    if (name) {
-      return (
-        `<button class="btn btn-primary" onclick="signUp(${game.id}, this)">＋1 報名</button>` +
-        guest
-      );
-    }
-    return "";
+    // No separate "sign myself up" button: the signup sheet's first row
+    // is already you, so one control covers "just me", "me and a
+    // friend", and "two friends, I'm not playing".
+    return guest;
   }
 
-  /** "+1, I'm bringing a friend". The friend has no LINE account and
-   * can't tap anything themselves, so somebody in the club does it for
-   * them — see routes._require_may_sign_up for the matching rule. If
-   * the game is already full this queues them on the waitlist, which is
-   * the server's decision, not this form's. */
   function buildGuestSignupHtml(season, game) {
     const full = isGameFull(season, game);
-    return `
-      <button type="button" class="action" onclick="toggleGuestForm()">＋ 幫朋友報名${full ? "候補" : ""}</button>
-      <div class="sub-form" id="guest-form" hidden>
-        <input type="text" placeholder="朋友的名字" id="guest-name">
-        <select id="guest-gender">
-          <option value="">性別</option>
-          <option value="male">男</option>
-          <option value="female">女</option>
-        </select>
-        <button type="button" data-confirm-sub onclick="signUpGuest(${game.id}, this)">
-          ${full ? "加入候補" : "確認報名"}
-        </button>
-      </div>
-    `;
+    return `<button type="button" class="action" onclick="openSignup(${game.id})">＋ 報名${full ? "候補" : ""}</button>`;
   }
 
   function isGameFull(season, game) {
-    const playing =
-      season.members.length - game.absences.length + game.confirmed_drop_ins.length;
-    return playing >= season.capacity;
+    return countPlaying(season, game) >= season.capacity;
   }
 
-  function toggleGuestForm() {
-    const form = document.getElementById("guest-form");
-    form.hidden = !form.hidden;
-    if (!form.hidden) document.getElementById("guest-name").focus();
+  /* ---- the signup sheet ----
+   * Its own sheet, not a form under the game, because a game's roster
+   * runs to 18 names and anything placed after it is effectively
+   * hidden. Everything the decision needs is on one screen: how full
+   * the game is, who you're bringing, and what it costs. */
+  let suGame = null;
+  let suPeople = [];
+
+  function openSignup(gameId) {
+    suGame = currentSeason.games.find((g) => g.id === gameId);
+    if (!suGame) return;
+    // First row is you, pre-filled — the common case is "me plus one",
+    // and nobody should have to type their own name.
+    const alreadyIn =
+      suGame.confirmed_drop_ins.some((d) => d.player_name === playerName()) ||
+      suGame.waitlist_entries.some((w) => w.player_name === playerName()) ||
+      currentSeason.members.some((m) => m.name === playerName());
+    suPeople = alreadyIn
+      ? [{ name: "", gender: null, playerId: null }]
+      : [{ name: playerName(), gender: null, playerId: myPlayerId, self: true }];
+    document.getElementById("su-when").textContent = describeGameWhen(currentSeason, suGame);
+    renderSignup();
+    document.getElementById("signup-backdrop").hidden = false;
   }
 
-  async function signUpGuest(gameId, btn) {
-    const nameEl = document.getElementById("guest-name");
-    const name = nameEl.value.trim();
-    if (!name) {
-      alert("請先輸入朋友的名字");
+  function describeGameWhen(season, game) {
+    const d = describeDate(game.date);
+    const time = season.game_start_time ? " " + season.game_start_time.slice(0, 5) : "";
+    return `${d.month}/${d.day}（${d.weekday.slice(-1)}）${time}${season.location ? " · " + season.location : ""}`;
+  }
+
+  function closeSignup() { document.getElementById("signup-backdrop").hidden = true; }
+
+  function renderSignup() {
+    const playing = countPlaying(currentSeason, suGame);
+    const slots = Math.max(0, currentSeason.capacity - playing);
+    const confirmed = Math.min(suPeople.length, slots);
+    const waiting = suPeople.length - confirmed;
+    const share = Number(currentSeason.share_per_game);
+
+    document.getElementById("su-now").textContent = playing + confirmed;
+    document.getElementById("su-cap").textContent = currentSeason.capacity;
+    document.getElementById("su-note").textContent =
+      waiting > 0 ? `${waiting} 位排候補` : `${slots - confirmed} 位空位`;
+    const pct = (n) => (n / currentSeason.capacity) * 100 + "%";
+    document.getElementById("su-bar-now").style.width = pct(playing);
+    document.getElementById("su-bar-add").style.width = pct(confirmed);
+    document.getElementById("su-bar-over").style.width = pct(waiting);
+
+    document.getElementById("su-seg").innerHTML = [1, 2, 3]
+      .map(
+        (n) =>
+          `<button type="button" data-n="${n}" aria-pressed="${n === suPeople.length}">${n}</button>`
+      )
+      .join("");
+
+    document.getElementById("su-who").innerHTML = suPeople
+      .map((p, i) => {
+        const wait = playing + i >= currentSeason.capacity;
+        // Offered, never applied on its own — see DropInBatchEntry.
+        const clash =
+          !p.self && !p.playerId && p.name.trim()
+            ? clubMembers.find((m) => m.name === p.name.trim())
+            : null;
+        return `
+          <div class="su-row${wait ? " wait" : ""}">
+            <span class="n">${i + 1}</span>
+            <input type="text" data-i="${i}" value="${escapeHtml(p.name)}"
+              placeholder="${i === 0 ? "你的名字" : "朋友的名字"}" ${p.self ? "disabled" : ""}>
+            <span class="su-g">
+              <button type="button" data-g="male" data-i="${i}" aria-pressed="${p.gender === "male"}">男</button>
+              <button type="button" class="f" data-g="female" data-i="${i}" aria-pressed="${p.gender === "female"}">女</button>
+            </span>
+            ${wait ? '<span class="su-wait-tag">候補</span>' : ""}
+          </div>
+          ${clash ? `<button type="button" class="su-same" data-same="${i}" data-pid="${clash.id}">↳ 就是球隊裡那個「${escapeHtml(clash.name)}」，不要新增一個</button>` : ""}
+          ${p.playerId && !p.self ? `<button type="button" class="su-same" data-unsame="${i}">↳ 已選既有成員，改成新的人</button>` : ""}
+        `;
+      })
+      .join("");
+
+    document.getElementById("su-amt").textContent = "$" + confirmed * share;
+    document.getElementById("su-breakdown").textContent =
+      `${confirmed} 位 × $${share}` + (waiting ? `（候補 ${waiting} 位不計）` : "");
+    document.getElementById("su-go").textContent =
+      confirmed === 0 ? "加入候補" : "確認報名";
+  }
+
+  document.getElementById("su-seg").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-n]");
+    if (!b) return;
+    const n = Number(b.dataset.n);
+    while (suPeople.length < n) suPeople.push({ name: "", gender: null, playerId: null });
+    suPeople.length = n;
+    renderSignup();
+  });
+
+  document.getElementById("su-who").addEventListener("click", (e) => {
+    const g = e.target.closest("button[data-g]");
+    if (g) {
+      const i = Number(g.dataset.i);
+      suPeople[i].gender = suPeople[i].gender === g.dataset.g ? null : g.dataset.g;
+      renderSignup();
       return;
     }
-    const gender = document.getElementById("guest-gender").value || null;
+    const same = e.target.closest("[data-same]");
+    if (same) {
+      suPeople[Number(same.dataset.same)].playerId = Number(same.dataset.pid);
+      renderSignup();
+      return;
+    }
+    const unsame = e.target.closest("[data-unsame]");
+    if (unsame) {
+      suPeople[Number(unsame.dataset.unsame)].playerId = null;
+      renderSignup();
+    }
+  });
+
+  document.getElementById("su-who").addEventListener("input", (e) => {
+    if (e.target.dataset.i === undefined) return;
+    const p = suPeople[Number(e.target.dataset.i)];
+    p.name = e.target.value;
+    p.playerId = null; // typing a different name is a different person
+  });
+  // Re-render on blur rather than on every keystroke: redrawing mid-word
+  // would take the caret with it.
+  document.getElementById("su-who").addEventListener("focusout", () => renderSignup());
+
+  document.getElementById("su-go").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    for (const p of suPeople) {
+      if (!p.name.trim()) return alert("還有名字沒填");
+      if (!p.playerId && !p.gender) return alert(`請幫「${p.name.trim()}」選性別`);
+    }
     btn.disabled = true;
     try {
-      await postJson(API_BASE, "/drop-ins", { player_name: name, game_id: gameId, gender });
+      await postJson(API_BASE, `/games/${suGame.id}/drop-ins`, {
+        people: suPeople.map((p) => ({
+          player_name: p.name.trim(),
+          gender: p.gender,
+          player_id: p.playerId,
+        })),
+      });
+      closeSignup();
       await loadSeason(currentSeasonId);
-    } catch (e) {
-      alert("報名失敗：" + e.message);
+    } catch (err) {
+      alert("報名失敗：" + err.message);
+    } finally {
       btn.disabled = false;
     }
-  }
+  });
 
   async function renderBalance(season) {
     const name = playerName();

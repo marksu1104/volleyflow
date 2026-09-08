@@ -2635,3 +2635,200 @@ def test_an_unknown_screenshot_token_is_a_404(client: TestClient) -> None:
     response = client.get("/reports/not-a-real-token/image")
 
     assert response.status_code == 404
+
+
+def test_signing_up_a_group_charges_each_of_them(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    game_id = season["games"][0]["id"]
+    carol = identify(client, "Carol")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+    )
+
+    response = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={
+            "people": [
+                {"player_name": "Carol", "player_id": carol["id"]},
+                {"player_name": "小明", "gender": "male"},
+                {"player_name": "小華", "gender": "female"},
+            ]
+        },
+        headers=auth_headers(carol["token"]),
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert [r["status"] for r in results] == ["confirmed"] * 3
+
+
+def test_two_guests_with_the_same_name_are_two_different_people(
+    client: TestClient,
+) -> None:
+    # Two real people are both called 小明. Matching a typed name to an
+    # existing player would let only the first of them play.
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    game_id = season["games"][0]["id"]
+
+    response = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={
+            "people": [
+                {"player_name": "小明", "gender": "male"},
+                {"player_name": "小明", "gender": "female"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert results[0]["player_id"] != results[1]["player_id"]
+    assert [r["status"] for r in results] == ["confirmed", "confirmed"]
+
+
+def test_a_group_overflowing_capacity_waitlists_the_last_ones(
+    client: TestClient,
+) -> None:
+    # Capacity is spent in list order, so the caller knows in advance
+    # which of their friends misses out.
+    season = _start_season(client, member_names=["Alice", "Bob"], capacity=3)
+    game_id = season["games"][0]["id"]
+
+    response = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={
+            "people": [
+                {"player_name": "第一個", "gender": "male"},
+                {"player_name": "第二個", "gender": "male"},
+                {"player_name": "第三個", "gender": "female"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert [r["status"] for r in response.json()["results"]] == [
+        "confirmed",
+        "waitlisted",
+        "waitlisted",
+    ]
+
+
+def test_a_group_naming_a_fixed_member_is_rejected_whole(client: TestClient) -> None:
+    # Half-succeeding is the worst state to leave money in, so one bad
+    # entry rolls the whole group back.
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    game_id = season["games"][0]["id"]
+    alice_id = client.get(f"/seasons/{season['id']}").json()["members"][0]["id"]
+
+    response = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={
+            "people": [
+                {"player_name": "小明", "gender": "male"},
+                {"player_name": "Alice", "player_id": alice_id},
+            ]
+        },
+    )
+
+    assert response.status_code == 400
+    assert "fixed member" in response.json()["detail"]
+
+    detail = client.get(f"/seasons/{season['id']}").json()
+    game = next(g for g in detail["games"] if g["id"] == game_id)
+    assert game["confirmed_drop_ins"] == [], "小明 must not have been left signed up"
+
+
+def test_signing_up_a_new_person_without_a_gender_is_rejected(
+    client: TestClient,
+) -> None:
+    # The roster's 男/女 tags are what the team is picked from.
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    game_id = season["games"][0]["id"]
+
+    response = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={"people": [{"player_name": "小明"}]},
+    )
+
+    assert response.status_code == 422
+
+
+def test_a_guest_records_who_brought_them_but_you_dont(
+    client: TestClient, db_session: Session
+) -> None:
+    # The fee lands on the guest's own ledger, but the guest has no
+    # account and pays nothing — the member who brought them hands over
+    # the cash, so the organizer needs to know who that was.
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    game_id = season["games"][0]["id"]
+    carol = identify(client, "Carol")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+    )
+
+    results = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={
+            "people": [
+                {"player_name": "Carol", "player_id": carol["id"]},
+                {"player_name": "小明", "gender": "male"},
+            ]
+        },
+        headers=auth_headers(carol["token"]),
+    ).json()["results"]
+
+    brought_by = {
+        r["player_id"]: db_session.get(DropInRow, r["id"]).brought_by_player_id
+        for r in results
+    }
+
+    assert brought_by[carol["id"]] is None, "signing yourself up names nobody"
+    guest_id = next(pid for pid in brought_by if pid != carol["id"])
+    assert brought_by[guest_id] == carol["id"]
+
+
+def test_a_cancelled_absence_stops_freeing_up_a_slot(client: TestClient) -> None:
+    # expected = members - absences + drop-ins. Counting an absence that
+    # was cancelled made the game look emptier than it is, and admitted
+    # one drop-in too many for every absence that had ever been undone.
+    season = _start_season(client, member_names=["Alice", "Bob"], capacity=2)
+    game_id = season["games"][0]["id"]
+
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    client.post(f"/absences/{absence['id']}/cancel")
+
+    response = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={"people": [{"player_name": "小明", "gender": "male"}]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["status"] == "waitlisted"
+
+
+def test_the_money_screen_names_who_brought_each_guest(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    club_id = season["club_id"]
+    game_id = season["games"][0]["id"]
+    carol = identify(client, "Carol")
+    client.post(f"/clubs/{club_id}/join", headers=auth_headers(carol["token"]))
+
+    results = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={
+            "people": [
+                {"player_name": "Carol", "player_id": carol["id"]},
+                {"player_name": "小明", "gender": "male"},
+            ]
+        },
+        headers=auth_headers(carol["token"]),
+    ).json()["results"]
+    guest_id = next(r["player_id"] for r in results if r["player_id"] != carol["id"])
+
+    balances = client.get(f"/clubs/{club_id}/balances").json()
+    by_player = {b["player_id"]: b for b in balances}
+
+    assert by_player[guest_id]["brought_by"] == "Carol"
+    assert by_player[carol["id"]]["brought_by"] is None

@@ -147,3 +147,29 @@ test("a game with nobody in it says so rather than showing an empty box", () => 
   renderGameDetail(el, season, game, {});
   assert.match(el.innerHTML, /沒有人出席/);
 });
+
+test("controls come before the lists, never after them", () => {
+  // The bug this locks out: every control rendered after the attendance,
+  // absence and waitlist lists. On a full roster that's most of a screen
+  // of names before you reach the button you opened the sheet to press,
+  // so nobody found them. Scrolling must only ever reveal more names.
+  const { season, game } = fixture();
+  const el = makeElement();
+  renderGameDetail(el, season, game, {
+    viewerName: "蘇慬",
+    extraHtml: '<button id="my-action">請假</button>',
+    onAddDropIn() {},
+    onRecordAbsence() {},
+    onCancelAbsence() {},
+    onRemoveDropIn() {},
+  });
+
+  const html = el.innerHTML;
+  const action = html.indexOf("my-action");
+  const addDropIn = html.indexOf("data-add-dropin");
+  const roster = html.indexOf("出席名單");
+
+  assert.ok(action >= 0 && addDropIn >= 0 && roster >= 0, "all three rendered");
+  assert.ok(action < roster, "my own action is above the roster");
+  assert.ok(addDropIn < roster, "the organizer's 新增臨打 is above the roster too");
+});
