@@ -687,3 +687,14 @@ textarea {
 }
 .su-amt { font-family: var(--font-num); font-size: 1.2rem; font-weight: 800; }
 .su-breakdown { color: var(--ink-faint); font-size: .72rem; }
+
+/* Tapping a date changes the card above the calendar, and without a cue
+   the change is easy to miss — especially when two dates have the same
+   headcount and only the date line differs. A brief lift is enough to
+   say "this is the thing that just changed", and it's skipped entirely
+   under prefers-reduced-motion by the global rule above. */
+@keyframes cardSwap {
+  0%   { transform: translateY(3px); opacity: .55; }
+  100% { transform: translateY(0);   opacity: 1; }
+}
+.card-swap { animation: cardSwap .22s ease-out; }
