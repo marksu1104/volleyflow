@@ -1116,3 +1116,92 @@ with `node --check`, HTML tag structure verified for balance, and every
 LIFF/phone testing is still the next step before merging.
 
 193 tests (2 postgres-only).
+
+## 2026-09-08/09 — What real use turned up, then group signup
+
+First real week of other people using it. Everything here came from
+somebody hitting it on a phone, which is a different bug distribution
+from anything the test suite was finding.
+
+**Five reported problems, and what each actually was.** Arranging a 代打
+turned out to be a one-way door: the action panel showed a sentence and
+no buttons once someone covered your absence, and the server refuses to
+cancel covered leave, so neither half could be undone. "請用 LINE 開啟"
+was appearing constantly for people who were perfectly logged in —
+`initLiffIdentity` swallowed every failure into `null`, including a
+free-tier cold start (30s, often a 502 on the way), so a sleeping
+backend was being reported as a login failure; it now retries three
+times and distinguishes the two, returning `false` for a server failure
+and `null` for LINE's side. The "are you a fixed member?" question was
+racing the spinner *and* being asked of people who were already fixed
+members, because it ran before the season loaded and `onRoster` can't be
+true with no roster to check. And an invite link landed on the wrong
+club: `GET /clubs` is scoped to the caller, so a club you haven't joined
+isn't in the list, and the picker fell back to one you *are* in while
+overwriting the remembered club — `?club=` for an unjoined club is now
+the whole screen until it's answered.
+
+**iOS was zooming the page on every input.** Safari zooms whenever a
+focused field's font size is under 16px and never zooms back out, so the
+app stayed cropped for the rest of the session once anyone typed. Every
+field was between 13px and 15.2px. One `!important` rule at 16px; the
+alternative, `maximum-scale=1`, disables pinch-zoom for everyone and
+fails WCAG 1.4.4.
+
+**Joining and saying which kind of member you are became one flow.** It
+used to ask after dropping you into the app, with a ＋1 報名 button live
+underneath the question. Both steps are now full-screen, and nothing is
+actionable until both are answered.
+
+**Controls moved above the rosters.** They had been rendering after the
+attendance, absence and waitlist lists — on a full roster that is most
+of a screen of names before the button you opened the sheet to press, so
+nobody found them, the organizer's 新增臨打 field included.
+
+**Group signup.** `POST /games/{id}/drop-ins` takes a list: one
+transaction, one `SELECT ... FOR UPDATE`, capacity spent in list order.
+Looping over the single-signup route instead can interleave with
+somebody else's request and push a game past capacity, and can
+half-succeed. The design question underneath it was whether a typed name
+identifies a person. It doesn't: two real people called 小明 both have
+to be able to play, so a bare name always means a *new* person and
+reusing an existing one takes an explicit `player_id` after the app has
+offered it. The asymmetry decides it — a duplicate row looks untidy, one
+person's fee on another person's ledger can't be undone.
+
+`brought_by_player_id` (migration `4560ad02d5d6`, one nullable column)
+records who signed a guest up. Their fee sits on their own ledger, but a
+guest has no account and never pays from it — the member who brought
+them hands over the cash — so it is shown **only** on the money screen,
+where it answers "who do I collect this from", and never on the roster,
+where it would be noise.
+
+The signup sheet shows how full the game is, who you're bringing, and
+what it costs on one screen, with the people who overflow marked 候補
+before you send rather than after. Tapping a calendar date switches the
+card above it instead of opening a modal, and each day carries one dot
+(has a game / short / full / you're away) because a cell is ~40px across
+and a word in it is unreadable.
+
+**Two bugs found while building it.** `_has_open_slot` counted cancelled
+absences — `expected = members − absences + drop-ins`, and an absence
+that had been cancelled still subtracted, so every undone absence let
+one drop-in too many in. And the batch route half-succeeded on failure:
+rows are flushed as they go so capacity sees each one, which makes
+rollback the route's own job rather than something inherited from the
+request-scoped session being closed.
+
+**Air-conditioning is designed but not built.** Every venue's AC pricing
+collapses to one field, 每場冷氣加價 — bundled venues set 0, hourly-rate
+venues set the difference (Hong Kong LCSD volleyball is 236/hr with AC
+vs 148/hr without; this club's venue is 1490 vs 1310 over 3.5 hours =
+630), flat-fee venues set the amount. A season discount is optional;
+public venues publish fixed rates and give none. The hard part is that
+whether the AC runs is decided *on the day*, which rules out computing
+it all at season creation: a game carries a planned flag and an actual
+one, and a mismatch corrects every member's charge with a ledger
+adjustment immediately, reusing `_sync_season_fee_ledger`. A weight-based
+model was designed and thrown away — it was an indirection over simply
+storing what a game costs.
+
+256 tests (2 postgres-only), plus 65 frontend tests under `node --test`.
