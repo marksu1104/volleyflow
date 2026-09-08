@@ -532,7 +532,14 @@ function renderGameDetail(container, season, game, options) {
   // the lists are last. Scrolling down only ever reveals more names —
   // nothing is ever buried behind them.
   container.innerHTML = `
-    ${renderGameHero(season, game, { metaPills: opts.heroMetaPills })}
+    ${renderGameHero(season, game, {
+      metaPills: opts.heroMetaPills,
+      // Straight into the card, not stacked underneath it: .hero-actions
+      // draws its own top rule to separate itself from the facts above,
+      // which outside the card is a hairline floating on the page.
+      statusHtml: opts.statusHtml,
+      actionsHtml: opts.actionsHtml,
+    })}
     ${game.locked ? '<div class="gdetail-locked">已過更動期限，這一場無法再變更</div>' : ""}
     ${extraHtml}
     ${

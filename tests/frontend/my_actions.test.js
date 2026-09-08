@@ -7,7 +7,15 @@ const assert = require("node:assert/strict");
 const { load } = require("./harness.js");
 
 const page = load("member.html");
-const { buildMyActionHtml } = page;
+const { myActions } = page;
+
+/** The card renders these two pieces in two places — status above the
+ * rule, buttons below — so a test that cares about both reads them as
+ * one string. */
+function buildMyActionHtml(season, game) {
+  const mine = myActions(season, game);
+  return mine.status + (mine.actions ? `<div class="hero-actions">${mine.actions}</div>` : "");
+}
 
 function fixture(overrides = {}) {
   return {
@@ -31,7 +39,7 @@ function fixture(overrides = {}) {
   };
 }
 
-/** buildMyActionHtml reads the viewer's name out of the name field
+/** myActions reads the viewer's name out of the name field
  * rather than taking it as an argument, because playerName() is what
  * every other action on the page keys off too. The page's myClubs stays
  * empty here, which is the ordinary case: viewingOnly() only bites for
