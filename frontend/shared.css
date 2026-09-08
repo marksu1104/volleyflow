@@ -589,3 +589,26 @@ a.btn { display: block; text-decoration: none; text-align: center; }
 .pill { background: var(--surface); border: 1px solid var(--rule); border-radius: 20px; padding: 5px 12px; font-size: .78rem; color: var(--ink-soft); }
 .pill strong { color: var(--ink); font-weight: 700; }
 .pill.settled { background: var(--good-soft); color: var(--good); border-color: transparent; }
+
+/* iOS Safari zooms the entire page whenever a focused field's font size
+   is under 16px — and it does not zoom back out afterwards, so the app
+   stays cropped for the rest of the session once anyone types anything.
+   Every field in this project was between 13px and 15.2px, which is why
+   it happened on every single input.
+
+   16px is the only value that stops it; there is no opt-out short of
+   `maximum-scale=1` on the viewport, which would disable pinch-zoom for
+   everyone and fails WCAG 1.4.4. !important because .control and
+   friends set their own size with class-level specificity, and because
+   the rule has to hold for fields added later without anyone having to
+   remember it. On a phone this is also just a better size to type into;
+   on a desktop the change is invisible.
+
+   Buttons, checkboxes, radios and file inputs are excluded: they take
+   no text entry, so they never trigger the zoom, and they carry sizes
+   the layout depends on. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="button"]):not([type="submit"]),
+select,
+textarea {
+  font-size: 16px !important;
+}

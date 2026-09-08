@@ -186,6 +186,36 @@
     );
   }
 
+  /** Step two of joining, and still the whole screen.
+   *
+   * This used to be asked *after* dropping you into the app, which put
+   * the question on screen with a ＋1 報名 button live underneath it —
+   * you were being asked what kind of member you are while already able
+   * to act as one. Joining and saying which you are is one decision, so
+   * it's one flow, finished before anything else is reachable. */
+  function renderInviteIntent() {
+    const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
+    if (!mine || mine.wants_fixed_membership !== null) {
+      enterApp();
+      return;
+    }
+    document.getElementById("hero-wrap").innerHTML = `
+      <div class="empty-state" style="text-align:left">
+        <h3>已加入「${escapeHtml(mine.name)}」</h3>
+        <p>請問你是這一季的固定成員嗎？主揪確認後才會加入名單。</p>
+        <div class="btn-row" style="margin-top:12px">
+          <button type="button" class="btn btn-primary" onclick="answerIntent(true, true)">我是固定成員</button>
+          <button type="button" class="btn btn-quiet" onclick="answerIntent(false, true)">我只是臨打</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function enterApp() {
+    showPageLoading(document.getElementById("hero-wrap"));
+    startPickers();
+  }
+
   /** The invite went nowhere. Drop it and boot normally, rather than
    * leaving them looking at a club that doesn't exist with the app
    * apparently broken. */
@@ -358,7 +388,7 @@
     `;
   }
 
-  async function answerIntent(wantsFixed) {
+  async function answerIntent(wantsFixed, thenEnterApp) {
     try {
       const updated = await postJson(
         API_BASE,
@@ -368,6 +398,10 @@
       );
       const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
       if (mine) mine.wants_fixed_membership = updated.wants_fixed_membership;
+      if (thenEnterApp) {
+        enterApp();
+        return;
+      }
       renderIntentAsk();
       if (currentSeasonId) loadSeason(currentSeasonId);
       else renderNoSeason();
@@ -376,16 +410,38 @@
     }
   }
 
-  /** Whether this viewer may act on a game at all. Someone waiting to be
-   * approved as a fixed member can look but not touch: signing up as a
-   * drop-in would contradict what they just said they are, and taking
-   * leave from a roster they're not on means nothing. */
-  function viewingOnly() {
+  /** Why this viewer may look but not act, or null if they may act.
+   *
+   * Returns the reason rather than a boolean because the two cases need
+   * different words, and showing the wrong one is most of what made
+   * this confusing: "waiting for the organizer" said to somebody who
+   * simply hasn't answered a question yet is nonsense.
+   */
+  function viewingOnlyReason(membership, onRoster) {
+    if (!membership) return null; // not in this club at all
+    // Anyone who joined before the question moved into the join flow
+    // still has no answer on file. Letting them press ＋1 報名 while the
+    // question is on screen is exactly the contradiction that was
+    // reported, so the buttons wait for the answer too.
+    if (membership.wants_fixed_membership === null) {
+      return "請先回答你是固定成員還是臨打，才能報名或請假";
+    }
+    // Said they're a fixed member, but the organizer hasn't put them on
+    // the roster yet: signing up as a drop-in would contradict what
+    // they just said, and taking leave from a roster they're not on
+    // means nothing.
+    if (membership.wants_fixed_membership === true && !onRoster) {
+      return "等待主揪把你加入本季名單，在那之前只能查看";
+    }
+    return null;
+  }
+
+  function currentViewingOnlyReason() {
     const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
-    if (!mine) return false;
-    const onRoster =
-      currentSeason && currentSeason.members.some((m) => m.name === playerName());
-    return mine.wants_fixed_membership === true && !onRoster;
+    const onRoster = !!(
+      currentSeason && currentSeason.members.some((m) => m.name === playerName())
+    );
+    return viewingOnlyReason(mine, onRoster);
   }
 
   async function joinFromPrompt() {
@@ -395,10 +451,8 @@
       pendingInviteClubId = null;
       renderManageButton();
       renderClubChip();
-      // Now a member: the seasons this club has are readable, so start
-      // the pickers that the invite screen was holding back.
-      showPageLoading(document.getElementById("hero-wrap"));
-      startPickers();
+      // Not into the app yet — ask which kind of member they are first.
+      renderInviteIntent();
     } catch (e) {
       alert("加入失敗：" + e.message);
     }
@@ -610,8 +664,9 @@
 
   function buildMyActionHtml(season, game) {
     const name = playerName();
-    if (viewingOnly()) {
-      return '<div class="gdetail-mystatus waitlisted">等待主揪把你加入本季名單，在那之前只能查看</div>';
+    const blocked = currentViewingOnlyReason();
+    if (blocked) {
+      return `<div class="gdetail-mystatus waitlisted">${escapeHtml(blocked)}</div>`;
     }
     if (game.locked) {
       return '<div class="gdetail-mystatus absent">已過更動期限，這一場無法再變更</div>';
