@@ -189,11 +189,6 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 /* app-top bar: club chip + avatar, echoed on every page */
 .app-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
 .app-top .avatar { cursor: pointer; }
-.app-top-right { display: flex; align-items: center; gap: 8px; }
-.manage-btn {
-  border: 1px solid var(--rule-strong); background: var(--surface); color: var(--ink);
-  font-size: .78rem; font-weight: 700; padding: 6px 12px; border-radius: 999px; cursor: pointer;
-}
 .club-chip {
   display: inline-flex; align-items: center; gap: 7px; border: none; background: var(--surface-2);
   color: var(--ink); font-size: .86rem; font-weight: 700; padding: 7px 12px 7px 8px; border-radius: 999px;
@@ -239,11 +234,8 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 .capacity-bar i { display: block; height: 100%; }
 .capacity-bar .fill-m { background: var(--accent); }
 .capacity-bar .fill-f { background: var(--pink); }
-
-.status-line { display: flex; align-items: center; gap: 7px; font-size: .84rem; font-weight: 700; padding: 9px 11px; border-radius: 9px; margin-top: 12px; }
 .status-line.absent { background: var(--bad-soft); color: var(--bad); }
 .status-line.confirmed { background: var(--good-soft); color: var(--good); }
-.status-line.waitlisted { background: var(--warn-soft); color: var(--warn); }
 
 /* balance line — a member's own running total, or a row in a settlement list */
 .balance { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; }
@@ -287,9 +279,6 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 
 /* at-a-glance summary */
 .glance { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; margin: 4px 0 6px; }
-.glance-label { font-size: .74rem; color: var(--ink-soft); margin-bottom: 4px; }
-.glance-main { font-size: 1rem; font-weight: 700; }
-.glance-sub { font-size: .8rem; color: var(--ink-soft); margin-top: 2px; }
 
 /* bottom sheet a tapped calendar day (or a modal action) opens into */
 .gsheet-backdrop {
@@ -313,24 +302,14 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 
 /* one game's full detail inside the sheet */
 .gdetail-head { display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px; }
-.gdetail-date { font-weight: 700; font-size: 1rem; font-family: var(--font-num); }
-.gdetail-when { font-size: .78rem; color: var(--ink-soft); }
-.gdetail-meta { font-size: .8rem; color: var(--ink-soft); margin-top: 2px; }
 .gdetail-section-label { font-size: .72rem; color: var(--ink-soft); font-weight: 700; margin: 14px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
-.gdetail-roster { display: flex; flex-direction: column; gap: 3px; }
-.roster-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 8px; font-size: .86rem; }
-.roster-row.present { color: var(--ink); }
 .roster-row.absent { background: var(--bad-soft); color: var(--bad); }
 .roster-row.dropin { background: var(--good-soft); color: var(--good); }
 .roster-note { font-size: .74rem; font-weight: 400; opacity: .9; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.gdetail-waitlist { display: flex; flex-direction: column; gap: 3px; }
 .gdetail-mystatus { display: flex; align-items: center; gap: 7px; font-size: .84rem; font-weight: 700; padding: 9px 11px; border-radius: 9px; margin: 10px 0 4px; }
 .gdetail-mystatus.absent { background: var(--bad-soft); color: var(--bad); }
 .gdetail-mystatus.confirmed { background: var(--good-soft); color: var(--good); }
 .gdetail-mystatus.waitlisted { background: var(--warn-soft); color: var(--warn); }
-
-.gdetail-count { font-size: .86rem; margin-top: 8px; }
-.gdetail-count strong { font-variant-numeric: tabular-nums; font-family: var(--font-num); }
 .gdetail-locked { font-size: .78rem; color: var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 6px 10px; margin-top: 8px; }
 
 /* The organizer's quick-add, kept as an inline row rather than moved
@@ -355,13 +334,6 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
   font-size: .84rem; font-weight: 700; padding: 9px 14px; border-radius: 9px;
   cursor: pointer; white-space: nowrap; font-family: var(--font-cjk);
 }
-
-.gdetail-toggle {
-  display: block; width: 100%; margin-top: 12px; padding: 9px; border: 1px solid var(--rule);
-  border-radius: 9px; background: var(--surface-2); color: var(--ink-soft); font-size: .82rem;
-  font-weight: 700; cursor: pointer;
-}
-.gdetail-roster-wrap { margin-top: 10px; }
 
 /* The attendance list: one numbered line per person who'll be on court,
    so "how many, and who" is answered by looking rather than counting.
@@ -391,10 +363,6 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 /* 候補 waitlist rows — numbered so the order (the thing people asked
    about when several sign up at once) is the first thing the eye hits */
 .wl-row { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 8px; font-size: .84rem; }
-.wl-row.me { background: var(--warn-soft); color: var(--warn); font-weight: 700; }
-.wl-num { font-family: var(--font-num); font-size: .8rem; font-weight: 800; color: var(--ink-faint); width: 16px; font-variant-numeric: tabular-nums; }
-.wl-row.me .wl-num { color: var(--warn); }
-.wl-name { flex: 1; }
 
 /* 代打 (substitute) inline controls on an absence row */
 .mini-action {
@@ -407,6 +375,12 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
   background: var(--surface-2); border-radius: 10px;
 }
 .sub-form[hidden] { display: none; }
+/* The season wizard's member picker holds the same .pick-row as the
+   substitute picker does, and had no layout at all — the rows sat flush
+   against each other while the identical-looking list elsewhere had a
+   gap. No max-height here: a 30-person roster scrolling inside a form is
+   worse than letting the page scroll. */
+.pick { display: flex; flex-direction: column; gap: 3px; }
 .sub-pick { display: flex; flex-direction: column; gap: 3px; max-height: 180px; overflow-y: auto; }
 .pick-row {
   display: flex; align-items: center; gap: 8px; padding: 8px 9px; border-radius: 8px;

@@ -689,15 +689,11 @@
       statusHtml: mine.status,
       actionsHtml: mine.actions,
       moreHtml: `<button type="button" class="hero-more" onclick="openGameSheet()">
-          <span>看名單（${countPlaying(season, game)} 人）</span><span class="chev">›</span>
+          <span>看名單（${expectedAttendance(season, game)} 人）</span><span class="chev">›</span>
         </button>`,
     });
     wrap.dataset.heroGameId = game.id;
     wrap.onclick = null;
-  }
-
-  function countPlaying(season, game) {
-    return season.members.length - game.absences.length + game.confirmed_drop_ins.length;
   }
 
   /** Which colour that day's dot gets. Ordered by what you most need to
@@ -706,7 +702,7 @@
   function calendarState(game) {
     const name = playerName();
     if (game.absences.some((a) => a.player_name === name)) return "away";
-    const playing = countPlaying(currentSeason, game);
+    const playing = expectedAttendance(currentSeason, game);
     if (playing >= currentSeason.capacity) return "full";
     if (playing < currentSeason.minimum_roster) return "short";
     return "";
@@ -736,7 +732,8 @@
       heroMetaPills: [deadlinePill],
       clubMembers,
       viewerName: playerName(),
-      extraHtml: buildMyActionHtml(currentSeason, game),
+      statusHtml: myActions(currentSeason, game).status,
+      actionsHtml: myActions(currentSeason, game).actions,
       onAssignSubstitute: (absenceId, name, gender) => assignSubstitute(absenceId, name, gender),
       onLeaveWaitlist: (entryId, btn) => leaveWaitlist(entryId, btn),
       onCancelSubstitute: (dropInId, btn) => cancelDropIn(dropInId, btn),
@@ -854,20 +851,10 @@
     return { status: "", actions: bring };
   }
 
-  /** The same controls, for the roster sheet, where they follow the hero
-   * rather than being part of it. */
-  function buildMyActionHtml(season, game) {
-    const mine = myActions(season, game);
-    return mine.status + (mine.actions ? `<div class="hero-actions">${mine.actions}</div>` : "");
-  }
 
-  function buildGuestSignupHtml(season, game) {
-    const full = isGameFull(season, game);
-    return `<button type="button" class="action" onclick="openSignup(${game.id})">＋ 報名${full ? "候補" : ""}</button>`;
-  }
 
   function isGameFull(season, game) {
-    return countPlaying(season, game) >= season.capacity;
+    return expectedAttendance(season, game) >= season.capacity;
   }
 
   /* ---- the signup sheet ----
@@ -904,7 +891,7 @@
   function closeSignup() { document.getElementById("signup-backdrop").hidden = true; }
 
   function renderSignup() {
-    const playing = countPlaying(currentSeason, suGame);
+    const playing = expectedAttendance(currentSeason, suGame);
     const slots = Math.max(0, currentSeason.capacity - playing);
     const confirmed = Math.min(suPeople.length, slots);
     const waiting = suPeople.length - confirmed;
@@ -1051,18 +1038,26 @@
    * again. The server is still the authority: on failure we put the
    * screen back and say why, and every success re-reads it anyway.
    */
+  /** Everything that shows the selected game's state. The calendar
+   * belongs here too: taking leave changes that day's dot, and leaving
+   * it out let the card say 已請假 while the calendar still showed the
+   * day as ordinary until the server answered. */
+  function repaintGame() {
+    renderHero(currentSeason);
+    renderCalendar();
+    renderSelectedGameDetail();
+  }
+
   async function optimistically(mutateLocally, request, failureMessage) {
     const snapshot = JSON.parse(JSON.stringify(currentSeason));
     mutateLocally(currentSeason);
-    renderHero(currentSeason);
-    renderSelectedGameDetail();
+    repaintGame();
     try {
       await request();
       loadSeason(currentSeasonId);
     } catch (e) {
       currentSeason = snapshot;
-      renderHero(currentSeason);
-      renderSelectedGameDetail();
+      repaintGame();
       alert(failureMessage + e.message);
     }
   }
@@ -1082,23 +1077,6 @@
     );
   }
 
-  async function signUp(gameId, btn) {
-    const name = playerName();
-    await optimistically(
-      (season) => {
-        const game = season.games.find((g) => g.id === gameId);
-        game.confirmed_drop_ins.push({
-          id: -1,
-          player_id: myPlayerId,
-          player_name: name,
-          gender: null,
-          covering: null,
-        });
-      },
-      () => postJson(API_BASE, "/drop-ins", { player_name: name, game_id: gameId }),
-      "報名失敗："
-    );
-  }
 
   /** A queue place is a different row in a different table from a
    * confirmed signup, and the two id sequences overlap. Sending a

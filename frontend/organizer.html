@@ -253,11 +253,10 @@
       el.innerHTML = '<div class="empty">這一季還沒有場次</div>';
       return;
     }
-    const statusHtml = game.status === "scheduled"
-      ? ""
-      : `<div class="gdetail-mystatus absent">${statusLabel(game.status)}</div>`;
     renderGameDetail(el, currentSeason, game, {
-      extraHtml: statusHtml,
+      statusHtml: game.status === "scheduled"
+        ? ""
+        : `<div class="hero-status absent">${statusLabel(game.status)}</div>`,
       clubMembers,
       viewerName: myName,
       onAssignSubstitute: (absenceId, name, gender) => assignSubstitute(absenceId, name, gender),
