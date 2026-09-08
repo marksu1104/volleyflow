@@ -2425,8 +2425,18 @@ def set_player_name(
     they already have is always allowed).
     """
     player = _get_player_or_404(db, player_id)
-    if current_player.id != player_id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only rename yourself")
+    if current_player.id != player_id and not _may_edit_accountless_player(
+        db, current_player, player
+    ):
+        # Same rule as set_player_gender, which allowed this from the
+        # start. Without it an organizer who mistypes a guest's name can
+        # never correct it — the guest has no account to fix it from
+        # themselves — while the gender on the very same row stays
+        # editable, which is an arbitrary place to draw the line.
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "You can only rename yourself, or someone you added who has no account",
+        )
     name = payload.name.strip()
     if not name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Name can't be empty")

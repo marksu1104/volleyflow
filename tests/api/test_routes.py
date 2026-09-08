@@ -2832,3 +2832,34 @@ def test_the_money_screen_names_who_brought_each_guest(client: TestClient) -> No
 
     assert by_player[guest_id]["brought_by"] == "Carol"
     assert by_player[carol["id"]]["brought_by"] is None
+
+
+def test_the_organizer_can_fix_a_typo_in_a_guests_name(client: TestClient) -> None:
+    # The guest has no account to correct it from themselves, and the
+    # gender on the very same row was always the organizer's to edit.
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    game_id = season["games"][0]["id"]
+    guest_id = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={"people": [{"player_name": "小名", "gender": "male"}]},
+    ).json()["results"][0]["player_id"]
+
+    response = client.put(f"/players/{guest_id}/name", json={"name": "小明"})
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "小明"
+
+
+def test_an_organizer_still_cannot_rename_someone_with_an_account(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    carol = identify(client, "Carol")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+    )
+
+    # client.headers still carries the organizer's token.
+    response = client.put(f"/players/{carol['id']}/name", json={"name": "Renamed"})
+
+    assert response.status_code == 403
