@@ -145,3 +145,30 @@ test("an empty state with a link still renders a link", () => {
   const html = emptyStateHtml("標題", "說明", { label: "建立第一季", href: "x.html" });
   assert.match(html, /<a class="btn btn-primary" href="x.html"/);
 });
+
+// Joining and saying which kind of member you are is one decision, so
+// nothing is actionable in between. The bug: the question was asked
+// after landing in the app, with a ＋1 報名 button live underneath it.
+const { viewingOnlyReason } = load("member.html");
+
+test("someone who hasn't said what they are cannot act yet", () => {
+  const reason = viewingOnlyReason({ id: 1, wants_fixed_membership: null }, false);
+  assert.match(reason, /請先回答/);
+});
+
+test("a fixed member waiting on the organizer is told that, not something else", () => {
+  const reason = viewingOnlyReason({ id: 1, wants_fixed_membership: true }, false);
+  assert.match(reason, /等待主揪/);
+});
+
+test("a fixed member already on the roster acts normally", () => {
+  assert.equal(viewingOnlyReason({ id: 1, wants_fixed_membership: true }, true), null);
+});
+
+test("someone who said they're only a drop-in acts normally", () => {
+  assert.equal(viewingOnlyReason({ id: 1, wants_fixed_membership: false }, false), null);
+});
+
+test("a non-member isn't blocked by this rule — the invite screen has them", () => {
+  assert.equal(viewingOnlyReason(undefined, false), null);
+});
