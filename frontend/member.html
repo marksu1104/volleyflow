@@ -17,8 +17,6 @@
     font-size: .95rem; background: var(--surface); color: var(--ink); font-family: var(--font-cjk);
   }
   .name-row[hidden] { display: none; }
-  .join-prompt { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
-  .join-prompt[hidden] { display: none; }
   .club-sheet-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
   .club-row-manage { border: none; background: none; color: var(--accent); font-size: .74rem; font-weight: 700; cursor: pointer; }
 </style>
@@ -49,11 +47,6 @@
 
   <select id="season-picker" class="season-picker" style="margin-bottom: 14px" hidden></select>
   <div id="error"></div>
-
-  <div id="join-prompt" class="balance join-prompt" hidden>
-    <span id="join-prompt-text" class="balance-label"></span>
-    <button type="button" class="action" onclick="joinFromPrompt()">加入</button>
-  </div>
 
   <div id="intent-ask" hidden></div>
 
@@ -99,6 +92,13 @@
   let allClubs = [];
   let myClubs = [];
   let clubMembers = [];
+  // Set when ?club= names a club this player hasn't joined. Holds the
+  // page on the invite instead of letting the picker pick a club they
+  // *are* in — see renderInviteScreen.
+  let pendingInviteClubId = null;
+  // False until we know whether there's a season and who's on it. Guards
+  // renderIntentAsk; see the comment there.
+  let seasonSettled = false;
 
   // A club's "用連結加入球隊" link carries ?club=<id> — LIFF forwards
   // query params from the liff.line.me URL through to this page, so
@@ -138,8 +138,12 @@
     await refreshMyClubs();
     renderClubChip();
     renderManageButton();
-    renderJoinPrompt();
-    renderIntentAsk();
+    // renderIntentAsk deliberately not called here: it needs to know
+    // whether you're already on this season's roster, and no season has
+    // loaded yet. Asking now both races the spinner (the question
+    // appearing over a still-loading page) and asks people who are
+    // already fixed members. It runs from loadSeason/renderNoSeason
+    // instead, once that's actually known.
     return identified;
   })();
 
@@ -151,14 +155,44 @@
   identityReady.then((identified) => {
     if (!identified) {
       stopLoadingEscalation();
-      document.getElementById("hero-wrap").innerHTML = emptyStateHtml(
-        "請用 LINE 開啟",
-        "球隊的名單和場次只有成員看得到，所以需要先用 LINE 登入。請從 LINE 裡的連結開啟這一頁。"
-      );
+      document.getElementById("hero-wrap").innerHTML = signInFailureHtml(identified);
+      return;
+    }
+    if (pendingInviteClubId) {
+      renderInviteScreen();
       return;
     }
     startPickers();
   });
+
+  /** An invite link for a club you're not in yet. Nothing else on this
+   * page means anything until you join — the roster, the seasons and
+   * the games are all 403 to a non-member — and letting the season
+   * picker run would silently switch the page to a club you *are* in,
+   * which is exactly how you end up unsure whether you joined at all.
+   * So the invite is the whole screen until it's answered. */
+  function renderInviteScreen() {
+    stopLoadingEscalation();
+    const club = allClubs.find((c) => String(c.id) === String(pendingInviteClubId));
+    document.getElementById("season-picker").hidden = true;
+    document.getElementById("hero-wrap").innerHTML = emptyStateHtml(
+      club ? `加入「${club.name}」？` : "找不到這個球隊",
+      club
+        ? "這是主揪分享的邀請連結。加入之後就能看到本季場次、請假和帳務。"
+        : "這個邀請連結可能已經失效，或球隊已經被刪除。請向主揪確認。",
+      club
+        ? { label: "加入球隊", onclick: "joinFromPrompt()" }
+        : { label: "回到我的球隊", onclick: "forgetInvite()" }
+    );
+  }
+
+  /** The invite went nowhere. Drop it and boot normally, rather than
+   * leaving them looking at a club that doesn't exist with the app
+   * apparently broken. */
+  function forgetInvite() {
+    localStorage.removeItem(CLUB_STORAGE_KEY);
+    location.href = location.pathname;
+  }
 
   function startPickers() {
   initClubAndSeasonPickers(
@@ -178,7 +212,6 @@
       stopLoadingEscalation();
       renderClubChip();
       renderManageButton();
-      renderJoinPrompt();
       if (id) loadSeason(id);
       else renderNoSeason();
     },
@@ -192,6 +225,7 @@
    * leaving empty cards on screen. */
   function renderNoSeason() {
     currentSeason = null;
+    seasonSettled = true;
     document.getElementById("cal-label").hidden = true;
     document.getElementById("month-cal").hidden = true;
     document.getElementById("month-cal").innerHTML = "";
@@ -223,6 +257,10 @@
     }
     document.getElementById("hero-wrap").innerHTML = html;
     document.getElementById("hero-wrap").onclick = null;
+    // Now that we know there's no season, "are you a fixed member?" is
+    // answerable — and safe to show, because nothing else is still
+    // loading behind it.
+    renderIntentAsk();
   }
 
   /** GET /clubs is scoped to the caller now, so "every club" and "my
@@ -242,8 +280,15 @@
     myClubs = mine.ok ? await mine.json() : [];
     allClubs = myClubs.slice();
 
-    const pending = currentClubId();
+    // Only a club named by *this* load's ?club= counts as an invite. A
+    // remembered club that's no longer mine is a different situation —
+    // it was deleted, or I was removed — and there the picker's own
+    // "fall back to a club you are in" recovery is the right answer.
+    // Treating that as an invite too would strand them on a join screen
+    // for a club GET /clubs/{id} won't even return.
+    const pending = requestedClubId;
     if (pending && !myClubs.some((c) => String(c.id) === String(pending))) {
+      pendingInviteClubId = pending;
       const res = await fetch(`${API_BASE}/clubs/${pending}`, { headers: authHeader() });
       if (res.ok) allClubs.push(await res.json());
     }
@@ -267,32 +312,36 @@
     document.getElementById("club-dot").textContent = club ? club.name.slice(0, 1) : "-";
   }
 
-  function renderJoinPrompt() {
-    const prompt = document.getElementById("join-prompt");
-    const clubId = currentClubId();
-    const club = allClubs.find((c) => String(c.id) === String(clubId));
-    const alreadyIn = myClubs.some((c) => String(c.id) === String(clubId));
-    if (!myPlayerId || !club || alreadyIn) {
-      prompt.hidden = true;
-      return;
-    }
-    document.getElementById("join-prompt-text").textContent = `尚未加入「${club.name}」`;
-    prompt.hidden = false;
-  }
-
   /** Asked once, right after joining. A fixed member's season fee is a
    * real obligation, so saying you are one queues you for the organizer
    * rather than signing you up; saying you aren't opens drop-in signups
    * straight away. Until they answer, they get neither — an unanswered
    * question is not a reason to let someone commit to money. */
+  /** Whether to put the question on screen at all.
+   *
+   * `settled` is the half that was missing and got reported from a real
+   * phone: called before the season loads, this asked over the top of a
+   * hero that still said 載入中, and asked people who were *already*
+   * fixed members — because onRoster can't be true when there's no
+   * roster yet to check against. Everything here is an argument so the
+   * rule can be tested directly; renderIntentAsk below just supplies
+   * the page's current values.
+   */
+  function shouldAskIntent(settled, membership, onRoster) {
+    if (!settled) return false;
+    if (!membership) return false; // not in this club — the join prompt's job
+    if (onRoster) return false; // already a fixed member; nothing to ask
+    return membership.wants_fixed_membership === null;
+  }
+
   function renderIntentAsk() {
     const el = document.getElementById("intent-ask");
     const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
-    const onRoster =
-      currentSeason &&
-      currentSeason.members.some((m) => m.name === playerName());
+    const onRoster = !!(
+      currentSeason && currentSeason.members.some((m) => m.name === playerName())
+    );
 
-    if (!mine || onRoster || mine.wants_fixed_membership !== null) {
+    if (!shouldAskIntent(seasonSettled, mine, onRoster)) {
       el.hidden = true;
       return;
     }
@@ -343,10 +392,13 @@
     try {
       await postJson(API_BASE, `/clubs/${currentClubId()}/join`, {});
       await refreshMyClubs();
-      renderJoinPrompt();
+      pendingInviteClubId = null;
       renderManageButton();
-      renderIntentAsk();
-      renderIntentAsk();
+      renderClubChip();
+      // Now a member: the seasons this club has are readable, so start
+      // the pickers that the invite screen was holding back.
+      showPageLoading(document.getElementById("hero-wrap"));
+      startPickers();
     } catch (e) {
       alert("加入失敗：" + e.message);
     }
@@ -390,9 +442,15 @@
     }
     const row = e.target.closest("[data-pick-club]");
     if (row) {
-      localStorage.setItem(CLUB_STORAGE_KEY, row.dataset.pickClub);
+      const id = row.dataset.pickClub;
+      localStorage.setItem(CLUB_STORAGE_KEY, id);
       closeClubSheet();
-      location.reload();
+      // A club that isn't mine yet can only be the invite from this
+      // load. Go back through ?club= so it lands on the join screen
+      // again, rather than a reload that reads it as a stale remembered
+      // club and quietly picks a different one.
+      const mine = myClubs.some((c) => String(c.id) === String(id));
+      location.href = mine ? location.pathname : `${location.pathname}?club=${id}`;
     }
   });
 
@@ -452,6 +510,7 @@
     function render(season) {
       const isNewSeason = !currentSeason || currentSeason.id !== season.id;
       currentSeason = season;
+      seasonSettled = true;
       if (isNewSeason || !season.games.some((g) => g.id === selectedGameId)) {
         const upcoming = season.games.find((g) => !describeDate(g.date).isPast) || season.games[season.games.length - 1];
         selectedGameId = upcoming ? upcoming.id : null;
@@ -561,35 +620,113 @@
     const myAbsence = game.absences.find((a) => a.player_name === name);
     const myDropIn = game.confirmed_drop_ins.find((d) => d.player_name === name);
     const myWaitlistIndex = game.waitlist_entries.findIndex((d) => d.player_name === name);
+    // Anyone in the club can bring a friend, whether they're playing
+    // themselves or sitting this one out — so this hangs off every
+    // branch below rather than being one more mutually exclusive state.
+    const guest = name ? buildGuestSignupHtml(season, game) : "";
 
     if (isMember) {
       if (myAbsence) {
         if (myAbsence.covered_by) {
-          return `<div class="gdetail-mystatus absent">已請假，由 ${escapeHtml(myAbsence.covered_by)} 代打</div>`;
+          // The substitute has to go before the absence can: cancelling
+          // leave that someone is covering is refused server-side, and
+          // without this button there was no way to undo either — you
+          // were stuck the moment you arranged a 代打.
+          const covering = game.confirmed_drop_ins.find((d) => d.covering === name);
+          const undoSub = covering
+            ? `<button class="action cancel" onclick="cancelDropIn(${covering.id}, this)">取消代打</button>`
+            : "";
+          return (
+            `<div class="gdetail-mystatus absent">已請假，由 ${escapeHtml(myAbsence.covered_by)} 代打</div>` +
+            undoSub +
+            guest
+          );
         }
         return (
           '<div class="gdetail-mystatus absent">已請假這一場</div>' +
-          `<button class="action cancel" onclick="cancelAbsence(${myAbsence.id}, this)">取消請假</button>`
+          `<button class="action cancel" onclick="cancelAbsence(${myAbsence.id}, this)">取消請假</button>` +
+          guest
         );
       }
-      return `<button class="btn btn-danger" onclick="recordAbsence(${game.id}, this)">請假</button>`;
+      return (
+        `<button class="btn btn-danger" onclick="recordAbsence(${game.id}, this)">請假</button>` +
+        guest
+      );
     }
     if (myDropIn) {
       return (
         '<div class="gdetail-mystatus confirmed">已報名這一場</div>' +
-        `<button class="action cancel" onclick="cancelDropIn(${myDropIn.id}, this)">取消報名</button>`
+        `<button class="action cancel" onclick="cancelDropIn(${myDropIn.id}, this)">取消報名</button>` +
+        guest
       );
     }
     if (myWaitlistIndex >= 0) {
       return (
         `<div class="gdetail-mystatus waitlisted">候補中・第 ${myWaitlistIndex + 1} 順位</div>` +
-        `<button class="action cancel" onclick="cancelDropIn(${game.waitlist_entries[myWaitlistIndex].id}, this)">取消候補</button>`
+        `<button class="action cancel" onclick="cancelDropIn(${game.waitlist_entries[myWaitlistIndex].id}, this)">取消候補</button>` +
+        guest
       );
     }
     if (name) {
-      return `<button class="btn btn-primary" onclick="signUp(${game.id}, this)">＋1 報名</button>`;
+      return (
+        `<button class="btn btn-primary" onclick="signUp(${game.id}, this)">＋1 報名</button>` +
+        guest
+      );
     }
     return "";
+  }
+
+  /** "+1, I'm bringing a friend". The friend has no LINE account and
+   * can't tap anything themselves, so somebody in the club does it for
+   * them — see routes._require_may_sign_up for the matching rule. If
+   * the game is already full this queues them on the waitlist, which is
+   * the server's decision, not this form's. */
+  function buildGuestSignupHtml(season, game) {
+    const full = isGameFull(season, game);
+    return `
+      <button type="button" class="action" onclick="toggleGuestForm()">＋ 幫朋友報名${full ? "候補" : ""}</button>
+      <div class="sub-form" id="guest-form" hidden>
+        <input type="text" placeholder="朋友的名字" id="guest-name">
+        <select id="guest-gender">
+          <option value="">性別</option>
+          <option value="male">男</option>
+          <option value="female">女</option>
+        </select>
+        <button type="button" data-confirm-sub onclick="signUpGuest(${game.id}, this)">
+          ${full ? "加入候補" : "確認報名"}
+        </button>
+      </div>
+    `;
+  }
+
+  function isGameFull(season, game) {
+    const playing =
+      season.members.length - game.absences.length + game.confirmed_drop_ins.length;
+    return playing >= season.capacity;
+  }
+
+  function toggleGuestForm() {
+    const form = document.getElementById("guest-form");
+    form.hidden = !form.hidden;
+    if (!form.hidden) document.getElementById("guest-name").focus();
+  }
+
+  async function signUpGuest(gameId, btn) {
+    const nameEl = document.getElementById("guest-name");
+    const name = nameEl.value.trim();
+    if (!name) {
+      alert("請先輸入朋友的名字");
+      return;
+    }
+    const gender = document.getElementById("guest-gender").value || null;
+    btn.disabled = true;
+    try {
+      await postJson(API_BASE, "/drop-ins", { player_name: name, game_id: gameId, gender });
+      await loadSeason(currentSeasonId);
+    } catch (e) {
+      alert("報名失敗：" + e.message);
+      btn.disabled = false;
+    }
   }
 
   async function renderBalance(season) {
