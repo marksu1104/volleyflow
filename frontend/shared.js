@@ -500,9 +500,30 @@ function renderGameDetail(container, season, game, options) {
         .join("")
     : "";
 
+  // Order matters, and it used to be wrong: every control sat *after*
+  // the attendance, absence and waitlist lists. With a full roster
+  // that's most of a screen of names before you reach the button you
+  // opened the sheet to press, and the organizer's 新增臨打 field was
+  // further down still. Nobody found them.
+  //
+  // So: the hero says which game this is, the controls come next, and
+  // the lists are last. Scrolling down only ever reveals more names —
+  // nothing is ever buried behind them.
   container.innerHTML = `
     ${renderGameHero(season, game, { metaPills: opts.heroMetaPills })}
     ${game.locked ? '<div class="gdetail-locked">已過更動期限，這一場無法再變更</div>' : ""}
+    ${extraHtml}
+    ${
+      opts.onAddDropIn
+        ? `<div class="add-dropin">
+             <input type="text" placeholder="臨打姓名" data-new-dropin>
+             <select data-new-dropin-gender>
+               <option value="">性別</option><option value="male">男</option><option value="female">女</option>
+             </select>
+             <button type="button" data-add-dropin>新增臨打</button>
+           </div>`
+        : ""
+    }
     <div class="gdetail-section-label">出席名單（${attendingRows.length} 人）</div>
     <div class="att-list">${attendingHtml || '<div class="empty">這一場沒有人出席</div>'}</div>
     ${
@@ -515,18 +536,6 @@ function renderGameDetail(container, season, game, options) {
         ? `<div class="gdetail-section-label">候補（${game.waitlist_entries.length} 人）</div><div class="gdetail-waitlist">${waitlistRows}</div>`
         : ""
     }
-    ${
-      opts.onAddDropIn
-        ? `<div class="add-dropin">
-             <input type="text" placeholder="臨打姓名" data-new-dropin>
-             <select data-new-dropin-gender>
-               <option value="">性別</option><option value="male">男</option><option value="female">女</option>
-             </select>
-             <button type="button" data-add-dropin>新增臨打</button>
-           </div>`
-        : ""
-    }
-    ${extraHtml}
   `;
 
   // Assigned directly (not addEventListener) so re-rendering this same
