@@ -295,6 +295,39 @@ def _require_self_or_organizer(
         )
 
 
+def _require_may_sign_up(
+    db: Session, club_id: int, current_player: PlayerRow, target: PlayerRow
+) -> None:
+    """Signing up is deliberately looser than the rest of
+    _require_self_or_organizer, because "+1, I'm bringing a friend" is
+    how drop-ins actually happen — the friend isn't in LINE, has no way
+    to tap anything, and the member bringing them is the one who pays
+    and vouches for them.
+
+    So a club member may sign up anyone who has no LINE identity of
+    their own, on the same reasoning as _may_edit_accountless_player:
+    an accountless player exists only because somebody typed their
+    name, and can't act for themselves. Signing up someone who *does*
+    have an account stays restricted to that person or the organizer —
+    a drop-in costs money, and nobody may commit a real user to it.
+    """
+    if current_player.id == target.id:
+        return
+    membership = db.get(
+        ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}
+    )
+    if membership is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "You are not a member of this club"
+        )
+    if membership.role == "organizer" or target.line_user_id is None:
+        return
+    raise HTTPException(
+        status.HTTP_403_FORBIDDEN,
+        "That person has their own account — they need to sign themselves up",
+    )
+
+
 def _get_game_or_404(db: Session, game_id: int) -> GameRow:
     """Locks the game row for the rest of this transaction.
 
@@ -1855,8 +1888,10 @@ def sign_up(
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
     player = _get_or_create_player(db, season.club_id, payload.player_name)
-    _require_self_or_organizer(db, season.club_id, current_player, player.id)
+    _require_may_sign_up(db, season.club_id, current_player, player)
     _require_within_change_deadline(db, game, season, current_player)
+    if player.gender is None and payload.gender is not None:
+        player.gender = payload.gender
 
     already_signed_up = (
         db.query(DropInRow)

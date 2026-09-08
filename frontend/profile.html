@@ -83,9 +83,7 @@
     <button type="button" class="btn btn-primary" id="report-btn" onclick="sendReport()">送出回報</button>
   </div>
 
-  <div id="no-liff" class="no-liff" hidden>
-    個人資料需要透過 LINE 開啟才能編輯。
-  </div>
+  <div id="no-liff" class="no-liff" hidden></div>
 </div>
 
 <script src="shared.js"></script>
@@ -99,7 +97,9 @@
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
     if (!identified) {
       identityEl.textContent = "";
-      document.getElementById("no-liff").hidden = false;
+      const notice = document.getElementById("no-liff");
+      notice.innerHTML = signInFailureHtml(identified);
+      notice.hidden = false;
       return;
     }
     me = identified;

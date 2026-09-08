@@ -1771,10 +1771,10 @@ def test_a_member_can_sign_up_themselves_as_a_drop_in(client: TestClient) -> Non
     assert response.status_code == 200
 
 
-def test_a_member_cannot_sign_up_someone_else_as_a_drop_in(client: TestClient) -> None:
+def test_a_non_member_cannot_sign_anyone_up(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"], capacity=18)
     game_id = season["games"][0]["id"]
-    carol = identify(client, "Carol")
+    carol = identify(client, "Carol")  # never joined this club
 
     response = client.post(
         "/drop-ins",
@@ -1783,6 +1783,59 @@ def test_a_member_cannot_sign_up_someone_else_as_a_drop_in(client: TestClient) -
     )
 
     assert response.status_code == 403
+
+
+def test_a_member_can_bring_a_guest_who_has_no_account(client: TestClient) -> None:
+    # "+1, I'm bringing a friend" — the friend isn't in LINE and can't
+    # tap anything, so the member bringing them signs them up.
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    game_id = season["games"][0]["id"]
+    carol = identify(client, "Carol")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+    )
+
+    response = client.post(
+        "/drop-ins",
+        json={"player_name": "Carol's Friend", "game_id": game_id},
+        headers=auth_headers(carol["token"]),
+    )
+
+    assert response.status_code == 200
+
+
+def test_a_member_cannot_sign_up_someone_who_has_an_account(client: TestClient) -> None:
+    # A drop-in costs money. Somebody who can speak for themselves has
+    # to be the one who commits to it.
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    game_id = season["games"][0]["id"]
+    club_id = season["club_id"]
+    carol = identify(client, "Carol")
+    dave = identify(client, "Dave")
+    for player in (carol, dave):
+        client.post(f"/clubs/{club_id}/join", headers=auth_headers(player["token"]))
+
+    response = client.post(
+        "/drop-ins",
+        json={"player_name": "Dave", "game_id": game_id},
+        headers=auth_headers(carol["token"]),
+    )
+
+    assert response.status_code == 403
+
+
+def test_the_organizer_can_still_sign_up_anyone(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"], capacity=18)
+    game_id = season["games"][0]["id"]
+    dave = identify(client, "Dave")
+    client.post(f"/clubs/{season['club_id']}/join", headers=auth_headers(dave["token"]))
+
+    # client.headers still carries the organizer's token (see create_club).
+    response = client.post(
+        "/drop-ins", json={"player_name": "Dave", "game_id": game_id}
+    )
+
+    assert response.status_code == 200
 
 
 def test_a_member_can_cancel_their_own_drop_in(client: TestClient) -> None:

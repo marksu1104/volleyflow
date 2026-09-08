@@ -156,6 +156,10 @@ class SubstituteCreate(BaseModel):
 class DropInCreate(BaseModel):
     player_name: str
     game_id: int
+    # Only ever fills a gender in, never overwrites one — a guest being
+    # brought by a member is usually a brand new name, and the roster
+    # shows 男/女 because team balance is decided off it.
+    gender: Gender | None = None
 
 
 class DropInOut(BaseModel):
