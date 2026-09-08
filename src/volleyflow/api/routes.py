@@ -21,7 +21,7 @@ from fastapi import (
 )
 from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from volleyflow.api.auth import verify_id_token
 from volleyflow.api.conversion import (
@@ -2570,15 +2570,48 @@ def list_club_balances(
         .group_by(LedgerEntryRow.player_id)
         .all()
     )
+    brought_by = _who_brought(db, club_id)
     return [
         PlayerBalanceOut(
             player_id=player_id,
             balance=balance_total,
             season_total=season_total,
             season_fee_charged=season_fee,
+            brought_by=brought_by.get(player_id),
         )
         for player_id, balance_total, season_total, season_fee in rows
     ]
+
+
+def _who_brought(db: Session, club_id: int) -> dict[int, str]:
+    """Guest player id -> the name(s) of whoever signed them up.
+
+    Only ever shown on the money screen. A guest's fee is charged to
+    their own ledger, but they have no account and pay nothing — the
+    member who brought them hands over the cash — so "who do I collect
+    this from" is otherwise unanswerable, and on a night when three
+    members each bring somebody it is guesswork. Deliberately absent
+    from the roster, where it would be noise.
+    """
+    Bringer = aliased(PlayerRow)
+    rows = (
+        db.query(DropInRow.player_id, Bringer.name)
+        .join(Bringer, Bringer.id == DropInRow.brought_by_player_id)
+        .join(GameRow, GameRow.id == DropInRow.game_id)
+        .join(SeasonRow, SeasonRow.id == GameRow.season_id)
+        .filter(SeasonRow.club_id == club_id, DropInRow.cancelled_at.is_(None))
+        .distinct()
+        .all()
+    )
+    names: dict[int, list[str]] = {}
+    for player_id, bringer_name in rows:
+        names.setdefault(player_id, []).append(bringer_name)
+    # Two names is already enough to go and ask; beyond that the list
+    # stops fitting on a phone and stops being the point.
+    return {
+        player_id: "、".join(sorted(who)[:2]) + ("等" if len(who) > 2 else "")
+        for player_id, who in names.items()
+    }
 
 
 @router.get(

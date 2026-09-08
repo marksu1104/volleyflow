@@ -85,3 +85,28 @@ test("names are escaped — they come from LINE profiles", () => {
   );
   assert.doesNotMatch(html, /<img src=x/);
 });
+
+test("a guest's row names who to collect the cash from", () => {
+  // The guest's fee is on the guest's own ledger, but they have no
+  // account and pay nothing — without this the organizer sees
+  // "小明 應收 $235" and no way to know who to ask.
+  const { splitLedger, moneyRowHtml, applyBalances } = load("organizer-ledger.html");
+  applyBalances([
+    { player_id: 7, balance: "-235", season_total: "-235", season_fee_charged: "0", brought_by: "蘇慬" },
+  ]);
+
+  const html = moneyRowHtml(7, "小明", "male", splitLedger(row(-235, -235, 0)), null, null);
+
+  assert.match(html, /蘇慬 帶/);
+});
+
+test("someone who signed themselves up gets no such tag", () => {
+  const { splitLedger, moneyRowHtml, applyBalances } = load("organizer-ledger.html");
+  applyBalances([
+    { player_id: 8, balance: "-235", season_total: "-235", season_fee_charged: "0", brought_by: null },
+  ]);
+
+  const html = moneyRowHtml(8, "Ricky", "male", splitLedger(row(-235, -235, 0)), null, null);
+
+  assert.doesNotMatch(html, /帶</);
+});
