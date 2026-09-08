@@ -9,7 +9,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from volleyflow.ledger import EntryType
 from volleyflow.schedule import GameStatus
@@ -167,6 +167,50 @@ class DropInOut(BaseModel):
     id: int
     player_id: int
     game_id: int
+
+
+class DropInBatchEntry(BaseModel):
+    """One person in a "+1, and I'm bringing two friends" signup.
+
+    `player_id` is what decides identity, and it is deliberately never
+    inferred from the name. Two real people called 小明 must both be
+    able to play, so a bare name always means *a new person*; reusing an
+    existing one is something the caller has to say explicitly, after
+    the app has offered it. Guessing the other way round would put one
+    person's fee on another person's ledger, which is not recoverable —
+    a duplicate row merely looks untidy.
+    """
+
+    player_name: str
+    gender: Gender | None = None
+    player_id: int | None = None
+
+    @model_validator(mode="after")
+    def _gender_required_for_new_people(self) -> "DropInBatchEntry":
+        # The roster's 男/女 tags are what the team is picked from, so a
+        # blank is a hole someone has to chase later. An existing player
+        # is exempt: theirs is already on file.
+        if self.player_id is None and self.gender is None:
+            raise ValueError("gender is required when signing up a new person")
+        if not self.player_name.strip():
+            raise ValueError("player_name cannot be blank")
+        return self
+
+
+class DropInBatchCreate(BaseModel):
+    """Signing several people up is one request, not several.
+
+    Capacity has to be decided for the whole group at once, under the
+    same row lock: three sequential requests can interleave with someone
+    else's and let the game go over capacity, and they can also half-
+    succeed, which is the worst state to leave money in.
+    """
+
+    people: list[DropInBatchEntry] = Field(min_length=1, max_length=10)
+
+
+class DropInBatchOut(BaseModel):
+    results: list[DropInOut]
 
 
 class DropInCancelOut(BaseModel):
@@ -373,6 +417,14 @@ class PlayerBalanceOut(BaseModel):
     season_fee_charged: Decimal
     """Just the season-fee entries for that season, before any payment,
     which is what "本季季費" means on screen."""
+    brought_by: str | None = None
+    """Who signed this player up, when they're a guest somebody brought.
+
+    Only meaningful on the money screen: the fee is on this player's
+    ledger but a guest has no account to pay from, so this names the
+    member who actually hands over the cash. None for anyone who signed
+    themselves up.
+    """
 
 
 class PlayerLedgerOut(BaseModel):
