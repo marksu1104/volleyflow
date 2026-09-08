@@ -267,6 +267,30 @@ class WaitlistEntryRow(Base):
     queued_at: Mapped[datetime]
 
 
+class ProblemReportRow(Base):
+    """A screenshot attached to a problem report.
+
+    Only the image is kept, and only so LINE has somewhere public to
+    fetch it from: an image message has to cite an HTTPS URL, and this
+    project has no file storage. The report's words go straight to the
+    developer's chat and aren't stored — see routes.report_a_problem for
+    why nothing here is a queue anyone has to read.
+
+    Rows are deleted after a month by the next report that comes in, so
+    a free-tier database doesn't slowly fill with screenshots nobody
+    will look at again.
+    """
+
+    __tablename__ = "problem_reports"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    """An unguessable token, because the image endpoint has to be public
+    for LINE's servers to fetch it."""
+    image: Mapped[bytes]
+    content_type: Mapped[str]
+    created_at: Mapped[datetime]
+
+
 class LedgerEntryRow(Base):
     __tablename__ = "ledger_entries"
 

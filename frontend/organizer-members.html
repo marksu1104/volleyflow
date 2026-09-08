@@ -150,10 +150,7 @@
   identityReady.then((identified) => {
     if (!identified) {
       stopLoadingEscalation();
-      document.getElementById("no-season").innerHTML = emptyStateHtml(
-        "請用 LINE 開啟",
-        "名單和帳務只有球隊成員看得到，所以需要先用 LINE 登入。請從 LINE 裡的連結開啟這一頁。"
-      );
+      document.getElementById("no-season").innerHTML = signInFailureHtml(identified);
       return;
     }
     initClubAndSeasonPickers(

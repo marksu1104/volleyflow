@@ -34,6 +34,14 @@ jobs:
       - name: Test
         run: uv run pytest --cov --cov-report=term-missing
 
+      # The frontend has no build step and no framework, so its checks
+      # run on the Node that's already on the runner — no dependencies to
+      # install. They guard the parts that would be expensive to get
+      # wrong: the billing preview the wizard shows, who the game sheet
+      # says is playing, and what the cache is allowed to overrule.
+      - name: Frontend tests
+        run: node --test tests/frontend/*.test.js
+
       - name: Postgres tests
         run: uv run pytest -m postgres
         env:
