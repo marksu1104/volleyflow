@@ -7,7 +7,15 @@ const assert = require("node:assert/strict");
 const { load } = require("./harness.js");
 
 const page = load("member.html");
-const { buildMyActionHtml } = page;
+const { myActions } = page;
+
+/** The card renders these two pieces in two places — status above the
+ * rule, buttons below — so a test that cares about both reads them as
+ * one string. */
+function buildMyActionHtml(season, game) {
+  const mine = myActions(season, game);
+  return mine.status + (mine.actions ? `<div class="hero-actions">${mine.actions}</div>` : "");
+}
 
 function fixture(overrides = {}) {
   return {
@@ -31,7 +39,7 @@ function fixture(overrides = {}) {
   };
 }
 
-/** buildMyActionHtml reads the viewer's name out of the name field
+/** myActions reads the viewer's name out of the name field
  * rather than taking it as an argument, because playerName() is what
  * every other action on the page keys off too. The page's myClubs stays
  * empty here, which is the ordinary case: viewingOnly() only bites for
@@ -122,7 +130,7 @@ test("a full game offers the waitlist rather than pretending there's room", () =
 
   const html = buildMyActionHtml(season, game);
 
-  assert.match(html, /報名候補/, "a full game must not look like it has room");
+  assert.match(html, /候補/, "a full game must not look like it has room");
 });
 
 test("a game with room says 報名, not 候補", () => {
@@ -131,7 +139,7 @@ test("a game with room says 報名, not 候補", () => {
 
   const html = buildMyActionHtml(season, game);
 
-  assert.match(html, /報名(?!候補)/);
+  assert.doesNotMatch(html, /候補/);
 });
 
 test("a locked game offers nothing at all", () => {
@@ -157,4 +165,31 @@ test("a substitute's name is escaped — it was typed by a person", () => {
   as("蘇慬");
 
   assert.doesNotMatch(buildMyActionHtml(season, game), /<img src=x/);
+});
+
+test("the button says who the signup is for", () => {
+  // A fixed member is already on the sheet, so the panel is for the
+  // people they're bringing — calling that 報名 reads as signing
+  // themselves up a second time.
+  const onRoster = fixture();
+  as("蘇慬");
+  assert.match(buildMyActionHtml(onRoster.season, onRoster.game), /帶朋友/);
+
+  const guest = fixture();
+  as("Ricky"); // not on the roster
+  assert.match(buildMyActionHtml(guest.season, guest.game), /＋ 報名/);
+});
+
+test("every control in the row is the same kind of button", () => {
+  // Three different widths and weights stacked under the card was the
+  // complaint; they are one row of equal-weight buttons now.
+  const { season, game } = fixture({
+    game: { absences: [{ id: 1, player_name: "蘇慬", covered_by: null }] },
+  });
+  as("蘇慬");
+
+  const html = buildMyActionHtml(season, game);
+
+  assert.equal((html.match(/class="hact/g) || []).length, 2);
+  assert.doesNotMatch(html, /class="btn |class="action/);
 });

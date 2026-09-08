@@ -42,6 +42,12 @@
 
   <div class="section-label" id="cal-label" hidden>本季場次</div>
   <div id="month-cal" class="mcal" hidden></div>
+  <div class="mcal-legend" id="cal-legend" hidden>
+    <span><i class="mcal-dot"></i>有場次</span>
+    <span><i class="mcal-dot short"></i>人數不足</span>
+    <span><i class="mcal-dot full"></i>已滿</span>
+    <span><i class="mcal-dot away"></i>已取消</span>
+  </div>
 </div>
 
 <div id="game-sheet-backdrop" class="gsheet-backdrop" hidden>
@@ -146,9 +152,10 @@
       document.getElementById("season-picker").hidden = false;
       document.getElementById("cal-label").hidden = false;
       document.getElementById("month-cal").hidden = false;
+      document.getElementById("cal-legend").hidden = false;
       renderMeta(season);
       renderHero(season);
-      renderMonthCalendar(document.getElementById("month-cal"), season.games, selectGame);
+      renderCalendar();
       renderSelectedGameDetail();
       // Only the substitute picker needs the club roster, so it loads
       // alongside the paint instead of delaying it.
@@ -179,20 +186,64 @@
 
   function renderHero(season) {
     const wrap = document.getElementById("hero-wrap");
-    const upcoming = season.games.find((g) => !describeDate(g.date).isPast) || season.games[season.games.length - 1];
-    if (!upcoming) { wrap.innerHTML = '<div class="empty">這一季還沒有場次</div>'; return; }
-    const expected = expectedAttendance(season, upcoming);
+    const game =
+      season.games.find((g) => g.id === selectedGameId) ||
+      season.games.find((g) => !describeDate(g.date).isPast) ||
+      season.games[season.games.length - 1];
+    if (!game) { wrap.innerHTML = '<div class="empty">這一季還沒有場次</div>'; return; }
+    selectedGameId = game.id;
+    const expected = expectedAttendance(season, game);
     const shortPill = expected < season.minimum_roster
       ? `<span class="meta-pill" style="color:var(--warn)">低於最低門檻 <strong>${season.minimum_roster}</strong></span>`
       : `<span class="meta-pill">最低門檻 <strong>${season.minimum_roster}</strong> 人</span>`;
-    wrap.innerHTML = renderGameHero(season, upcoming, { metaPills: [shortPill] });
-    wrap.onclick = () => selectGame(upcoming.id);
+    const cancelled = game.status !== "scheduled";
+    // Same card as the member page, so the two halves of the app read as
+    // one app — the difference is what the buttons do, not how a game
+    // looks. 名單 is where the organizer actually works, so it leads.
+    wrap.innerHTML = renderGameHero(season, game, {
+      metaPills: [shortPill],
+      statusHtml: cancelled
+        ? `<div class="hero-status absent">${statusLabel(game.status)}</div>`
+        : "",
+      actionsHtml: cancelled
+        ? ""
+        : `<button type="button" class="hact" onclick="openGameSheet()">名單與請假</button>
+           <button type="button" class="hact quiet" onclick="location.href='organizer-settings.html'">場次設定</button>`,
+    });
+    wrap.onclick = null;
+  }
+
+  function calendarState(game) {
+    if (game.status !== "scheduled") return "away";
+    const expected = expectedAttendance(currentSeason, game);
+    if (expected >= currentSeason.capacity) return "full";
+    if (expected < currentSeason.minimum_roster) return "short";
+    return "";
+  }
+
+  function renderCalendar() {
+    if (!currentSeason) return;
+    renderMonthCalendar(
+      document.getElementById("month-cal"),
+      currentSeason.games,
+      selectGame,
+      { stateOf: calendarState, selectedId: selectedGameId }
+    );
   }
 
   function selectGame(gameId) {
     selectedGameId = gameId;
+    // Switches the card above the calendar rather than opening a modal —
+    // the organizer scans dates far more often than they open a roster.
+    renderHero(currentSeason);
+    renderCalendar();
     renderSelectedGameDetail();
-    openGameSheet();
+    const card = document.querySelector("#hero-wrap .hero");
+    if (card) {
+      card.classList.remove("card-swap");
+      void card.offsetWidth;
+      card.classList.add("card-swap");
+    }
   }
 
   function renderSelectedGameDetail() {
@@ -202,14 +253,14 @@
       el.innerHTML = '<div class="empty">這一季還沒有場次</div>';
       return;
     }
-    const statusHtml = game.status === "scheduled"
-      ? ""
-      : `<div class="gdetail-mystatus absent">${statusLabel(game.status)}</div>`;
     renderGameDetail(el, currentSeason, game, {
-      extraHtml: statusHtml,
+      statusHtml: game.status === "scheduled"
+        ? ""
+        : `<div class="hero-status absent">${statusLabel(game.status)}</div>`,
       clubMembers,
       viewerName: myName,
       onAssignSubstitute: (absenceId, name, gender) => assignSubstitute(absenceId, name, gender),
+      onLeaveWaitlist: (entryId, btn) => leaveWaitlistFor(entryId, btn),
       onCancelSubstitute: (dropInId, btn) => cancelSubstitute(dropInId, btn),
       // The organizer arranges all of this for other people: half the
       // club tells them in person or in the group chat, and members with
@@ -294,6 +345,20 @@
       loadDashboard(currentSeason.id);
     } catch (e) {
       alert("新增臨打失敗：" + e.message);
+    }
+  }
+
+  /** Removing someone from the queue. Its own endpoint because a queue
+   * place is a different table from a confirmed signup and the two id
+   * sequences overlap — see routes.leave_waitlist. */
+  async function leaveWaitlistFor(entryId, btn) {
+    try {
+      await withButtonFeedback(btn, "移除中...", async () => {
+        await postJson(API_BASE, `/waitlist/${entryId}/cancel`, {});
+      });
+      loadDashboard(currentSeason.id);
+    } catch (e) {
+      alert("移除候補失敗：" + e.message);
     }
   }
 
