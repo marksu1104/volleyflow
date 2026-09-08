@@ -151,22 +151,32 @@ test("an empty state with a link still renders a link", () => {
 // after landing in the app, with a ＋1 報名 button live underneath it.
 const { viewingOnlyReason } = load("member.html");
 
-test("someone who hasn't said what they are cannot act yet", () => {
-  const reason = viewingOnlyReason({ id: 1, wants_fixed_membership: null }, false);
-  assert.match(reason, /請先回答/);
+test("not having answered yet is not a reason to block anyone", () => {
+  // The regression this locks out: an organizer, and every member who
+  // joined before the question existed, both carry a null here — and
+  // were told "請先回答你是固定成員還是臨打" with no way past it.
+  assert.equal(viewingOnlyReason({ role: "member", wants_fixed_membership: null }, false), null);
 });
 
-test("a fixed member waiting on the organizer is told that, not something else", () => {
-  const reason = viewingOnlyReason({ id: 1, wants_fixed_membership: true }, false);
+test("the organizer is never waiting on the organizer", () => {
+  assert.equal(viewingOnlyReason({ role: "organizer", wants_fixed_membership: null }, false), null);
+  assert.equal(viewingOnlyReason({ role: "organizer", wants_fixed_membership: true }, false), null);
+});
+
+test("a fixed member waiting on the roster is told exactly that", () => {
+  const reason = viewingOnlyReason({ role: "member", wants_fixed_membership: true }, false);
   assert.match(reason, /等待主揪/);
 });
 
-test("a fixed member already on the roster acts normally", () => {
-  assert.equal(viewingOnlyReason({ id: 1, wants_fixed_membership: true }, true), null);
+test("being on the roster settles it, whatever the column says", () => {
+  // Everyone added before the question existed has a null.
+  for (const wants of [true, false, null]) {
+    assert.equal(viewingOnlyReason({ role: "member", wants_fixed_membership: wants }, true), null);
+  }
 });
 
 test("someone who said they're only a drop-in acts normally", () => {
-  assert.equal(viewingOnlyReason({ id: 1, wants_fixed_membership: false }, false), null);
+  assert.equal(viewingOnlyReason({ role: "member", wants_fixed_membership: false }, false), null);
 });
 
 test("a non-member isn't blocked by this rule — the invite screen has them", () => {

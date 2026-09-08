@@ -166,22 +166,33 @@
     if (hasSeason) showTab(location.hash === "#settle" ? "closing" : "fee");
   }
 
+  const ledgerLoad = staleGuard();
+
   async function loadLedger(seasonId) {
+    // Two of these run on nearly every page load — see staleGuard — and
+    // whichever finishes last wins. Without the ticket the loser can be
+    // the older one, repainting money figures from before the last
+    // write.
+    const ticket = ledgerLoad.take();
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
     try {
       const res = await fetch(`${API_BASE}/seasons/${seasonId}`, {
         headers: authHeader(),
       });
+      if (!ledgerLoad.current(ticket)) return;
       if (!res.ok) {
         errorEl.textContent = "找不到這一季";
         return;
       }
-      currentSeason = await res.json();
+      const season = await res.json();
+      if (!ledgerLoad.current(ticket)) return;
+      currentSeason = season;
       await loadBalances(currentSeason);
+      if (!ledgerLoad.current(ticket)) return;
       await Promise.all([renderFeeTab(), renderDropInTab(), renderClosingTab()]);
     } catch (e) {
-      errorEl.textContent = "連不上伺服器：" + e.message;
+      if (ledgerLoad.current(ticket)) errorEl.textContent = "連不上伺服器：" + e.message;
     }
   }
 
@@ -347,7 +358,9 @@
         note: "帳務頁記錄",
         client_token: token,
       });
+      const ticket = ledgerLoad.take();
       await loadBalances(currentSeason);
+      if (!ledgerLoad.current(ticket)) return;
       renderTabsFromBalances();
     } catch (e) {
       balances[playerId] = before;

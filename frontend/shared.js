@@ -955,3 +955,24 @@ async function fetchClubMembers(apiBase, clubId) {
     return [];
   }
 }
+
+/** Lets a loader discard its own result when a newer run has started.
+ *
+ * getJsonSWR calls its callback twice — once from cache, once from the
+ * network — and the season picker turns each of those into a fresh
+ * `onSeasonChange`, so two loads are routinely in flight at once. They
+ * are not guaranteed to finish in order: the older one finishing last
+ * paints its stale copy over the newer one's. That is what made a
+ * recorded payment flick back to 收款 a second after it had settled,
+ * and it can put any screen a whole request behind reality.
+ *
+ * Usage: take a ticket at the top of the loader, and check it after
+ * every await, before touching the DOM or shared state.
+ */
+function staleGuard() {
+  let latest = 0;
+  return {
+    take: () => ++latest,
+    current: (ticket) => ticket === latest,
+  };
+}
