@@ -52,12 +52,6 @@
 
   <div id="hero-wrap"></div>
 
-  <div class="section-label" id="balance-label" hidden>帳務</div>
-  <div id="balance-card" class="balance" hidden>
-    <span class="balance-label">本季餘額</span>
-    <span id="balance-value" class="balance-value"></span>
-  </div>
-
   <div class="section-label" id="cal-label" hidden>本季場次</div>
   <div id="month-cal" class="mcal" hidden></div>
   <div class="mcal-legend" id="cal-legend" hidden>
@@ -66,6 +60,13 @@
     <span><i class="mcal-dot full"></i>已滿</span>
     <span><i class="mcal-dot away"></i>你請假</span>
   </div>
+
+  <div class="section-label" id="balance-label" hidden>帳務</div>
+  <div id="balance-card" class="balance" hidden>
+    <span class="balance-label">本季餘額</span>
+    <span id="balance-value" class="balance-value"></span>
+  </div>
+
 </div>
 
 <div id="club-sheet-backdrop" class="gsheet-backdrop" hidden>
@@ -454,20 +455,30 @@
    */
   function viewingOnlyReason(membership, onRoster) {
     if (!membership) return null; // not in this club at all
-    // Anyone who joined before the question moved into the join flow
-    // still has no answer on file. Letting them press ＋1 報名 while the
-    // question is on screen is exactly the contradiction that was
-    // reported, so the buttons wait for the answer too.
-    if (membership.wants_fixed_membership === null) {
-      return "請先回答你是固定成員還是臨打，才能報名或請假";
-    }
-    // Said they're a fixed member, but the organizer hasn't put them on
-    // the roster yet: signing up as a drop-in would contradict what
-    // they just said, and taking leave from a roster they're not on
-    // means nothing.
-    if (membership.wants_fixed_membership === true && !onRoster) {
+    // The organizer runs the club — they add people to the roster, so
+    // they can never be the one waiting for it. Their own membership
+    // row has never had wants_fixed_membership set at all (create_club
+    // doesn't ask), which is how an earlier version of this rule locked
+    // the organizer out of their own club entirely.
+    if (membership.role === "organizer") return null;
+    // Already on the roster: they *are* a fixed member, whatever the
+    // column says. Everyone added before the question existed has a
+    // null here, and blocking them was the same bug seen from the
+    // members' side.
+    if (onRoster) return null;
+    // The one real case: they said they're a fixed member, and the
+    // organizer hasn't put them on the roster yet. Signing up as a
+    // drop-in would contradict what they just said, and taking leave
+    // from a roster they're not on means nothing.
+    if (membership.wants_fixed_membership === true) {
       return "等待主揪把你加入本季名單，在那之前只能查看";
     }
+    // An unanswered question is deliberately *not* a block. Signing up
+    // as a drop-in is a legitimate thing to do whether or not you
+    // intend to become a fixed member, and the cost of getting this
+    // wrong is asymmetric: someone signing up a moment early is
+    // harmless, locking a real member out of the app is not. The
+    // question still gets asked, just without holding anything hostage.
     return null;
   }
 
@@ -582,7 +593,14 @@
     });
   });
 
+  const seasonLoad = staleGuard();
+
   async function loadSeason(seasonId) {
+    // The season picker fires onSeasonChange once from cache and once
+    // from the network, so two of these overlap on most page loads, and
+    // an absence recorded in between could be painted away by the older
+    // one landing last. See staleGuard.
+    const ticket = seasonLoad.take();
     currentSeasonId = seasonId;
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
@@ -594,10 +612,11 @@
         headers: authHeader(),
       });
     } catch (e) {
-      errorEl.textContent = "連不上伺服器：" + e.message;
+      if (seasonLoad.current(ticket)) errorEl.textContent = "連不上伺服器：" + e.message;
     }
 
     function render(season) {
+      if (!seasonLoad.current(ticket)) return;
       const isNewSeason = !currentSeason || currentSeason.id !== season.id;
       currentSeason = season;
       seasonSettled = true;
@@ -637,6 +656,14 @@
     // 18-name roster is behind 看名單, which is the rarer thing to want.
     renderHero(currentSeason);
     renderCalendar();
+    // Say that something changed. Two dates with the same headcount
+    // differ only in the date line, which is easy to miss on a phone.
+    const card = document.querySelector("#hero-wrap .hero");
+    if (card) {
+      card.classList.remove("card-swap");
+      void card.offsetWidth; // restart the animation rather than no-op
+      card.classList.add("card-swap");
+    }
   }
 
   function renderHero(season) {

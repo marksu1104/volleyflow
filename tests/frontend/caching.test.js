@@ -165,3 +165,32 @@ test("a failed club fetch reaches the page instead of vanishing", async () => {
   );
   assert.equal(error.message, "Failed to fetch");
 });
+
+// Two loads overlap on most page loads, because the season picker fires
+// its callback once from cache and once from the network. Whichever
+// finishes last wins, and that is not always the newest one.
+test("an older load discards its result once a newer one has started", () => {
+  const { staleGuard } = load();
+  const guard = staleGuard();
+
+  const first = guard.take();
+  const second = guard.take();
+
+  assert.equal(guard.current(first), false, "the older load must not paint");
+  assert.equal(guard.current(second), true);
+});
+
+test("a lone load is always allowed to paint", () => {
+  const { staleGuard } = load();
+  const guard = staleGuard();
+  assert.equal(guard.current(guard.take()), true);
+});
+
+test("two guards don't invalidate each other", () => {
+  const { staleGuard } = load();
+  const a = staleGuard();
+  const b = staleGuard();
+  const ticket = a.take();
+  b.take();
+  assert.equal(a.current(ticket), true);
+});
