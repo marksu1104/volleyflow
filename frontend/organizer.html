@@ -238,16 +238,9 @@
         : "",
       actionsHtml: cancelled
         ? ""
-        : `<button type="button" class="hact" onclick="openGameSheet()">名單與請假</button>` +
-          // Only offered when the club actually pays for air
-          // conditioning: a venue that bundles it has nothing to toggle,
-          // and a switch that changes no money is just clutter.
-          (Number(season.ac_surcharge) > 0
-            ? `<button type="button" class="hact ${game.air_conditioned ? "" : "quiet"}"
-                 onclick="toggleAirConditioning(${game.id}, ${!game.air_conditioned})">
-                 ${game.air_conditioned ? "冷氣：開" : "冷氣：關"}
-               </button>`
-            : `<button type="button" class="hact quiet" onclick="location.href='organizer-settings.html'">場次設定</button>`),
+        : `<button type="button" class="hact" onclick="openGameSheet()">名單與請假</button>
+           <button type="button" class="hact quiet" onclick="location.href='organizer-settings.html'">場次設定</button>`,
+      moreHtml: cancelled ? "" : acSwitch(season, game),
     });
     wrap.onclick = null;
   }
@@ -257,7 +250,31 @@
    * game the organizer is expected to correct afterwards. It moves what
    * the club owes the venue and re-prices every member's share, so it
    * says so before doing it. */
+  /** The state, not the action. A button would say what you can do; this
+   * says what the game currently is, which is the thing worth being able
+   * to check at a glance — the organizer opens this card for the roster
+   * anyway, so a wrong setting catches the eye without needing a
+   * separate "did you confirm?" flag. Absent entirely when the club
+   * doesn't pay for air conditioning. */
+  function acSwitch(season, game) {
+    if (!(Number(season.ac_surcharge) > 0)) return "";
+    const on = game.air_conditioned;
+    const each = Math.round(Number(season.ac_surcharge) / season.members.length);
+    return `
+      <div class="ac-switch">
+        <span class="lbl">冷氣</span>
+        <span class="ac-seg">
+          <button type="button" aria-pressed="${on}"
+            onclick="toggleAirConditioning(${game.id}, true)">開</button>
+          <button type="button" class="off" aria-pressed="${!on}"
+            onclick="toggleAirConditioning(${game.id}, false)">關</button>
+        </span>
+        <span class="ac-cost">${on ? `每人 +$${each}` : "每人不加收"}</span>
+      </div>`;
+  }
+
   async function toggleAirConditioning(gameId, on) {
+    if (on === currentSeason.games.find((g) => g.id === gameId).air_conditioned) return;
     const each = Math.round(Number(currentSeason.ac_surcharge) / currentSeason.members.length);
     const wording = on
       ? `要把這場改成「有開冷氣」嗎？每位成員這一場會多 $${each}。`
