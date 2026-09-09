@@ -13,14 +13,19 @@ records how each stage actually got built.
 
 ## Running it locally
 
-Two terminals. Both from the repo root.
+Two terminals, both from the repo root. One script each, because the
+one-liner differs in every shell — `VAR=1 cmd` and `&&` are bash, and
+Windows PowerShell rejects both.
+
+```powershell
+.\scripts\dev-api.ps1     # the API on :8000, with local sign-in on
+.\scripts\dev-web.ps1     # the pages on :5500
+```
+
+On bash or zsh, the same two things:
 
 ```bash
-# The API. --reload restarts it whenever a file is saved.
-# VOLLEYFLOW_DEV_LOGIN turns on the local identity described below.
 VOLLEYFLOW_DEV_LOGIN=1 uv run uvicorn volleyflow.api.main:app --reload --port 8000
-
-# The pages. Anything that serves static files will do.
 cd frontend && python -m http.server 5500
 ```
 
@@ -38,7 +43,7 @@ here should ever be pointed at it.
 The dev branch starts empty, so the app opens on "no club yet" with
 nothing to click.
 
-```bash
+```
 uv run python scripts/seed_dev.py
 ```
 
@@ -85,7 +90,7 @@ a real person's ledger. See `tests/test_auth.py`.
 
 ## Checks
 
-```bash
+```
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
