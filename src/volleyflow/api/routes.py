@@ -550,7 +550,7 @@ def _drop_in_share(db: Session, season_row: SeasonRow, game_id: int) -> Decimal:
     game_rows = (
         db.query(GameRow)
         .filter(GameRow.season_id == season_row.id)
-        .order_by(GameRow.id)
+        .order_by(GameRow.date)
         .all()
     )
     member_rows = (
@@ -633,7 +633,12 @@ def _gather_member_settlements(
     if season_row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
 
-    game_rows = db.query(GameRow).filter(GameRow.season_id == season_id).all()
+    game_rows = (
+        db.query(GameRow)
+        .filter(GameRow.season_id == season_id)
+        .order_by(GameRow.date)
+        .all()
+    )
     game_ids = [g.id for g in game_rows]
     member_rows = (
         db.query(PlayerRow)
@@ -685,7 +690,11 @@ def _absorb_drop_ins_into_membership(
     as attending and still are, just as a member now, so no slot opened.
     """
     game_ids = [
-        row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id).all()
+        row.id
+        for row in db.query(GameRow)
+        .filter(GameRow.season_id == season.id)
+        .order_by(GameRow.date)
+        .all()
     ]
     if not game_ids:
         return
@@ -1207,7 +1216,11 @@ def _delete_season_rows(db: Session, season: SeasonRow) -> None:
     """Removes a season and everything hanging off it, children first so
     no foreign key is ever left dangling."""
     game_ids = [
-        row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id).all()
+        row.id
+        for row in db.query(GameRow)
+        .filter(GameRow.season_id == season.id)
+        .order_by(GameRow.date)
+        .all()
     ]
     if game_ids:
         absence_ids = [
@@ -1380,7 +1393,12 @@ def start_season(
 
 
 def _season_out(db: Session, season: SeasonRow) -> SeasonOut:
-    games = db.query(GameRow).filter(GameRow.season_id == season.id).all()
+    games = (
+        db.query(GameRow)
+        .filter(GameRow.season_id == season.id)
+        .order_by(GameRow.date)
+        .all()
+    )
     member_ids = [
         row.player_id
         for row in db.query(SeasonMemberRow)
@@ -1692,7 +1710,12 @@ def get_season(
         viewer_membership is not None and viewer_membership.role == "organizer"
     )
 
-    game_rows = db.query(GameRow).filter(GameRow.season_id == season_id).all()
+    game_rows = (
+        db.query(GameRow)
+        .filter(GameRow.season_id == season_id)
+        .order_by(GameRow.date)
+        .all()
+    )
     game_ids = [g.id for g in game_rows]
     member_rows = (
         db.query(PlayerRow)

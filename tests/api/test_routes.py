@@ -3157,3 +3157,58 @@ def test_changing_the_air_conditioning_price_is_blocked_after_settling(
     response = client.patch(f"/seasons/{season['id']}", json={"ac_surcharge": "500"})
 
     assert response.status_code == 400
+
+
+def test_a_season_s_games_always_come_back_in_calendar_order(
+    client: TestClient, db_session: Session
+) -> None:
+    # Without ORDER BY, Postgres returns rows in whatever order the heap
+    # gives it — and an UPDATE rewrites a row, moving it. Toggling one
+    # game's air conditioning was enough to put 9/22 ahead of 9/15, and
+    # the card that shows "the next game" takes the first future one in
+    # the list. The game was never missing; the order was.
+    club = create_club(client)
+    dates = ["2026-11-03", "2026-11-10", "2026-11-17", "2026-11-24"]
+    season = client.post(
+        f"/clubs/{club['id']}/seasons",
+        json={
+            "total_venue_cost": "10000",
+            "game_dates": dates,
+            "member_names": ["Alice", "Bob"],
+        },
+    ).json()
+
+    # Rewrite the middle rows, the way any edit to them would.
+    for game in client.get(f"/seasons/{season['id']}").json()["games"][1:3]:
+        db_session.execute(
+            text(
+                "UPDATE games SET air_conditioned = NOT air_conditioned WHERE id = :g"
+            ),
+            {"g": game["id"]},
+        )
+    db_session.commit()
+
+    got = [g["date"] for g in client.get(f"/seasons/{season['id']}").json()["games"]]
+
+    assert got == dates
+
+
+def test_a_date_added_later_still_sorts_by_when_it_is(client: TestClient) -> None:
+    # id order and calendar order diverge the moment a one-off date is
+    # added to an existing season.
+    season = _start_season(
+        client, game_dates=["2026-12-01", "2026-12-15"], member_names=["Alice"]
+    )
+    club_id = season["club_id"]
+    later = client.post(
+        f"/clubs/{club_id}/seasons",
+        json={
+            "total_venue_cost": "1000",
+            "game_dates": ["2026-12-08", "2026-12-01"],
+            "member_names": ["Alice"],
+        },
+    ).json()
+
+    got = [g["date"] for g in client.get(f"/seasons/{later['id']}").json()["games"]]
+
+    assert got == ["2026-12-01", "2026-12-08"]
