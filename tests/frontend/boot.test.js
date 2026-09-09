@@ -245,3 +245,52 @@ test("a page served without the stamp is left alone", () => {
 
   assert.equal(replaced, 0);
 });
+
+// Dev login: a way to be somebody on a laptop, where there is no LIFF.
+// Three locks, and these cover the one that lives in the browser — the
+// other two are on the server (see tests/test_auth.py).
+test("?as= only works on a laptop, never on the real site", () => {
+  const { devIdentityName } = load();
+
+  globalThis.location = { hostname: "localhost", search: "?as=蘇懂" };
+  assert.equal(devIdentityName(), "蘇懂");
+
+  globalThis.location = { hostname: "marksu1104.github.io", search: "?as=蘇懂" };
+  assert.equal(devIdentityName(), null, "the shipped site must never offer this");
+});
+
+test("the identity sticks across pages without carrying the parameter", () => {
+  const { devIdentityName } = load();
+  globalThis.location = { hostname: "127.0.0.1", search: "?as=楊于嫺" };
+  devIdentityName();
+
+  globalThis.location = { hostname: "127.0.0.1", search: "" };
+  assert.equal(devIdentityName(), "楊于嫺");
+});
+
+test("?as= with nothing after it drops the identity", () => {
+  const { devIdentityName } = load();
+  globalThis.location = { hostname: "localhost", search: "?as=蘇懂" };
+  devIdentityName();
+
+  globalThis.location = { hostname: "localhost", search: "?as=" };
+  assert.equal(devIdentityName(), null);
+});
+
+test("a dev identity is sent as a token nothing else could produce", () => {
+  // The server only accepts this shape, and only with an environment
+  // variable production doesn't set.
+  const { devIdentityName, authHeader } = load();
+  globalThis.location = { hostname: "localhost", search: "?as=蘇懂" };
+  devIdentityName();
+
+  assert.equal(authHeader().Authorization, "Bearer dev:%E8%98%87%E6%87%82");
+});
+
+test("with no dev identity the header is whatever LIFF gives", () => {
+  const { authHeader } = load();
+  globalThis.location = { hostname: "localhost", search: "" };
+  globalThis.liff = { isLoggedIn: () => true, getIDToken: () => "real-token" };
+
+  assert.equal(authHeader().Authorization, "Bearer real-token");
+});

@@ -230,7 +230,17 @@ with.
 ### Git
 - Default branch: `main`.
 - Commit straight to `main`. CI runs on every push to `main` (`ci.yml` is `on: push: branches: [main]`), so pushing directly still gets `ruff` → `mypy` → `pytest`; the only thing a PR added was running them a few minutes earlier. Decided 2026-09-08, replacing "feature branch → PR → CI green → merge". On a solo project a PR nobody reviews is ceremony: it produced 24 self-merged PRs in two days, a notification for each, and a public record that makes the process look more collaborative than it was.
-- Open a PR only when the change genuinely wants one: billing logic, authentication or authorization, or a database migration. Those are the changes worth gating on CI *before* they reach `main`, and worth leaving a written explanation next to. Everything else — frontend fixes, copy, styling, docs — goes straight to `main`.
+- No pull requests. Push straight to `main`, always. Decided 2026-09-10,
+  replacing "PR for billing, auth or migrations". A PR does three things
+  and none of them survive scrutiny here: it runs CI before `main`
+  (`ci.yml` already runs on every push to `main`, so this buys minutes),
+  it gives other people somewhere to comment (there are none), and it
+  records why a change happened (a commit message and `docs/dev-log.md`
+  do that, and are easier to find later). The one remaining argument —
+  that a migration needs a pause for someone to apply SQL by hand — went
+  away when CI started applying migrations itself. Thirty-two
+  self-merged PRs also read oddly on a repo whose point is to be looked
+  at by an interviewer.
 - Commit messages: one line, plain short description of what the code now does. No `type:` prefix, no body, no internal planning terms (e.g. "milestone 1") — describe the change, not where it sits in the schedule.
 - No AI attribution (e.g. `Co-Authored-By: Claude`) in commit messages.
 - Commit granularity is one commit per completed, tested stage, not per file or per intermediate step. For milestone 1 that stage is the whole billing engine (all six modules, full test suite) — one commit, not six.

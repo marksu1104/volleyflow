@@ -737,7 +737,46 @@ async function withButtonFeedback(btn, busyLabel, action) {
  * as if the header were simply absent). A fresh token is fetched every
  * call rather than cached: liff.getIDToken() already handles refreshing
  * it, so caching here would just risk holding an expired one. */
+/** Whether this page is being served from a laptop rather than the real
+ * site. The third lock on dev login — the other two are on the server
+ * (see auth.verify_id_token). Not a security boundary by itself, but it
+ * means the shipped site never even offers to send a dev token. */
+function isLocalDev() {
+  return ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+}
+
+/** Who you're pretending to be, from `?as=<name>` — local only.
+ *
+ * Nothing in this app is reachable without a verified identity, and on a
+ * laptop there is no LIFF to get one from, so every page stopped at
+ * "open this in LINE". Testing a member's view meant picking up a phone
+ * and using the live club's real data. This is the way in:
+ *
+ *     http://localhost:5500/member.html?as=蘇懂
+ *
+ * Remembered for the session, so links inside the app keep the identity
+ * without carrying the parameter around. `?as=` with no name clears it.
+ */
+function devIdentityName() {
+  if (!isLocalDev()) return null;
+  const asked = new URLSearchParams(location.search).get("as");
+  try {
+    if (asked !== null) {
+      if (asked.trim()) sessionStorage.setItem("vf_dev_as", asked.trim());
+      else sessionStorage.removeItem("vf_dev_as");
+    }
+    return sessionStorage.getItem("vf_dev_as");
+  } catch (e) {
+    return asked && asked.trim() ? asked.trim() : null;
+  }
+}
+
 function authHeader() {
+  const dev = devIdentityName();
+  // encodeURIComponent because an Authorization header has to be ASCII:
+  // a browser throws outright on `Bearer dev:蘇懂`. auth.verify_id_token
+  // decodes it back.
+  if (dev) return { Authorization: `Bearer dev:${encodeURIComponent(dev)}` };
   try {
     if (typeof liff !== "undefined" && liff.isLoggedIn()) {
       return { Authorization: `Bearer ${liff.getIDToken()}` };
@@ -767,6 +806,23 @@ function authHeader() {
  * read-only view either way.
  */
 async function initLiffIdentity(apiBase, liffId) {
+  // Skips LINE entirely — see devIdentityName. Goes through the same
+  // /players/identify call as a real login, so everything downstream
+  // (clubs, roles, the ledger) behaves exactly as it does for a real
+  // person; only where the identity came from is different.
+  const devName = devIdentityName();
+  if (devName) {
+    try {
+      return await postJson(apiBase, "/players/identify", {
+        id_token: `dev:${encodeURIComponent(devName)}`,
+        display_name: devName,
+      });
+    } catch (e) {
+      console.warn("dev login failed:", e);
+      return false;
+    }
+  }
+
   let profile;
   try {
     await liff.init({ liffId });
