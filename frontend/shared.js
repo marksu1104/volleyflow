@@ -52,6 +52,23 @@ function expectedAttendance(season, game) {
   return season.members.length - game.absences.length + game.confirmed_drop_ins.length;
 }
 
+function isGameFull(season, game) {
+  return expectedAttendance(season, game) >= season.capacity;
+}
+
+/** What the air conditioning adds to one person's share of this game,
+ * or nothing when it isn't running or the season doesn't charge for it.
+ *
+ * Shared because both pages show the same game: this lived in
+ * member.html only, so opening one game as a member and as the
+ * organizer reported different facts about it — and the organizer is
+ * the person who gets asked "why is tonight more expensive". */
+function acPill(season, game) {
+  if (!game.air_conditioned || !(Number(season.ac_surcharge) > 0)) return "";
+  const each = Math.round(Number(season.ac_surcharge) / season.members.length);
+  return `<span class="meta-pill ac">含冷氣 +$${each}</span>`;
+}
+
 /** How many of the people expected at this game are each gender — for
  * the hero card's 男/女 pills and capacity bar. A member who recorded an
  * absence isn't attending directly (their substitute, if any, is
@@ -588,9 +605,17 @@ function renderGameDetail(container, season, game, options) {
         name: w.player_name + (viewerName && w.player_name === viewerName ? "（你）" : ""),
         tone: "queued" + (viewerName && w.player_name === viewerName ? " me" : ""),
         note: '<span class="att-note">候補</span>',
-        controls: opts.onLeaveWaitlist
-          ? `<button type="button" class="mini-action danger" data-remove-waitlist="${w.id}">移除</button>`
-          : "",
+        // 遞補 first: the organizer opens this sheet to put somebody on
+        // the court far more often than to strike them off, and the
+        // queue's own order is exactly what they are overriding — the
+        // person at the front is often the one who can't make it.
+        controls:
+          (opts.onPromoteFromWaitlist
+            ? `<button type="button" class="mini-action" data-promote-waitlist="${w.id}">遞補</button>`
+            : "") +
+          (opts.onLeaveWaitlist
+            ? `<button type="button" class="mini-action danger" data-remove-waitlist="${w.id}">移除</button>`
+            : ""),
       })
     )
     .join("");
@@ -604,6 +629,13 @@ function renderGameDetail(container, season, game, options) {
   // So: the hero says which game this is, the controls come next, and
   // the lists are last. Scrolling down only ever reveals more names —
   // nothing is ever buried behind them.
+  //
+  // The lists follow the same rule among themselves, which took a
+  // screenshot to notice: 候補 and 請假 run to a handful of rows and
+  // carry 遞補, 移除 and 指定代打, while 出席名單 is the full roster —
+  // eighteen rows of mostly nothing to press. With the roster first,
+  // reaching the queue meant scrolling past every player on the court.
+  // Short and actionable first, long and informational last.
   container.innerHTML = `
     ${renderGameHero(season, game, {
       metaPills: opts.heroMetaPills,
@@ -626,18 +658,18 @@ function renderGameDetail(container, season, game, options) {
            </div>`
         : ""
     }
-    <div class="gdetail-section-label">出席名單（${attendingRows.length} 人）</div>
-    <div class="att-list">${attendingHtml || '<div class="empty">這一場沒有人出席</div>'}</div>
-    ${
-      absentRows.length
-        ? `<div class="gdetail-section-label">請假（${absentRows.length} 人）</div><div class="att-list">${absentRows.join("")}</div>`
-        : ""
-    }
     ${
       waitlistRows
         ? `<div class="gdetail-section-label">候補（${game.waitlist_entries.length} 人）</div><div class="att-list">${waitlistRows}</div>`
         : ""
     }
+    ${
+      absentRows.length
+        ? `<div class="gdetail-section-label">請假（${absentRows.length} 人）</div><div class="att-list">${absentRows.join("")}</div>`
+        : ""
+    }
+    <div class="gdetail-section-label">出席名單（${attendingRows.length} 人）</div>
+    <div class="att-list">${attendingHtml || '<div class="empty">這一場沒有人出席</div>'}</div>
   `;
 
   // Assigned directly (not addEventListener) so re-rendering this same
@@ -695,6 +727,14 @@ function renderGameDetail(container, season, game, options) {
     // Separate hook, not a shared one: a queue place lives in its own
     // table with its own id sequence, and routing it through the
     // drop-in handler cancels whoever happens to hold that number.
+    const promoteWaitlist = e.target.closest("[data-promote-waitlist]");
+    if (promoteWaitlist && opts.onPromoteFromWaitlist) {
+      opts.onPromoteFromWaitlist(
+        Number(promoteWaitlist.dataset.promoteWaitlist),
+        promoteWaitlist
+      );
+      return;
+    }
     const removeWaitlist = e.target.closest("[data-remove-waitlist]");
     if (removeWaitlist && opts.onLeaveWaitlist) {
       opts.onLeaveWaitlist(Number(removeWaitlist.dataset.removeWaitlist), removeWaitlist);

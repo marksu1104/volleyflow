@@ -903,15 +903,8 @@
   /** Why this game costs more than the one beside it. Only on the games
    * it applies to — a night with no air conditioning needs no
    * explanation, its price is just the price. */
-  function acPill(season, game) {
-    if (!game.air_conditioned || !(Number(season.ac_surcharge) > 0)) return "";
-    const each = Math.round(Number(season.ac_surcharge) / season.members.length);
-    return `<span class="meta-pill ac">含冷氣 +$${each}</span>`;
-  }
-
-  function isGameFull(season, game) {
-    return expectedAttendance(season, game) >= season.capacity;
-  }
+  // acPill and isGameFull now live in shared.js — the organizer's sheet
+  // shows the same game and has to say the same thing about it.
 
   /* ---- the signup sheet ----
    * Its own sheet, not a form under the game, because a game's roster
