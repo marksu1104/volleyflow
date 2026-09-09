@@ -164,8 +164,13 @@
       renderCalendar();
       renderSelectedGameDetail();
       // Only the substitute picker needs the club roster, so it loads
-      // alongside the paint instead of delaying it.
+      // alongside the paint instead of delaying it — and only repaints
+      // if it actually brought something new. It used to repaint every
+      // time, so every tap drew the sheet, waited out a round trip, and
+      // drew the identical sheet again: the visible flicker reported as
+      // 瞬間跳針.
       fetchClubMembers(API_BASE, currentClubId()).then((m) => {
+        if (JSON.stringify(m) === JSON.stringify(clubMembers)) return;
         clubMembers = m;
         renderSelectedGameDetail();
       });

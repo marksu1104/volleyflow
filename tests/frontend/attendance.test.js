@@ -1,4 +1,4 @@
-// The game sheet's job is to answer "who is actually playing", which is
+﻿// The game sheet's job is to answer "who is actually playing", which is
 // members-minus-absences-plus-drop-ins. Getting that wrong on the day
 // means turning up short, so the headline count and the list under it
 // have to agree with each other and with the hero card.
@@ -263,16 +263,37 @@ test("only the chosen group is shown", () => {
   assert.match(el.innerHTML, /data-gd-panel="queued"[^>]*hidden/);
 });
 
+test("a tap on a roster button is not swallowed by the tab strip", () => {
+  // The bug, mine, found by clicking in a real browser: the container
+  // remembers the open tab in a data attribute, and the tab handler
+  // looked for a bare [data-gd-tab]. closest() therefore walked up from
+  // any button in the sheet, hit the container, and every 請假 / 移除 /
+  // 遞補 / 指定代打 tap was treated as a tab switch and did nothing.
+  const { season, game } = fixture();
+  const el = makeElement();
+  const absences = [];
+  renderGameDetail(el, season, game, {
+    viewerName: "蘇慬",
+    onRecordAbsence: (name) => absences.push(name),
+  });
+
+  // The stored key must not be readable as one of the tab buttons.
+  assert.equal(el.dataset.gdTab, undefined, "the container's own key is named apart");
+  assert.equal(el.dataset.gdActiveTab, "attending");
+  // And the markup a tab handler looks for is a button, not the container.
+  assert.match(el.innerHTML, /<button[^>]*data-gd-tab="attending"/);
+});
+
 test("the chosen group survives a repaint", () => {
   // Every action repaints this sheet. Losing the tab each time is one
   // of the "it jumps around" complaints.
   const { season, game } = fixture();
   const el = makeElement();
-  el.dataset.gdTab = "queued";
+  el.dataset.gdActiveTab = "queued";
 
   renderGameDetail(el, season, game, { viewerName: "蘇慬" });
 
-  assert.equal(el.dataset.gdTab, "queued");
+  assert.equal(el.dataset.gdActiveTab, "queued");
   assert.match(el.innerHTML, /data-gd-panel="queued"(?![^>]*hidden)/);
   assert.match(el.innerHTML, /data-gd-panel="attending"[^>]*hidden/);
 });
@@ -280,11 +301,11 @@ test("the chosen group survives a repaint", () => {
 test("a tab that no longer makes sense falls back to who's playing", () => {
   const { season, game } = fixture();
   const el = makeElement();
-  el.dataset.gdTab = "nonsense";
+  el.dataset.gdActiveTab = "nonsense";
 
   renderGameDetail(el, season, game, { viewerName: "蘇慬" });
 
-  assert.equal(el.dataset.gdTab, "attending");
+  assert.equal(el.dataset.gdActiveTab, "attending");
 });
 
 test("only the organizer is offered 遞補 on a queued person", () => {

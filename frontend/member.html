@@ -659,13 +659,18 @@
       renderCalendar();
       renderSelectedGameDetail();
       paintBalance();
-      // These two are independent of the season document and each other,
-      // so they run in parallel rather than blocking the paint above.
+      // Independent of the season document, so it runs alongside the
+      // paint above rather than blocking it — and only repaints if it
+      // brought something new. It used to repaint unconditionally, so
+      // every tap drew the sheet, waited out a round trip, and drew the
+      // identical sheet again: the flicker reported as 瞬間跳針.
+      // (paintBalance was also called twice here, once before this and
+      // once after, for the same reason and with the same effect.)
       fetchClubMembers(API_BASE, currentClubId()).then((m) => {
+        if (JSON.stringify(m) === JSON.stringify(clubMembers)) return;
         clubMembers = m;
         renderSelectedGameDetail();
       });
-      paintBalance();
     }
   }
 

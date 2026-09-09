@@ -1,4 +1,4 @@
-// Shared helpers for member.html and organizer.html — date formatting,
+﻿// Shared helpers for member.html and organizer.html — date formatting,
 // the season picker, and the month calendar. One copy so the two pages
 // can't quietly drift apart on how they show the same data.
 
@@ -447,11 +447,11 @@ function emptyPanel(text) {
  * the substitute picker, for instance, whose form lives in 請假. */
 function showGameDetailTab(container, key) {
   if (!TAB_ORDER.some((t) => t.key === key)) return;
-  if (container.dataset) container.dataset.gdTab = key;
+  if (container.dataset) container.dataset.gdActiveTab = key;
   for (const panel of container.querySelectorAll("[data-gd-panel]")) {
     panel.hidden = panel.dataset.gdPanel !== key;
   }
-  for (const tab of container.querySelectorAll("[data-gd-tab]")) {
+  for (const tab of container.querySelectorAll("button[data-gd-tab]")) {
     const on = tab.dataset.gdTab === key;
     tab.classList.toggle("active", on);
     tab.setAttribute("aria-selected", String(on));
@@ -688,9 +688,9 @@ function renderGameDetail(container, season, game, options) {
   // Kept on the container, which outlives the innerHTML below. Without
   // it every action that repaints the sheet would throw you back to the
   // first tab — one of the "it jumps around" complaints.
-  const asked = container.dataset ? container.dataset.gdTab : null;
+  const asked = container.dataset ? container.dataset.gdActiveTab : null;
   const activeTab = TAB_ORDER.some((t) => t.key === asked) ? asked : "attending";
-  if (container.dataset) container.dataset.gdTab = activeTab;
+  if (container.dataset) container.dataset.gdActiveTab = activeTab;
 
   container.innerHTML = `
     ${renderGameHero(season, game, {
@@ -749,7 +749,15 @@ function renderGameDetail(container, season, game, options) {
     // Switching tabs shows a panel that is already built and already in
     // the document — no refetch, no re-render, nothing to flash. The
     // choice is stored on the container so the next repaint keeps it.
-    const tab = e.target.closest("[data-gd-tab]");
+    //
+    // `button[...]`, not a bare attribute selector: the container itself
+    // records the active tab, and it does so in a data attribute of its
+    // own. A bare [data-gd-tab] therefore walked all the way up from any
+    // button in the sheet and matched the container — so every 請假,
+    // 移除, 遞補 and 指定代打 tap was swallowed here as a tab switch and
+    // silently did nothing. The stored key is named apart from the tab
+    // buttons' as well, so the two can't collide again.
+    const tab = e.target.closest("button[data-gd-tab]");
     if (tab) {
       showGameDetailTab(container, tab.dataset.gdTab);
       return;
@@ -1148,9 +1156,17 @@ async function getJsonSWR(url, onData, options) {
   }
 }
 
+/** This club's people, kept for the life of the page. Declared here
+ * rather than beside fetchClubMembers so it is initialised before
+ * clearResponseCache can reach for it. */
+const _clubMemberCache = {};
+
 /** Drops every cached response. Called after anything that writes, so
  * the next page doesn't paint from a copy we just invalidated. */
 function clearResponseCache() {
+  // The in-memory club roster goes with them, or adding a guest would
+  // leave the substitute picker offering the list from before.
+  for (const key of Object.keys(_clubMemberCache)) delete _clubMemberCache[key];
   try {
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith(CACHE_PREFIX)) localStorage.removeItem(key);
@@ -1269,11 +1285,21 @@ async function deleteJson(apiBase, path) {
  * missing picker list should just fall back to the manual text input,
  * not break the page. */
 async function fetchClubMembers(apiBase, clubId) {
+  // Held for the life of the page, because every action ends in a
+  // reload and each reload was fetching this list again — a whole
+  // network round trip, on every tap, for a list that only changes when
+  // somebody joins the club. clearResponseCache() drops it, and that
+  // runs after every write, so a roster change is still picked up.
+  if (Object.prototype.hasOwnProperty.call(_clubMemberCache, clubId)) {
+    return _clubMemberCache[clubId];
+  }
   try {
     const res = await fetch(`${apiBase}/clubs/${clubId}/members`, {
       headers: authHeader(),
     });
-    return res.ok ? await res.json() : [];
+    const members = res.ok ? await res.json() : [];
+    if (res.ok) _clubMemberCache[clubId] = members;
+    return members;
   } catch (e) {
     console.warn("Could not load club members:", e);
     return [];
