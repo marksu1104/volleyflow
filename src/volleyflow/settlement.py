@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from volleyflow.attendance import Absence, DropIn
 from volleyflow.players import Player
-from volleyflow.pricing import member_season_fee, share_per_game
+from volleyflow.pricing import shares_by_game
 from volleyflow.schedule import Game, GameStatus, Season
 
 
@@ -56,6 +56,24 @@ class MemberSettlement:
         return self.refund - self.season_fee
 
 
+def season_shares(season: Season) -> dict[int, Decimal]:
+    """Each game's per-member share, keyed by game id.
+
+    One place computes this, and everything that touches money for a
+    single game goes through it — a member's fee, a drop-in's charge, an
+    absence refund. Games can cost different amounts once air
+    conditioning is modelled, so "the season's share" is no longer a
+    single number; see pricing.shares_by_game.
+    """
+    shares = shares_by_game(
+        season.total_venue_cost,
+        [game.air_conditioned for game in season.games],
+        season.member_count,
+        season.ac_surcharge,
+    )
+    return {game.id: share for game, share in zip(season.games, shares, strict=True)}
+
+
 def settle_member(
     player: Player,
     season: Season,
@@ -63,28 +81,35 @@ def settle_member(
     drop_ins: Sequence[DropIn],
 ) -> MemberSettlement:
     """A member's season fee and refund, ignoring CANCELLED_REFUNDED games."""
-    share = share_per_game(
-        season.total_venue_cost, season.total_games, season.member_count
-    )
-    fee = member_season_fee(share, season.billable_games)
+    shares = season_shares(season)
+    billable = [g for g in season.games if g.status != GameStatus.CANCELLED_REFUNDED]
 
-    billable = (g for g in season.games if g.status != GameStatus.CANCELLED_REFUNDED)
-    refunded_games = sum(
-        1
-        for game in billable
-        for absence in covered_absences(game, absences, drop_ins)
-        if absence.player == player
+    # The fee is the sum of the games they're being charged for, not a
+    # share times a count: with air conditioning the games differ, and a
+    # season where half the nights are cooled costs more than twice the
+    # cheap half.
+    fee = sum((shares[g.id] for g in billable), Decimal("0"))
+
+    refund = sum(
+        (
+            shares[game.id]
+            for game in billable
+            for absence in covered_absences(game, absences, drop_ins)
+            if absence.player == player
+        ),
+        Decimal("0"),
     )
 
-    return MemberSettlement(
-        player=player, season_fee=fee, refund=share * refunded_games
-    )
+    return MemberSettlement(player=player, season_fee=fee, refund=refund)
 
 
 def settle_drop_in(drop_in: DropIn, season: Season) -> Decimal:
-    """A drop-in's charge for the game they signed up for, 0 if cancelled."""
+    """A drop-in's charge for the game they signed up for, 0 if cancelled.
+
+    Priced at that game's own share: a night with the air conditioning
+    on costs the club more, and a drop-in on a cool night should not be
+    subsidising one on a hot one.
+    """
     if not drop_in.is_active:
         return Decimal("0")
-    return share_per_game(
-        season.total_venue_cost, season.total_games, season.member_count
-    )
+    return season_shares(season)[drop_in.game.id]
