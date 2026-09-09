@@ -283,7 +283,7 @@ async function initClubAndSeasonPickers(
  * than a label on purpose — a calendar cell on a phone is about 40px
  * across, and anything with words in it is unreadable at that size. */
 function renderMonthCalendar(container, games, onPick, opts) {
-  const { stateOf = () => "", selectedId = null } = opts || {};
+  const { stateOf = () => "", selectedId = null, awayLabel = "你請假" } = opts || {};
   const gamesByDate = {};
   for (const g of games) gamesByDate[g.date] = g;
 
@@ -320,7 +320,25 @@ function renderMonthCalendar(container, games, onPick, opts) {
       </div>
       <div class="mcal-grid mcal-weekdays"><div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div></div>
       <div class="mcal-grid">${cells}</div>
+      ${legendHtml()}
     `;
+  }
+
+  /** Only the states this season actually contains. A legend entry for
+   * "人數不足" on a season where every game is full is noise, and on a
+   * phone every row of it is a row of dates pushed off the screen. */
+  function legendHtml() {
+    const labels = { "": "有場次", short: "人數不足", full: "已滿", away: awayLabel };
+    const present = [];
+    for (const g of games) {
+      const st = stateOf(g);
+      if (!present.includes(st)) present.push(st);
+    }
+    if (present.length < 2) return ""; // one state everywhere explains itself
+    return `<div class="mcal-legend">${present
+      .sort((a, b) => Object.keys(labels).indexOf(a) - Object.keys(labels).indexOf(b))
+      .map((st) => `<span><i class="mcal-dot ${st}"></i>${labels[st]}</span>`)
+      .join("")}</div>`;
   }
 
   container.onclick = (e) => {

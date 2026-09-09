@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="shared.css">
 <style>
   body { font-family: var(--font-cjk); }
-  .hero-date, .count-big, .balance-value, .m-net { font-family: var(--font-num); }
+  .hero-date, .count-big, .balance-chip, .m-net { font-family: var(--font-num); }
   .name-row { display: flex; gap: 8px; margin-bottom: 14px; }
   .name-row input {
     flex: 1; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 9px;
@@ -45,7 +45,10 @@
     <input id="player-name" type="text" placeholder="你的名字（測試用，非 LINE 環境）">
   </div>
 
-  <select id="season-picker" class="season-picker" style="margin-bottom: 14px" hidden></select>
+  <div class="season-row">
+    <select id="season-picker" class="season-picker" hidden></select>
+    <button type="button" id="balance-chip" class="balance-chip" onclick="location.href='profile.html'" hidden></button>
+  </div>
   <div id="error"></div>
 
   <div id="intent-ask" hidden></div>
@@ -54,18 +57,6 @@
 
   <div class="section-label" id="cal-label" hidden>本季場次</div>
   <div id="month-cal" class="mcal" hidden></div>
-  <div class="mcal-legend" id="cal-legend" hidden>
-    <span><i class="mcal-dot"></i>有場次</span>
-    <span><i class="mcal-dot short"></i>人數不足</span>
-    <span><i class="mcal-dot full"></i>已滿</span>
-    <span><i class="mcal-dot away"></i>你請假</span>
-  </div>
-
-  <div class="section-label" id="balance-label" hidden>帳務</div>
-  <div id="balance-card" class="balance" hidden>
-    <span class="balance-label">本季餘額</span>
-    <span id="balance-value" class="balance-value"></span>
-  </div>
 
 </div>
 
@@ -293,10 +284,8 @@
     seasonSettled = true;
     document.getElementById("cal-label").hidden = true;
     document.getElementById("month-cal").hidden = true;
-    document.getElementById("cal-legend").hidden = true;
     document.getElementById("month-cal").innerHTML = "";
-    document.getElementById("balance-label").hidden = true;
-    document.getElementById("balance-card").hidden = true;
+    document.getElementById("balance-chip").hidden = true;
     document.getElementById("season-picker").hidden = true;
 
     const clubId = currentClubId();
@@ -627,8 +616,7 @@
       document.getElementById("season-picker").hidden = false;
       document.getElementById("cal-label").hidden = false;
       document.getElementById("month-cal").hidden = false;
-      document.getElementById("cal-legend").hidden = false;
-      renderIntentAsk();
+        renderIntentAsk();
       renderHero(season);
       renderCalendar();
       renderSelectedGameDetail();
@@ -1009,28 +997,27 @@
     }
   });
 
+  /** Your money, in the row that already says which season this is —
+   * the balance belongs to that season, and a section of its own at the
+   * bottom of the page cost about 80px, which was most of the reason a
+   * phone had to scroll to see the calendar at all. Tapping it opens
+   * the full ledger on the profile page. */
   async function renderBalance(season) {
-    const name = playerName();
-    const labelEl = document.getElementById("balance-label");
-    const card = document.getElementById("balance-card");
-    const member = season.members.find((m) => m.name === name);
+    const chip = document.getElementById("balance-chip");
+    const member = season.members.find((m) => m.name === playerName());
     if (!member) {
-      labelEl.hidden = true;
-      card.hidden = true;
+      chip.hidden = true;
       return;
     }
     const ledger = await fetch(
       `${API_BASE}/clubs/${currentClubId()}/players/${member.id}/ledger`,
       { headers: authHeader() }
     ).then((r) => r.json());
-    const value = document.getElementById("balance-value");
     const n = Number(ledger.balance);
-    value.textContent = n === 0 ? "已結清" : n > 0 ? `餘額 +$${ledger.balance}` : `應繳 $${Math.abs(n)}`;
-    value.className = "balance-value " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
-    labelEl.hidden = false;
-    card.hidden = false;
+    chip.textContent = n === 0 ? "已結清" : n > 0 ? `餘額 +$${ledger.balance}` : `應繳 $${Math.abs(n)}`;
+    chip.className = "balance-chip " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
+    chip.hidden = false;
   }
-
   /**
    * Applies the change to what's on screen straight away, then sends it.
    * A round trip to a sleepy free-tier backend is long enough that a tap
