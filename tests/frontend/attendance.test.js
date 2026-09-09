@@ -206,6 +206,90 @@ test("without a waitlist handler the queue shows no remove button", () => {
   assert.doesNotMatch(el.innerHTML, /data-remove-waitlist/);
 });
 
+test("the short actionable lists come before the full roster", () => {
+  // Found in a screenshot, not a test: with eighteen players on court,
+  // 遞補 sat below all of them. Everything you open this sheet to press
+  // has to be reachable without scrolling past the roster.
+  const { season, game } = fixture();
+  const el = makeElement();
+
+  renderGameDetail(el, season, game, {
+    viewerName: "蘇慬",
+    onLeaveWaitlist() {},
+    onPromoteFromWaitlist() {},
+  });
+
+  const at = (label) => el.innerHTML.indexOf(label);
+  assert.ok(at("候補（") < at("出席名單（"), "the queue is above the roster");
+  assert.ok(at("請假（") < at("出席名單（"), "so is the absence list");
+});
+
+test("only the organizer is offered 遞補 on a queued person", () => {
+  // Choosing who comes off the queue overrides the queue's own order,
+  // so it is the organizer's call and nobody else's — a member opening
+  // the same sheet must not see the button at all.
+  const { season, game } = fixture();
+  const asMember = makeElement();
+  const asOrganizer = makeElement();
+
+  renderGameDetail(asMember, season, game, { viewerName: "蘇慬", onLeaveWaitlist() {} });
+  renderGameDetail(asOrganizer, season, game, {
+    viewerName: "蘇慬",
+    onLeaveWaitlist() {},
+    onPromoteFromWaitlist() {},
+  });
+
+  assert.doesNotMatch(asMember.innerHTML, /data-promote-waitlist/);
+  assert.match(asOrganizer.innerHTML, /data-promote-waitlist="300"/);
+});
+
+test("遞補 and 移除 are separate ids on the same queued person", () => {
+  // Both controls sit on one row, and the two tables have overlapping
+  // id sequences — routing either through the other's handler acts on
+  // whoever happens to hold that number.
+  const { season, game } = fixture();
+  const el = makeElement();
+  renderGameDetail(el, season, game, {
+    viewerName: "蘇慬",
+    onLeaveWaitlist() {},
+    onPromoteFromWaitlist() {},
+    onRemoveDropIn() {},
+  });
+
+  assert.match(el.innerHTML, /data-promote-waitlist="300"/);
+  assert.match(el.innerHTML, /data-remove-waitlist="300"/);
+  assert.doesNotMatch(el.innerHTML, /data-remove-drop-in="300"/);
+});
+
+// acPill and isGameFull moved out of member.html so the organizer's
+// sheet reports the same facts about the same game.
+test("the air conditioning surcharge is per person, and only when it ran", () => {
+  const { acPill } = load();
+  const season = { ac_surcharge: "540", members: new Array(18) };
+
+  assert.match(acPill(season, { air_conditioned: true }), /\+\$30/);
+  assert.equal(acPill(season, { air_conditioned: false }), "");
+  assert.equal(
+    acPill({ ac_surcharge: "0", members: new Array(18) }, { air_conditioned: true }),
+    "",
+    "a season that doesn't charge for it says nothing"
+  );
+});
+
+test("a game is full when the people expected reach the cap", () => {
+  const { isGameFull } = load();
+  const season = { members: new Array(18), capacity: 18 };
+  const empty = { absences: [], confirmed_drop_ins: [] };
+
+  assert.equal(isGameFull(season, empty), true);
+  assert.equal(isGameFull(season, { absences: [{}], confirmed_drop_ins: [] }), false);
+  assert.equal(
+    isGameFull(season, { absences: [{}], confirmed_drop_ins: [{}] }),
+    true,
+    "a substitute fills the slot the absence opened"
+  );
+});
+
 test("every kind of row is built from the same slots", () => {
   // The rows came out visibly different heights next to each other. The
   // cause was the note: as a flex child of the row it was blockified, so

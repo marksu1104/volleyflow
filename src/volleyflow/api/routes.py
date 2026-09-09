@@ -78,6 +78,8 @@ from volleyflow.api.schemas import (
     SettlementOut,
     SubstituteCreate,
     WaitlistCancelOut,
+    WaitlistPromote,
+    WaitlistPromoteOut,
 )
 from volleyflow.db.models import (
     AbsenceRow,
@@ -589,27 +591,16 @@ def _record_drop_in_charge(
     )
 
 
-def _promote_from_waitlist(db: Session, game_id: int) -> int | None:
-    """Pull the earliest-queued waitlist entry into a confirmed drop-in,
-    charging them the same way a direct signup would be.
+def _promote_entry(db: Session, entry: WaitlistEntryRow) -> DropInRow:
+    """Turn one queued person into a confirmed drop-in, charged exactly
+    as a direct signup would be.
 
-    Returns the promoted player's id, or None if nobody was waiting. See
-    CLAUDE.md 2.3: "a member records an absence -> the waitlist is offered
-    the slot in order."
+    Shared by the automatic promotion below and the organizer's manual
+    one, so "what promoting somebody means" — including the ledger entry
+    — is written once and cannot drift between the two.
     """
-    entry = (
-        db.query(WaitlistEntryRow)
-        .filter(WaitlistEntryRow.game_id == game_id)
-        .order_by(WaitlistEntryRow.queued_at)
-        .first()
-    )
-    if entry is None:
-        return None
-
-    promoted_player_id: int = entry.player_id
-    drop_in = DropInRow(
-        player_id=promoted_player_id, game_id=game_id, signed_up_at=_now()
-    )
+    game_id = entry.game_id
+    drop_in = DropInRow(player_id=entry.player_id, game_id=game_id, signed_up_at=_now())
     db.add(drop_in)
     db.delete(entry)
 
@@ -619,7 +610,26 @@ def _promote_from_waitlist(db: Session, game_id: int) -> int | None:
     assert season_row is not None
     _record_drop_in_charge(db, drop_in, season_row, reverse=False)
 
-    return promoted_player_id
+    return drop_in
+
+
+def _promote_from_waitlist(db: Session, game_id: int) -> int | None:
+    """Pull the earliest-queued waitlist entry into a confirmed drop-in.
+
+    Returns the promoted player's id, or None if nobody was waiting. See
+    CLAUDE.md 2.3: "a member records an absence -> the waitlist is offered
+    the slot in order." Order is the rule here and stays the rule; the
+    organizer overrides it explicitly through promote_from_waitlist.
+    """
+    entry = (
+        db.query(WaitlistEntryRow)
+        .filter(WaitlistEntryRow.game_id == game_id)
+        .order_by(WaitlistEntryRow.queued_at)
+        .first()
+    )
+    if entry is None:
+        return None
+    return _promote_entry(db, entry).player_id
 
 
 def _gather_member_settlements(
@@ -2247,6 +2257,75 @@ def leave_waitlist(
     db.delete(entry)
     db.commit()
     return WaitlistCancelOut(id=entry_id, player_id=player_id, game_id=game.id)
+
+
+@router.post("/waitlist/{entry_id}/promote", response_model=WaitlistPromoteOut)
+def promote_from_waitlist(
+    entry_id: int,
+    payload: WaitlistPromote,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> WaitlistPromoteOut:
+    """Put a specific queued person on the court. Organizer only.
+
+    The queue's order decides who gets a slot that opens by itself. It
+    can't decide who *should* play, because it doesn't know that the
+    first person in it is away this week — the organizer does, usually
+    from a message in the group chat. Without this the only way to act
+    on that was to cancel people one at a time until the automatic
+    promotion happened to land on the right person, charging and
+    refunding everyone it stepped through on the way.
+
+    The capacity cap still holds: with the game full, bringing somebody
+    in means naming who comes out, and both happen in this one
+    transaction.
+    """
+    entry = db.get(WaitlistEntryRow, entry_id)
+    if entry is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"No waitlist entry with id {entry_id}"
+        )
+    # Locks the game for the rest of the transaction, so the slot this
+    # decision is based on can't be taken by a concurrent signup.
+    game = _get_game_or_404(db, entry.game_id)
+    season = db.get(SeasonRow, game.season_id)
+    assert season is not None  # game.season_id is a foreign key, always valid
+    _require_organizer(db, season.club_id, current_player)
+
+    replaced_player_id: int | None = None
+    if payload.replacing_drop_in_id is not None:
+        replaced = db.get(DropInRow, payload.replacing_drop_in_id)
+        if replaced is None or replaced.game_id != game.id:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                f"No drop-in with id {payload.replacing_drop_in_id} in this game",
+            )
+        if replaced.cancelled_at is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Already cancelled")
+        replaced_player_id = replaced.player_id
+        replaced.cancelled_at = _now()
+        _record_drop_in_charge(db, replaced, season, reverse=True)
+        # Deliberately not _promote_from_waitlist here: that is the rule
+        # for a slot opening on its own, and this slot is already spoken
+        # for. Running it would put the queue's first person in the seat
+        # the organizer just chose somebody else for.
+    elif not _has_open_slot(db, game, season):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"This game is full ({season.capacity}). "
+            "Name who comes out, or raise the capacity first.",
+        )
+
+    drop_in = _promote_entry(db, entry)
+    db.commit()
+    db.refresh(drop_in)
+
+    return WaitlistPromoteOut(
+        player_id=drop_in.player_id,
+        game_id=game.id,
+        drop_in_id=drop_in.id,
+        replaced_player_id=replaced_player_id,
+    )
 
 
 @router.post("/drop-ins/{drop_in_id}/cancel", response_model=DropInCancelOut)

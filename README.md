@@ -118,9 +118,9 @@ a real person's ledger. See `tests/test_auth.py`.
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
-uv run pytest -q               # 313 tests
+uv run pytest -q               # 321 tests
 uv run lint-imports            # billing logic must not import the database
-node --test tests/frontend/*.test.js   # 113 frontend tests
+node --test tests/frontend/*.test.js   # 118 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
 ```
 

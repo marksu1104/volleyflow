@@ -246,6 +246,35 @@ class WaitlistCancelOut(BaseModel):
     game_id: int
 
 
+class WaitlistPromote(BaseModel):
+    """The organizer putting a specific queued person on the court.
+
+    Automatic promotion is strictly first-queued-first (CLAUDE.md 2.3),
+    and stays that way. This is the manual override, because the person
+    at the front of the queue is often the one who can't make it
+    tonight — the organizer knows that and the queue doesn't.
+
+    `replacing_drop_in_id` is what makes the choice possible without
+    breaking the capacity cap. Once a game is full the only way to bring
+    somebody in is to take somebody out, and doing that as two requests
+    means the cancellation's own automatic promotion fills the slot with
+    the wrong person first: each of those is a real charge and a real
+    refund on somebody's ledger. One request swaps them directly, so the
+    only money that moves belongs to the two people actually swapping.
+    """
+
+    replacing_drop_in_id: int | None = None
+
+
+class WaitlistPromoteOut(BaseModel):
+    player_id: int
+    """Who is now on the court."""
+    game_id: int
+    drop_in_id: int
+    replaced_player_id: int | None = None
+    """Who came off to make room, when this was a swap."""
+
+
 class DropInCancelOut(BaseModel):
     id: int
     cancelled_at: datetime
