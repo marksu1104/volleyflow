@@ -125,7 +125,10 @@
     document.getElementById("hero-wrap").onclick = null;
   }
 
+  const dashboardLoad = staleGuard();
+
   async function loadDashboard(seasonId) {
+    const ticket = dashboardLoad.take();
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
     try {
@@ -138,6 +141,11 @@
     }
 
     function render(season) {
+      if (!dashboardLoad.current(ticket)) return;
+      // Same reasoning as the member page: every action here ends in a
+      // reload, and redrawing data that hasn't changed costs a frame and
+      // reads as a stutter a second after the tap already worked.
+      if (currentSeason && JSON.stringify(season) === JSON.stringify(currentSeason)) return;
       const isNewSeason = !currentSeason || currentSeason.id !== season.id;
       currentSeason = season;
       // Keep whatever game was selected across a reload — only reset to

@@ -635,6 +635,14 @@
 
     function render(season) {
       if (!seasonLoad.current(ticket)) return;
+      // Nothing has changed since the last paint — which is the normal
+      // case right after an optimistic update that the server agreed
+      // with. Redrawing identical data is invisible work that isn't
+      // invisible: it costs a frame and reads as a stutter.
+      if (currentSeason && JSON.stringify(season) === JSON.stringify(currentSeason)) {
+        seasonSettled = true;
+        return;
+      }
       const isNewSeason = !currentSeason || currentSeason.id !== season.id;
       currentSeason = season;
       seasonSettled = true;
@@ -1195,12 +1203,18 @@
     renderSelectedGameDetail();
   }
 
-  async function optimistically(mutateLocally, request, failureMessage) {
+  async function optimistically(mutateLocally, request, failureMessage, reconcile) {
     const snapshot = JSON.parse(JSON.stringify(currentSeason));
     mutateLocally(currentSeason);
     repaintGame();
     try {
-      await request();
+      const result = await request();
+      // Fold the server's own ids into what's already on screen. Without
+      // this the refresh below always found a difference — the
+      // placeholder id — and redrew the hero, the calendar and the
+      // roster a second after the tap had already visibly worked, which
+      // is the stutter that made a working action feel broken.
+      if (reconcile) reconcile(result, currentSeason);
       loadSeason(currentSeasonId);
     } catch (e) {
       currentSeason = snapshot;
@@ -1220,7 +1234,16 @@
         game.absences.push({ id: -1, player_name: name, covered_by: null });
       },
       () => postJson(API_BASE, "/absences", { player_name: name, game_id: gameId }),
-      "請假失敗："
+      "請假失敗：",
+      (result, season) => {
+        // A promotion off the waitlist changes people we can't invent
+        // here, so leave the placeholder in place and let the refresh
+        // find the difference and redraw.
+        if (result.promoted_from_waitlist) return;
+        for (const game of season.games) {
+          for (const a of game.absences) if (a.id === -1) a.id = result.id;
+        }
+      }
     );
   }
 
