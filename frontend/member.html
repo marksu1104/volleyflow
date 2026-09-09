@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="shared.css">
 <style>
   body { font-family: var(--font-cjk); }
-  .hero-date, .count-big, .balance-chip, .m-net { font-family: var(--font-num); }
+  .hero-date, .count-big, .bc-value, .m-net { font-family: var(--font-num); }
   .name-row { display: flex; gap: 8px; margin-bottom: 14px; }
   .name-row input {
     flex: 1; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 9px;
@@ -626,7 +626,7 @@
         clubMembers = m;
         renderSelectedGameDetail();
       });
-      renderBalance(season);
+      renderBalance();
     }
   }
 
@@ -997,25 +997,43 @@
     }
   });
 
-  /** Your money, in the row that already says which season this is —
-   * the balance belongs to that season, and a section of its own at the
-   * bottom of the page cost about 80px, which was most of the reason a
-   * phone had to scroll to see the calendar at all. Tapping it opens
-   * the full ledger on the profile page. */
-  async function renderBalance(season) {
+  /** Your money, in the row that already names the season — a section
+   * of its own at the bottom cost about 80px, which was most of the
+   * reason a phone had to scroll to reach the calendar.
+   *
+   * Two lines, because "已結清" on its own says nothing: the value needs
+   * to say what it is the value *of*. And the label is deliberately not
+   * 「本季」 — get_player_ledger spans every season in the club (a
+   * refund can be carried into next season, CLAUDE.md 2.4), so calling
+   * a cross-season figure "this season's" was simply wrong, which the
+   * old 本季餘額 card was.
+   *
+   * Keyed off the viewer's own player id rather than the season roster:
+   * a drop-in has a balance too, and looking them up in season.members
+   * meant the one group who pays cash on the day could never see what
+   * they owed. */
+  async function renderBalance() {
     const chip = document.getElementById("balance-chip");
-    const member = season.members.find((m) => m.name === playerName());
-    if (!member) {
+    if (!myPlayerId || !currentClubId()) {
       chip.hidden = true;
       return;
     }
-    const ledger = await fetch(
-      `${API_BASE}/clubs/${currentClubId()}/players/${member.id}/ledger`,
+    const res = await fetch(
+      `${API_BASE}/clubs/${currentClubId()}/players/${myPlayerId}/ledger`,
       { headers: authHeader() }
-    ).then((r) => r.json());
-    const n = Number(ledger.balance);
-    chip.textContent = n === 0 ? "已結清" : n > 0 ? `餘額 +$${ledger.balance}` : `應繳 $${Math.abs(n)}`;
-    chip.className = "balance-chip " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
+    );
+    if (!res.ok) {
+      chip.hidden = true;
+      return;
+    }
+    const n = Number((await res.json()).balance);
+    const state = n === 0 ? "even" : n > 0 ? "owed" : "owe";
+    chip.innerHTML = `
+      <span class="bc-label">我的帳務</span>
+      <span class="bc-value">${
+        n === 0 ? "已結清" : n > 0 ? `+$${n}` : `應繳 $${Math.abs(n)}`
+      } ›</span>`;
+    chip.className = "balance-chip " + state;
     chip.hidden = false;
   }
   /**

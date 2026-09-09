@@ -763,12 +763,27 @@ textarea {
    number. It sits in the season row instead: that row already says
    which season this is, and the balance belongs to that season. */
 .season-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.season-row .season-picker { flex: 1; min-width: 0; margin: 0; }
+.season-row .season-picker { flex: 1; min-width: 0; margin: 0; text-overflow: ellipsis; }
+/* Two lines so the value has something to be the value *of* — 已結清
+   on its own says nothing, and that is the state most members are in
+   most of the time. Same height as the picker beside it, so saying more
+   costs no space at all. */
 .balance-chip {
-  flex: none; border: 1px solid var(--rule); border-radius: 20px; padding: 8px 13px;
-  background: var(--surface); font-size: .82rem; font-weight: 700; cursor: pointer;
-  white-space: nowrap; color: var(--ink-soft); font-variant-numeric: tabular-nums;
+  flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  border: 1px solid var(--rule); border-radius: 11px; padding: 6px 11px;
+  background: var(--surface); cursor: pointer; font-family: var(--font-cjk);
+  text-align: left; line-height: 1.25;
 }
-.balance-chip.owe { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
-.balance-chip.owed { background: var(--good-soft); color: var(--good); border-color: transparent; }
+.balance-chip .bc-label { font-size: .62rem; font-weight: 600; color: var(--ink-faint); }
+.balance-chip .bc-value {
+  font-size: .86rem; font-weight: 800; color: var(--ink);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.balance-chip.owe { background: var(--bad-soft); border-color: transparent; }
+.balance-chip.owe .bc-value { color: var(--bad); }
+.balance-chip.owe .bc-label { color: var(--bad); opacity: .75; }
+.balance-chip.owed { background: var(--good-soft); border-color: transparent; }
+.balance-chip.owed .bc-value { color: var(--good); }
+.balance-chip.owed .bc-label { color: var(--good); opacity: .75; }
 .balance-chip.even { background: var(--surface-2); border-color: transparent; }
+.balance-chip.even .bc-value { color: var(--ink-soft); }
