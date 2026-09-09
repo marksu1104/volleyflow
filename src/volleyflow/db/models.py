@@ -128,6 +128,9 @@ class SeasonRow(Base):
             "change_deadline_days >= 0",
             name="ck_seasons_change_deadline_non_negative",
         ),
+        CheckConstraint(
+            "ac_surcharge >= 0", name="ck_seasons_ac_surcharge_non_negative"
+        ),
         Index("ix_seasons_club_id", "club_id"),
     )
 
@@ -138,6 +141,19 @@ class SeasonRow(Base):
     through this foreign key chain rather than storing their own
     club_id."""
     total_venue_cost: Mapped[Decimal] = mapped_column(Numeric(10, 0))
+    """What the club actually pays the venue for the whole season,
+    discounts and all. Stays authoritative: the air-conditioning portion
+    is taken *out* of this figure rather than added on top, so this is
+    always the number the organizer transferred."""
+    ac_surcharge: Mapped[Decimal] = mapped_column(Numeric(10, 0), default=Decimal("0"))
+    """What one game's air conditioning adds to the venue bill.
+
+    Every venue's AC pricing reduces to this: bundled venues charge 0
+    (the default, which makes every game cost the same and the whole
+    calculation identical to what it was before), venues with a higher
+    hourly rate when the AC is on charge the difference times the hours,
+    venues billing a flat AC fee charge that. See
+    pricing.shares_by_game."""
     capacity: Mapped[int] = mapped_column(default=18)
     minimum_roster: Mapped[int] = mapped_column(default=12)
     """Below this expected attendance, the organizer gets a short-roster
@@ -183,6 +199,14 @@ class GameRow(Base):
     status: Mapped[GameStatus] = mapped_column(
         Enum(GameStatus, name="game_status"), default=GameStatus.SCHEDULED
     )
+    air_conditioned: Mapped[bool] = mapped_column(default=False)
+    """Whether the air conditioning ran for this game.
+
+    Set from a forecast when the season is created and corrected on the
+    day — whether it actually runs is decided that evening, not when the
+    season is booked. Flipping it moves the season's total venue cost by
+    ac_surcharge and re-syncs every member's charge; see
+    routes.set_game_air_conditioning."""
 
 
 class AbsenceRow(Base):

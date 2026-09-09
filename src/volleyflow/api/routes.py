@@ -38,6 +38,7 @@ from volleyflow.api.schemas import (
     AbsenceCreate,
     AbsenceDetailOut,
     AbsenceOut,
+    AirConditioningUpdate,
     ClubCreate,
     ClubMemberOut,
     ClubOut,
@@ -95,7 +96,12 @@ from volleyflow.ledger import EntryType, balance
 from volleyflow.notify.line_client import push_image_to_user, push_to_user
 from volleyflow.pricing import share_per_game
 from volleyflow.schedule import GameStatus
-from volleyflow.settlement import MemberSettlement, covered_absences, settle_member
+from volleyflow.settlement import (
+    MemberSettlement,
+    covered_absences,
+    season_shares,
+    settle_member,
+)
 
 router = APIRouter()
 
@@ -532,14 +538,29 @@ def _is_absence_covered(db: Session, absence_row: AbsenceRow) -> bool:
     return absences_by_id[absence_row.id] in covered
 
 
-def _drop_in_share(db: Session, season_row: SeasonRow) -> Decimal:
-    total_games = db.query(GameRow).filter(GameRow.season_id == season_row.id).count()
-    member_count = (
-        db.query(SeasonMemberRow)
-        .filter(SeasonMemberRow.season_id == season_row.id)
-        .count()
+def _drop_in_share(db: Session, season_row: SeasonRow, game_id: int) -> Decimal:
+    """What one game costs one person.
+
+    Takes a game id rather than just the season because games no longer
+    all cost the same: a night with the air conditioning on costs the
+    club more, and a drop-in should pay for the night they actually turn
+    up to. With ac_surcharge at 0 every game returns the same figure,
+    which is what it always did.
+    """
+    game_rows = (
+        db.query(GameRow)
+        .filter(GameRow.season_id == season_row.id)
+        .order_by(GameRow.id)
+        .all()
     )
-    return share_per_game(season_row.total_venue_cost, total_games, member_count)
+    member_rows = (
+        db.query(PlayerRow)
+        .join(SeasonMemberRow, SeasonMemberRow.player_id == PlayerRow.id)
+        .filter(SeasonMemberRow.season_id == season_row.id)
+        .all()
+    )
+    season = season_from_rows(season_row, game_rows, member_rows)
+    return season_shares(season)[game_id]
 
 
 def _record_drop_in_charge(
@@ -550,7 +571,7 @@ def _record_drop_in_charge(
     the moment they cancel. See CLAUDE.md 2.4: "A DropIn pays the per-game
     share, collected by the organizer."
     """
-    share = _drop_in_share(db, season_row)
+    share = _drop_in_share(db, season_row, drop_in.game_id)
     db.add(
         LedgerEntryRow(
             player_id=drop_in.player_id,
@@ -1451,6 +1472,58 @@ def cancel_game(
     return GameOut(id=game.id, date=game.date, status=game.status)
 
 
+@router.put("/games/{game_id}/air-conditioning", response_model=GameOut)
+def set_game_air_conditioning(
+    game_id: int,
+    payload: AirConditioningUpdate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> GameOut:
+    """Record whether the air conditioning actually ran for this game.
+
+    Which nights get cooled is a forecast when the season is booked and
+    a fact on the evening itself, so this is the one season parameter
+    that is expected to change mid-season. Flipping it moves the club's
+    real bill by `ac_surcharge` — the venue charges for the AC it ran —
+    so `total_venue_cost` moves with it, and every member's charge is
+    corrected by an adjustment entry rather than by editing what they
+    were originally charged. Same machinery as changing the venue cost
+    by hand; see _sync_season_fee_ledger and CLAUDE.md 2.4.
+
+    A drop-in already charged for this game keeps the amount they were
+    charged. They pay the organizer in cash on the night, and chasing
+    someone for another $35 — or handing it back — because the AC
+    decision changed is worse than the small unfairness of leaving it.
+    The members absorb the difference, which is what the season fee is
+    for.
+    """
+    game = _get_game_or_404(db, game_id)
+    season = db.get(SeasonRow, game.season_id)
+    assert season is not None  # game.season_id is a foreign key, always valid
+    _require_organizer(db, season.club_id, current_player)
+    if season.settled_at is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is already settled")
+
+    if game.air_conditioned == payload.air_conditioned:
+        return GameOut(id=game.id, date=game.date, status=game.status)
+
+    delta = season.ac_surcharge if payload.air_conditioned else -season.ac_surcharge
+    if season.total_venue_cost + delta < 0:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "That would make the season's venue cost negative — "
+            "check the air-conditioning surcharge",
+        )
+
+    game.air_conditioned = payload.air_conditioned
+    season.total_venue_cost += delta
+    db.flush()
+    _sync_season_fee_ledger(db, season)
+    db.commit()
+    db.refresh(game)
+    return GameOut(id=game.id, date=game.date, status=game.status)
+
+
 @router.post("/seasons/{season_id}/members", response_model=MemberOut)
 def add_member(
     season_id: int,
@@ -1669,6 +1742,11 @@ def get_season(
             )
         )
 
+    # One place computes what each game costs a person; the games below
+    # and the drop-in charges elsewhere both read from it, so they can't
+    # disagree. See settlement.season_shares.
+    shares = season_shares(season_from_rows(season_row, game_rows, member_rows))
+
     games = []
     for game in game_rows:
         # (absence_id, name) pairs, FIFO order
@@ -1712,6 +1790,8 @@ def get_season(
                 id=game.id,
                 date=game.date,
                 status=game.status,
+                air_conditioned=game.air_conditioned,
+                share=shares[game.id],
                 locked=not (
                     viewer_is_organizer or _within_change_deadline(game, season_row)
                 ),
@@ -1744,9 +1824,16 @@ def get_season(
         game_end_time=season_row.game_end_time,
         location=season_row.location,
         change_deadline_days=season_row.change_deadline_days,
+        # The headline figure a season is described by: what one game
+        # costs one person before any air conditioning. Each game carries
+        # its own share above, because a cooled night costs more.
         share_per_game=share_per_game(
-            season_row.total_venue_cost, len(game_rows), len(member_rows)
+            season_row.total_venue_cost
+            - season_row.ac_surcharge * sum(1 for g in game_rows if g.air_conditioned),
+            len(game_rows),
+            len(member_rows),
         ),
+        ac_surcharge=season_row.ac_surcharge,
         settled_at=season_row.settled_at,
         members=[
             MemberOut(

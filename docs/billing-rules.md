@@ -23,17 +23,73 @@ full project vocabulary; this table covers only the billing-specific ones.
 ## Core formula
 
 ```
+ac_total   = ac_surcharge * (games with the air conditioning on)
+base_each  = (total_venue_cost - ac_total) / total_games
+share(g)   = ceil((base_each + (ac_surcharge if g is cooled else 0)) / member_count)
+```
+
+Rounded up to whole dollars, once per game's share, and nowhere else.
+Every other amount is one of those shares:
+
+```
+member_season_fee = sum of share(g) over their billable games
+drop_in_fee       = share(the game they signed up for)
+absence_refund    = share(the game they missed)   # per covered absence
+```
+
+With `ac_surcharge` at zero — the default, and what every venue that
+bundles air conditioning into its rate charges — every game's share is
+identical and the whole thing collapses to the original single formula:
+
+```
 share_per_game = ceil(total_venue_cost / total_games / member_count)
 ```
 
-Rounded up to whole dollars. This is the only rounding in the system.
-Every other amount is a multiple of it:
+### Air conditioning
+
+Games do not all cost the same. A night with the air conditioning on
+costs the club `ac_surcharge` more than one without, so splitting the
+season total evenly across every game would make a drop-in on a cool
+night subsidise the hot ones, and would refund an absence from an
+expensive game at a cheap game's rate.
+
+`ac_surcharge` is **per game, not per person**. The venue charges the
+same for the air conditioning whether twelve people or eighteen turn up,
+so a roster change has to move what each of them pays for it — which it
+does, because the division by `member_count` happens after.
+
+`total_venue_cost` stays authoritative: it is what the club actually
+transfers, discounts included, so the air-conditioning portion is taken
+*out* of it rather than added on top.
+
+Worked example, from this club's own invoice:
 
 ```
-member_season_fee = share_per_game * billable_games
-drop_in_fee        = share_per_game
-absence_refund     = share_per_game      # per covered absence
+13 games, 8 of them cooled, 18 members
+list price 66595, special discount 14305, transferred 52290
+air conditioning quoted separately at 180/hour x 3 hours = 540 a night,
+  and NOT covered by the discount
+
+ac_total  = 540 x 8                  = 4320
+base_each = (52290 - 4320) / 13      = 3690
+cooled    = ceil((3690 + 540) / 18)  = 235
+plain     = ceil(3690 / 18)          = 205
+collected = (235 x 8 + 205 x 5) x 18 = 52290   exactly, no surplus
 ```
+
+Whether a given night is cooled is a **forecast** when the season is
+booked and a **fact** on the evening itself. It is therefore the one
+season parameter expected to change mid-season: flipping it moves
+`total_venue_cost` by `ac_surcharge` (the venue bills for the air
+conditioning it ran) and corrects every member's charge with an
+adjustment entry — never by editing what they were already charged. See
+"Keeping the charge in sync when the inputs change" below.
+
+A drop-in already charged for that game keeps the amount they were
+charged. They pay the organizer in cash on the night, and chasing
+someone for another $30 — or handing it back — because the forecast was
+wrong costs more goodwill than the difference is worth. The members
+absorb it, which is what a season fee is for.
 
 ### Why rounding happens exactly once
 

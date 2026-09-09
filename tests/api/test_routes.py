@@ -1,10 +1,12 @@
 """Tests for the API routes."""
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tests.api.factories import auth_headers, create_club, identify
@@ -2958,3 +2960,112 @@ def test_the_organizer_of_a_club_is_told_so(client: TestClient) -> None:
     club = create_club(client, "我開的")
     clubs = client.get("/clubs").json()
     assert [c["role"] for c in clubs if c["id"] == club["id"]] == ["organizer"]
+
+
+def test_turning_the_air_conditioning_off_refunds_every_member(
+    client: TestClient, db_session: Session
+) -> None:
+    # The whole point of the feature: which nights are cooled is a
+    # forecast when the season is booked and a fact on the evening.
+    season = _start_season(
+        client,
+        total_venue_cost="10000",
+        game_dates=["2026-08-04", "2026-08-11"],
+        member_names=["Alice", "Bob"],
+    )
+    season_id, game_id = season["id"], season["games"][0]["id"]
+    club_id = season["club_id"]
+    db_session.execute(
+        text("UPDATE seasons SET ac_surcharge = 1000 WHERE id = :s"), {"s": season_id}
+    )
+    client.put(f"/games/{game_id}/air-conditioning", json={"air_conditioned": True})
+
+    alice = client.get(f"/seasons/{season_id}").json()["members"][0]["id"]
+    before = Decimal(
+        client.get(f"/clubs/{club_id}/players/{alice}/ledger").json()["balance"]
+    )
+
+    client.put(f"/games/{game_id}/air-conditioning", json={"air_conditioned": False})
+
+    after = Decimal(
+        client.get(f"/clubs/{club_id}/players/{alice}/ledger").json()["balance"]
+    )
+    assert after > before, "turning it off must give money back, not take more"
+
+
+def test_the_air_conditioning_correction_is_an_adjustment_not_an_edit(
+    client: TestClient, db_session: Session
+) -> None:
+    # CLAUDE.md 2.4: never edit what someone was already charged.
+    season = _start_season(
+        client,
+        total_venue_cost="10000",
+        game_dates=["2026-08-04", "2026-08-11"],
+        member_names=["Alice"],
+    )
+    season_id, game_id = season["id"], season["games"][0]["id"]
+    club_id = season["club_id"]
+    db_session.execute(
+        text("UPDATE seasons SET ac_surcharge = 1000 WHERE id = :s"), {"s": season_id}
+    )
+    alice = client.get(f"/seasons/{season_id}").json()["members"][0]["id"]
+    before = len(
+        client.get(f"/clubs/{club_id}/players/{alice}/ledger").json()["entries"]
+    )
+
+    client.put(f"/games/{game_id}/air-conditioning", json={"air_conditioned": True})
+
+    entries = client.get(f"/clubs/{club_id}/players/{alice}/ledger").json()["entries"]
+    assert len(entries) == before + 1, "a new entry, not a changed one"
+
+
+def test_setting_the_air_conditioning_to_what_it_already_is_changes_nothing(
+    client: TestClient, db_session: Session
+) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    season_id, game_id = season["id"], season["games"][0]["id"]
+    club_id = season["club_id"]
+    db_session.execute(
+        text("UPDATE seasons SET ac_surcharge = 500 WHERE id = :s"), {"s": season_id}
+    )
+    alice = client.get(f"/seasons/{season_id}").json()["members"][0]["id"]
+    before = client.get(f"/clubs/{club_id}/players/{alice}/ledger").json()
+
+    client.put(f"/games/{game_id}/air-conditioning", json={"air_conditioned": False})
+
+    after = client.get(f"/clubs/{club_id}/players/{alice}/ledger").json()
+    assert after == before, "a no-op write must not write a zero adjustment"
+
+
+def test_a_member_cannot_change_the_air_conditioning(client: TestClient) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    game_id = season["games"][0]["id"]
+    carol = identify(client, "Carol")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+    )
+
+    response = client.put(
+        f"/games/{game_id}/air-conditioning",
+        json={"air_conditioned": True},
+        headers=auth_headers(carol["token"]),
+    )
+
+    assert response.status_code == 403
+
+
+def test_the_air_conditioning_cannot_be_changed_after_settling(
+    client: TestClient, db_session: Session
+) -> None:
+    season = _start_season(client, member_names=["Alice"])
+    season_id, game_id = season["id"], season["games"][0]["id"]
+    db_session.execute(
+        text("UPDATE seasons SET ac_surcharge = 500 WHERE id = :s"), {"s": season_id}
+    )
+    client.post(f"/seasons/{season_id}/settle")
+
+    response = client.put(
+        f"/games/{game_id}/air-conditioning", json={"air_conditioned": True}
+    )
+
+    assert response.status_code == 400
