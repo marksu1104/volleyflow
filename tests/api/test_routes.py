@@ -1023,7 +1023,11 @@ def test_list_clubs_returns_all_clubs(client: TestClient) -> None:
     response = client.get("/clubs")
 
     assert response.status_code == 200
-    assert {"id": club["id"], "name": "Tuesday Volleyball"} in response.json()
+    assert {
+        "id": club["id"],
+        "name": "Tuesday Volleyball",
+        "role": "organizer",
+    } in response.json()
 
 
 def test_list_club_members_shows_roles(client: TestClient) -> None:
@@ -2081,7 +2085,13 @@ def test_an_invite_link_can_name_a_club_you_have_not_joined(
     )
 
     assert response.status_code == 200
-    assert response.json() == {"id": club["id"], "name": "啪排郎"}
+    # role is null here on purpose: this is the invite-link name lookup,
+    # and the caller has no role in the club by definition.
+    assert response.json() == {
+        "id": club["id"],
+        "name": "啪排郎",
+        "role": None,
+    }
 
 
 # --- deleting things -----------------------------------------------------
@@ -2924,3 +2934,27 @@ def test_a_waitlist_id_cannot_cancel_someone_elses_drop_in(client: TestClient) -
     assert [d["player_id"] for d in game["confirmed_drop_ins"]] == [
         confirmed["player_id"]
     ], "the confirmed signup must be untouched"
+
+
+def test_the_club_list_says_your_role_in_each(client: TestClient) -> None:
+    # Without this the management pages' club picker offered every club
+    # the caller belongs to, putting a management screen in front of an
+    # ordinary member of somebody else's club.
+    mine = create_club(client, "我開的")
+    other = create_club(client, "別人開的")  # resets client to a new organizer
+    carol = identify(client, "Carol")
+    client.post(f"/clubs/{mine['id']}/join", headers=auth_headers(carol["token"]))
+    client.post(f"/clubs/{other['id']}/join", headers=auth_headers(carol["token"]))
+
+    clubs = client.get("/clubs", headers=auth_headers(carol["token"])).json()
+
+    assert {c["name"]: c["role"] for c in clubs} == {
+        "我開的": "member",
+        "別人開的": "member",
+    }
+
+
+def test_the_organizer_of_a_club_is_told_so(client: TestClient) -> None:
+    club = create_club(client, "我開的")
+    clubs = client.get("/clubs").json()
+    assert [c["role"] for c in clubs if c["id"] == club["id"]] == ["organizer"]

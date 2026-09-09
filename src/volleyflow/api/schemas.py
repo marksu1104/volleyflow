@@ -29,6 +29,15 @@ class ClubCreate(BaseModel):
 class ClubOut(BaseModel):
     id: int
     name: str
+    role: str | None = None
+    """The caller's role in this club — "organizer" or "member".
+
+    Carried so the management pages can list only the clubs the caller
+    actually organizes. Without it their club picker offered every club
+    they merely belong to, which put a management screen in front of an
+    ordinary member. None on GET /clubs/{id}, the invite-link name
+    lookup, where the caller has no role yet by definition.
+    """
 
 
 class MyClubOut(BaseModel):

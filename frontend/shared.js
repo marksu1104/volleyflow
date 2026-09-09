@@ -167,7 +167,8 @@ async function initClubAndSeasonPickers(
   seasonEl,
   seasonStorageKey,
   onSeasonChange,
-  onError
+  onError,
+  clubFilter
 ) {
   // Without this, a failed fetch (offline, CORS, a backend that never
   // woke up) rejected an un-awaited promise and the page just sat there
@@ -190,7 +191,14 @@ async function initClubAndSeasonPickers(
     // Callers must resolve identity (initLiffIdentity) before starting
     // the pickers, or authHeader() is empty and the server says 401.
     await getJsonSWR(`${apiBase}/clubs`, (clubs, meta) => {
-      applyClubs(clubs, meta).catch((e) => {
+      // GET /clubs returns every club the caller belongs to, in any
+      // role. The management pages pass a filter so a club you are
+      // merely a member of never appears in their picker — it used to,
+      // which put a whole management surface in front of an ordinary
+      // member. The server refuses the writes either way; this stops
+      // the app from offering them.
+      const visible = clubFilter ? clubs.filter(clubFilter) : clubs;
+      applyClubs(visible, meta).catch((e) => {
         console.error("Could not load seasons:", e);
         if (onError) onError(e);
       });
