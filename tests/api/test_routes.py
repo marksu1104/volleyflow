@@ -1023,7 +1023,11 @@ def test_list_clubs_returns_all_clubs(client: TestClient) -> None:
     response = client.get("/clubs")
 
     assert response.status_code == 200
-    assert {"id": club["id"], "name": "Tuesday Volleyball"} in response.json()
+    assert {
+        "id": club["id"],
+        "name": "Tuesday Volleyball",
+        "role": "organizer",
+    } in response.json()
 
 
 def test_list_club_members_shows_roles(client: TestClient) -> None:
@@ -2081,7 +2085,13 @@ def test_an_invite_link_can_name_a_club_you_have_not_joined(
     )
 
     assert response.status_code == 200
-    assert response.json() == {"id": club["id"], "name": "啪排郎"}
+    # role is null here on purpose: this is the invite-link name lookup,
+    # and the caller has no role in the club by definition.
+    assert response.json() == {
+        "id": club["id"],
+        "name": "啪排郎",
+        "role": None,
+    }
 
 
 # --- deleting things -----------------------------------------------------
