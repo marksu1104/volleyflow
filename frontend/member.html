@@ -773,9 +773,12 @@
    * picker actually is instead of on a list to hunt through. */
   function openSubstitutePicker(absenceId) {
     openGameSheet();
-    const form = document
-      .getElementById("game-detail")
-      .querySelector(`[data-sub-form="${absenceId}"]`);
+    const detail = document.getElementById("game-detail");
+    // The form lives among the absences, so the sheet has to be showing
+    // that group before it can be scrolled to — otherwise 指定代打 on
+    // the card opened a sheet that looked like it had ignored the tap.
+    showGameDetailTab(detail, "absent");
+    const form = detail.querySelector(`[data-sub-form="${absenceId}"]`);
     if (form) {
       form.hidden = false;
       form.scrollIntoView({ block: "center" });

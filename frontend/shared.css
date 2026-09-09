@@ -323,6 +323,29 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 /* one game's full detail inside the sheet */
 .gdetail-head { display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px; }
 .gdetail-section-label { font-size: .72rem; color: var(--ink-soft); font-weight: 700; margin: 14px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
+
+/* The game sheet's three groups: 出席 / 請假 / 候補. The strip is the
+   summary — its counts are the "who's playing, who's away, who's
+   waiting" answer at a glance — and the panel below is whichever one
+   you asked for. */
+.gd-tabs {
+  display: flex; gap: 6px; margin: 14px 0 10px;
+  background: var(--surface-2); padding: 4px; border-radius: 12px;
+}
+.gd-tab {
+  flex: 1; border: 0; background: transparent; cursor: pointer;
+  /* 16px so iOS doesn't zoom the page when one is tapped, and a 40px
+     floor so a thumb can hit it — both learned on a real phone. */
+  font-size: 1rem; min-height: 40px; padding: 6px 4px;
+  border-radius: 9px; color: var(--ink-soft); font-weight: 600;
+  white-space: nowrap;
+}
+.gd-tab b { font-weight: 800; }
+.gd-tab.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(21, 27, 38, .10); }
+/* Explicit, because a class setting its own `display` beats a bare
+   [hidden] and that has silently broken a screen here before. */
+.gd-panel[hidden] { display: none; }
+.gd-empty { padding: 22px 0; text-align: center; }
 .roster-row.absent { background: var(--bad-soft); color: var(--bad); }
 .roster-row.dropin { background: var(--good-soft); color: var(--good); }
 /* The right-hand end of a roster row: whatever note and controls this
@@ -420,7 +443,16 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 /* 代打 (substitute) inline controls on an absence row */
 .mini-action {
   border: none; background: none; color: var(--accent); font-size: .74rem;
-  font-weight: 700; cursor: pointer; padding: 0; text-decoration: underline;
+  font-weight: 700; cursor: pointer; text-decoration: underline;
+  /* These measured 17px tall — under half of Apple's 44pt guidance —
+     so on a phone a good share of taps simply missed, which reads as
+     the app being slow rather than as a miss. The padding grows the
+     hit area to ~35px and the equal negative margin takes it back out
+     of the layout, so rows stay exactly the height they were.
+     Horizontal growth is only 3px a side on purpose: .roster-note sets
+     an 8px gap, and going wider would overlap the neighbouring hit
+     area — with 遞補 next to 移除, a stray tap is somebody removed. */
+  padding: 9px 3px; margin: -9px -3px;
 }
 .mini-action.danger { color: var(--bad); }
 .sub-form {

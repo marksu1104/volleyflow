@@ -68,7 +68,7 @@ function render(options = {}) {
 test("counts the people who will actually be there", () => {
   // 4 members - 2 absent + 2 drop-ins = 4
   const html = render();
-  assert.match(html, /出席名單（4 人）/);
+  assert.match(html, /data-gd-tab="attending"[^>]*>出席 <b>4<\/b>/);
 });
 
 test("the hero's headcount matches the list beneath it", () => {
@@ -87,7 +87,7 @@ test("a substitute is listed as playing, in the absent member's place", () => {
 test("an uncovered absence is called out as a gap", () => {
   const html = render();
   assert.match(html, /缺額/);
-  assert.match(html, /請假（2 人）/);
+  assert.match(html, /data-gd-tab="absent"[^>]*>請假 <b>2<\/b>/);
 });
 
 test("someone with no account is marked, wherever they appear", () => {
@@ -105,7 +105,7 @@ test("the waitlist keeps its order and marks the viewer", () => {
   ];
   const el = makeElement();
   renderGameDetail(el, season, game, { viewerName: "蘇慬" });
-  assert.match(el.innerHTML, /候補（2 人）/);
+  assert.match(el.innerHTML, /data-gd-tab="queued"[^>]*>候補 <b>2<\/b>/);
   assert.match(el.innerHTML, /（你）/);
 });
 
@@ -167,11 +167,11 @@ test("controls come before the lists, never after them", () => {
   const html = el.innerHTML;
   const action = html.indexOf("my-action");
   const addDropIn = html.indexOf("data-add-dropin");
-  const roster = html.indexOf("出席名單");
+  const lists = html.indexOf('class="gd-tabs"');
 
-  assert.ok(action >= 0 && addDropIn >= 0 && roster >= 0, "all three rendered");
-  assert.ok(action < roster, "my own action is above the roster");
-  assert.ok(addDropIn < roster, "the organizer's 新增臨打 is above the roster too");
+  assert.ok(action >= 0 && addDropIn >= 0 && lists >= 0, "all three rendered");
+  assert.ok(action < lists, "my own action is above the names");
+  assert.ok(addDropIn < lists, "the organizer's 新增臨打 is above them too");
 });
 
 test("the queue is a roster too, and removable through its own route", () => {
@@ -206,22 +206,85 @@ test("without a waitlist handler the queue shows no remove button", () => {
   assert.doesNotMatch(el.innerHTML, /data-remove-waitlist/);
 });
 
-test("the short actionable lists come before the full roster", () => {
-  // Found in a screenshot, not a test: with eighteen players on court,
-  // 遞補 sat below all of them. Everything you open this sheet to press
-  // has to be reachable without scrolling past the roster.
+// The three groups are tabs, so the counts are always on screen and no
+// group is buried under the eighteen names of another. Reported as "I
+// can't see in one page who's away, who's covering, who's queued".
+test("the tab strip carries all three counts at once", () => {
   const { season, game } = fixture();
   const el = makeElement();
 
-  renderGameDetail(el, season, game, {
-    viewerName: "蘇慬",
-    onLeaveWaitlist() {},
-    onPromoteFromWaitlist() {},
-  });
+  renderGameDetail(el, season, game, { viewerName: "蘇慬" });
 
-  const at = (label) => el.innerHTML.indexOf(label);
-  assert.ok(at("候補（") < at("出席名單（"), "the queue is above the roster");
-  assert.ok(at("請假（") < at("出席名單（"), "so is the absence list");
+  // Two members still playing, two drop-ins standing in, two away, one
+  // queued — the sum the sheet exists to do for you.
+  assert.match(el.innerHTML, /data-gd-tab="attending"[^>]*>出席 <b>4<\/b>/);
+  assert.match(el.innerHTML, /data-gd-tab="absent"[^>]*>請假 <b>2<\/b>/);
+  assert.match(el.innerHTML, /data-gd-tab="queued"[^>]*>候補 <b>1<\/b>/);
+});
+
+test("a game with no price yet says nothing rather than $undefined", () => {
+  // Seen in a rendered sheet: the fixture had no share and the hero
+  // printed "每人 $undefined" straight at the reader.
+  const { season, game } = fixture();
+  const el = makeElement();
+  delete game.share;
+
+  renderGameDetail(el, season, game, { viewerName: "蘇慬" });
+
+  assert.doesNotMatch(el.innerHTML, /undefined/);
+  assert.doesNotMatch(el.innerHTML, /每人 <strong>\$<\/strong>/);
+});
+
+test("a group with nobody in it still gets a tab, showing zero", () => {
+  // "我根本沒看到遞補的按鈕" — the queue section only existed once
+  // somebody was in it, so the whole feature was invisible.
+  const { season } = fixture();
+  const el = makeElement();
+  const quiet = {
+    id: 1, date: "2026-10-06", status: "scheduled", locked: false,
+    absences: [], confirmed_drop_ins: [], waitlist_entries: [],
+  };
+
+  renderGameDetail(el, season, quiet, { viewerName: "蘇慬" });
+
+  assert.match(el.innerHTML, /data-gd-tab="queued"[^>]*>候補 <b>0<\/b>/);
+  assert.match(el.innerHTML, /沒有人在候補/);
+  assert.match(el.innerHTML, /沒有人請假/);
+});
+
+test("only the chosen group is shown", () => {
+  const { season, game } = fixture();
+  const el = makeElement();
+
+  renderGameDetail(el, season, game, { viewerName: "蘇慬" });
+
+  assert.match(el.innerHTML, /data-gd-panel="attending"(?![^>]*hidden)/);
+  assert.match(el.innerHTML, /data-gd-panel="absent"[^>]*hidden/);
+  assert.match(el.innerHTML, /data-gd-panel="queued"[^>]*hidden/);
+});
+
+test("the chosen group survives a repaint", () => {
+  // Every action repaints this sheet. Losing the tab each time is one
+  // of the "it jumps around" complaints.
+  const { season, game } = fixture();
+  const el = makeElement();
+  el.dataset.gdTab = "queued";
+
+  renderGameDetail(el, season, game, { viewerName: "蘇慬" });
+
+  assert.equal(el.dataset.gdTab, "queued");
+  assert.match(el.innerHTML, /data-gd-panel="queued"(?![^>]*hidden)/);
+  assert.match(el.innerHTML, /data-gd-panel="attending"[^>]*hidden/);
+});
+
+test("a tab that no longer makes sense falls back to who's playing", () => {
+  const { season, game } = fixture();
+  const el = makeElement();
+  el.dataset.gdTab = "nonsense";
+
+  renderGameDetail(el, season, game, { viewerName: "蘇慬" });
+
+  assert.equal(el.dataset.gdTab, "attending");
 });
 
 test("only the organizer is offered 遞補 on a queued person", () => {
