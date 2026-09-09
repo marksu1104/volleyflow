@@ -345,11 +345,23 @@
       allClubs = [];
       return;
     }
-    const mine = await fetch(`${API_BASE}/players/${myPlayerId}/clubs`, {
-      headers: authHeader(),
-    });
-    myClubs = mine.ok ? await mine.json() : [];
-    allClubs = myClubs.slice();
+    // Everything on this page waits behind this one request — the
+    // pickers can't start until we know which clubs exist. Through
+    // getJsonSWR it answers from the last known list immediately, and
+    // corrects itself a moment later.
+    try {
+      await getJsonSWR(
+        `${API_BASE}/players/${myPlayerId}/clubs`,
+        (clubs) => {
+          myClubs = clubs;
+          allClubs = myClubs.slice();
+        },
+        { headers: authHeader() }
+      );
+    } catch (e) {
+      myClubs = [];
+      allClubs = [];
+    }
 
     // Only a club named by *this* load's ?club= counts as an invite. A
     // remembered club that's no longer mine is a different situation —
