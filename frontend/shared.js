@@ -143,7 +143,15 @@ function renderGameHero(season, game, opts) {
         <i class="fill-f" style="width:${Math.min(100, (female / capacity) * 100)}%"></i>
       </div>
       <div class="hero-meta">
-        <span class="meta-pill">每人 <strong>$${game.share}</strong></span>
+        ${
+          // Guarded, because "每人 $undefined" is what this printed when
+          // a game arrived without its share — a season still being set
+          // up, or an older cached response. Saying nothing about the
+          // price is far better than saying something that isn't a price.
+          game.share === null || game.share === undefined
+            ? ""
+            : `<span class="meta-pill">每人 <strong>$${game.share}</strong></span>`
+        }
         ${(o.metaPills || []).join("")}
       </div>
       ${o.statusHtml || ""}
@@ -420,6 +428,36 @@ function renderMonthCalendar(container, games, onPick, opts) {
  *     anyone's substitute; member.html restricts this to the viewer's
  *     own row).
  */
+/** The three groups a game's roster splits into, in tab order. Playing
+ * first because that is what most people open the sheet to see. */
+const TAB_ORDER = [
+  { key: "attending", label: "出席" },
+  { key: "absent", label: "請假" },
+  { key: "queued", label: "候補" },
+];
+
+/** An empty group says so in its own words. A blank panel reads as a
+ * page that failed to load — that has been reported twice. */
+function emptyPanel(text) {
+  return `<div class="empty gd-empty">${text}</div>`;
+}
+
+/** Shows one of a game sheet's three groups. Used by the tab strip and
+ * by anything that needs to send you to a particular group — opening
+ * the substitute picker, for instance, whose form lives in 請假. */
+function showGameDetailTab(container, key) {
+  if (!TAB_ORDER.some((t) => t.key === key)) return;
+  if (container.dataset) container.dataset.gdTab = key;
+  for (const panel of container.querySelectorAll("[data-gd-panel]")) {
+    panel.hidden = panel.dataset.gdPanel !== key;
+  }
+  for (const tab of container.querySelectorAll("[data-gd-tab]")) {
+    const on = tab.dataset.gdTab === key;
+    tab.classList.toggle("active", on);
+    tab.setAttribute("aria-selected", String(on));
+  }
+}
+
 function renderGameDetail(container, season, game, options) {
   const opts = options || {};
   const extraHtml = opts.extraHtml || "";
@@ -630,12 +668,30 @@ function renderGameDetail(container, season, game, options) {
   // the lists are last. Scrolling down only ever reveals more names —
   // nothing is ever buried behind them.
   //
-  // The lists follow the same rule among themselves, which took a
-  // screenshot to notice: 候補 and 請假 run to a handful of rows and
-  // carry 遞補, 移除 and 指定代打, while 出席名單 is the full roster —
-  // eighteen rows of mostly nothing to press. With the roster first,
-  // reaching the queue meant scrolling past every player on the court.
-  // Short and actionable first, long and informational last.
+  // The three groups are tabs rather than one stacked column, which is
+  // the answer to "I can't tell in one screen who's playing, who's
+  // away, who's covering for them and who's queued". Eighteen players
+  // is eighteen rows however it's arranged — what can be fixed is that
+  // reaching the other three groups meant scrolling past all of them,
+  // and that a queue of one was invisible below a full roster. The tab
+  // strip carries the counts, so the summary stays on screen and each
+  // group is one tap away rather than one scroll.
+  //
+  // Counts show even at zero: 候補 0 is how anyone finds out the queue
+  // exists, and "I never saw that button" is exactly what happened
+  // while the section only appeared once somebody was already in it.
+  const counts = {
+    attending: attendingRows.length,
+    absent: absentRows.length,
+    queued: game.waitlist_entries.length,
+  };
+  // Kept on the container, which outlives the innerHTML below. Without
+  // it every action that repaints the sheet would throw you back to the
+  // first tab — one of the "it jumps around" complaints.
+  const asked = container.dataset ? container.dataset.gdTab : null;
+  const activeTab = TAB_ORDER.some((t) => t.key === asked) ? asked : "attending";
+  if (container.dataset) container.dataset.gdTab = activeTab;
+
   container.innerHTML = `
     ${renderGameHero(season, game, {
       metaPills: opts.heroMetaPills,
@@ -658,24 +714,46 @@ function renderGameDetail(container, season, game, options) {
            </div>`
         : ""
     }
-    ${
-      waitlistRows
-        ? `<div class="gdetail-section-label">候補（${game.waitlist_entries.length} 人）</div><div class="att-list">${waitlistRows}</div>`
-        : ""
-    }
-    ${
-      absentRows.length
-        ? `<div class="gdetail-section-label">請假（${absentRows.length} 人）</div><div class="att-list">${absentRows.join("")}</div>`
-        : ""
-    }
-    <div class="gdetail-section-label">出席名單（${attendingRows.length} 人）</div>
-    <div class="att-list">${attendingHtml || '<div class="empty">這一場沒有人出席</div>'}</div>
+    <div class="gd-tabs" role="tablist">
+      ${TAB_ORDER.map(
+        (t) => `<button type="button" role="tab" class="gd-tab${
+          t.key === activeTab ? " active" : ""
+        }" data-gd-tab="${t.key}" aria-selected="${t.key === activeTab}">${
+          t.label
+        } <b>${counts[t.key]}</b></button>`
+      ).join("")}
+    </div>
+    <div class="gd-panel" data-gd-panel="attending"${activeTab === "attending" ? "" : " hidden"}>
+      <div class="att-list">${attendingHtml || emptyPanel("這一場還沒有人出席")}</div>
+    </div>
+    <div class="gd-panel" data-gd-panel="absent"${activeTab === "absent" ? "" : " hidden"}>
+      ${
+        absentRows.length
+          ? `<div class="att-list">${absentRows.join("")}</div>`
+          : emptyPanel("沒有人請假")
+      }
+    </div>
+    <div class="gd-panel" data-gd-panel="queued"${activeTab === "queued" ? "" : " hidden"}>
+      ${
+        waitlistRows
+          ? `<div class="att-list">${waitlistRows}</div>`
+          : emptyPanel("沒有人在候補")
+      }
+    </div>
   `;
 
   // Assigned directly (not addEventListener) so re-rendering this same
   // container never accumulates duplicate handlers — matches
   // renderMonthCalendar's pattern.
   container.onclick = (e) => {
+    // Switching tabs shows a panel that is already built and already in
+    // the document — no refetch, no re-render, nothing to flash. The
+    // choice is stored on the container so the next repaint keeps it.
+    const tab = e.target.closest("[data-gd-tab]");
+    if (tab) {
+      showGameDetailTab(container, tab.dataset.gdTab);
+      return;
+    }
     const toggleSub = e.target.closest("[data-toggle-sub]");
     if (toggleSub) {
       const form = container.querySelector(`[data-sub-form="${toggleSub.dataset.toggleSub}"]`);
