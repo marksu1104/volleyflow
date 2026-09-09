@@ -24,9 +24,20 @@ app = FastAPI(
 # The frontend is plain static HTML/JS served from GitHub Pages — a
 # different origin than this API — without CORS enabled, the browser
 # blocks every fetch() call before it reaches a route.
+# The local pages are served from a different port than this API, so
+# they are a different origin and need to be allowed too — but only when
+# local sign-in is already on, which production never sets. One switch
+# for the whole local setup rather than a second thing to remember.
+_ALLOWED_ORIGINS = ["https://marksu1104.github.io"]
+if os.environ.get("VOLLEYFLOW_DEV_LOGIN") == "1":
+    _ALLOWED_ORIGINS += [
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://marksu1104.github.io"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

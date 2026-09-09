@@ -9,13 +9,25 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { load } = require("./harness.js");
+const { load, inlineScript } = require("./harness.js");
 
 test("a rejected token says to open it in LINE", () => {
   const { signInFailureHtml } = load();
   const html = signInFailureHtml(null);
   assert.match(html, /請用 LINE 開啟/);
   assert.doesNotMatch(html, /重新載入/, "there is nothing to retry");
+});
+
+test("on a laptop it says how to sign in there instead", () => {
+  // "請用 LINE 開啟" is impossible advice on localhost — LINE can't open
+  // it — and it is exactly what a page opened without ?as= showed.
+  const { signInFailureHtml } = load();
+  globalThis.location = { hostname: "localhost", search: "" };
+
+  const html = signInFailureHtml(null);
+
+  assert.match(html, /\?as=/);
+  assert.doesNotMatch(html, /請用 LINE 開啟/);
 });
 
 test("a sleeping backend says so, and offers to try again", () => {
@@ -293,4 +305,44 @@ test("with no dev identity the header is whatever LIFF gives", () => {
   globalThis.liff = { isLoggedIn: () => true, getIDToken: () => "real-token" };
 
   assert.equal(authHeader().Authorization, "Bearer real-token");
+});
+
+// Which server a page talks to. The bug: every page had the production
+// URL written into it, so ?as= on a laptop sent a dev token to the live
+// server — which rejects it, and would have written to the real club's
+// books if it hadn't.
+test("a page on a laptop talks to the local API", () => {
+  const { apiBase } = load();
+  globalThis.location = { hostname: "localhost", search: "" };
+
+  assert.equal(apiBase(), "http://localhost:8000");
+});
+
+test("a page anywhere else talks to production", () => {
+  const { apiBase } = load();
+  for (const hostname of ["marksu1104.github.io", "liff.line.me"]) {
+    globalThis.location = { hostname, search: "" };
+    assert.equal(apiBase(), "https://volleyflow.onrender.com");
+  }
+});
+
+test("no page's script writes the production URL into itself", () => {
+  // The guard that matters: apiBase() is only worth anything if every
+  // page actually calls it. A page that hardcodes the URL again looks
+  // fine locally right up until it silently edits live data.
+  //
+  // Only the script is checked. Each page also carries a <link
+  // rel="preconnect"> to production, which stays: it opens the TLS
+  // handshake before the first fetch — worth real time against a
+  // free-tier backend — and sends nothing.
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const frontend = path.join(__dirname, "..", "..", "frontend");
+
+  const offenders = fs
+    .readdirSync(frontend)
+    .filter((f) => f.endsWith(".html"))
+    .filter((f) => inlineScript(f).includes("onrender.com"));
+
+  assert.deepEqual(offenders, [], "these must use apiBase() instead");
 });
