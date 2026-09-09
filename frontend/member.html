@@ -174,9 +174,12 @@
     await refreshMyClubs();
     renderClubChip();
     renderManageButton();
-    // Off it goes now, alongside the season load rather than after it —
-    // the chip used to be the last thing on a finished page to appear.
-    renderBalance();
+    // Fetched now, alongside the season rather than after it — but not
+    // painted yet. Starting it late made the chip the last thing to
+    // appear on a finished page; painting it the moment it lands made it
+    // the *first*, which reads just as much like the page is still
+    // loading. It goes up with everything else, in render() below.
+    loadMyLedger();
     // renderIntentAsk deliberately not called here: it needs to know
     // whether you're already on this season's roster, and no season has
     // loaded yet. Asking now both races the spinner (the question
@@ -630,17 +633,18 @@
       document.getElementById("season-picker").hidden = false;
       document.getElementById("cal-label").hidden = false;
       document.getElementById("month-cal").hidden = false;
-        renderIntentAsk();
+      renderIntentAsk();
       renderHero(season);
       renderCalendar();
       renderSelectedGameDetail();
+      paintBalance();
       // These two are independent of the season document and each other,
       // so they run in parallel rather than blocking the paint above.
       fetchClubMembers(API_BASE, currentClubId()).then((m) => {
         clubMembers = m;
         renderSelectedGameDetail();
       });
-      renderBalance();
+      paintBalance();
     }
   }
 
@@ -1031,80 +1035,134 @@
    * simply not being there, on a page that was otherwise finished.
    */
   let myLedger = null;
+  let ledgerReady = null;
 
-  async function renderBalance() {
+  /** Fetches the ledger without touching the screen. Separate from the
+   * paint so the chip can go up in the same frame as the card and the
+   * calendar — see the call in initIdentity. */
+  function loadMyLedger() {
+    if (!myPlayerId || !currentClubId()) return Promise.resolve();
+    ledgerReady = getJsonSWR(
+      `${API_BASE}/clubs/${currentClubId()}/players/${myPlayerId}/ledger`,
+      (ledger) => {
+        myLedger = ledger;
+        // Only repaint here if the page has already drawn once; the
+        // first paint comes from render().
+        if (seasonSettled) paintBalance();
+      },
+      { headers: authHeader() }
+    ).catch(() => {});
+    return ledgerReady;
+  }
+
+  function paintBalance() {
     const chip = document.getElementById("balance-chip");
-    if (!myPlayerId || !currentClubId()) {
+    if (!myLedger) {
       chip.hidden = true;
       return;
     }
-    try {
-      await getJsonSWR(
-        `${API_BASE}/clubs/${currentClubId()}/players/${myPlayerId}/ledger`,
-        (ledger) => {
-          myLedger = ledger;
-          const n = Number(ledger.balance);
-          chip.innerHTML = `
-            <span class="bc-label">我的帳務</span>
-            <span class="bc-value">${
-              n === 0 ? "已結清" : n > 0 ? `餘額 +$${n}` : `應繳 $${Math.abs(n)}`
-            }<span class="bc-chev">›</span></span>`;
-          chip.className = "balance-chip " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
-          chip.hidden = false;
-        },
-        { headers: authHeader() }
-      );
-    } catch (e) {
-      chip.hidden = true;
-    }
+    const n = Number(myLedger.balance);
+    chip.innerHTML = `
+      <span class="bc-label">我的帳務</span>
+      <span class="bc-value">${
+        n === 0 ? "已結清" : n > 0 ? `餘額 +$${n}` : `應繳 $${Math.abs(n)}`
+      }<span class="bc-chev">›</span></span>`;
+    chip.className = "balance-chip " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
+    chip.hidden = false;
   }
 
-  // Mirrors ledger.EntryType exactly — a name that isn't in that enum
-  // renders as the raw value, which is how the first two guesses here
-  // (payment_received, cash_refund) would have shipped unnoticed.
-  const ENTRY_LABELS = {
-    season_fee_charged: "季費",
-    drop_in_fee_charged: "臨打費",
-    absence_refund: "請假退費",
-    payment: "收付款",
-    carried_over: "上季結轉",
-  };
-
-  /** The entries behind the number. Tapping the chip used to open the
-   * profile page, which lists clubs and balances — the same number
-   * again, one screen further away. What you actually want to know is
-   * what made it up. */
+  /** What your money looks like right now, not a journal of every entry.
+   *
+   * The first version listed raw ledger rows newest-first — 季費 −$3055,
+   * 收付款 +$3055, 臨打費 −$235 — which is the accountant's view and
+   * answers a question nobody asked. What a member wants to know is how
+   * many games they signed up for, how many they took leave from, and
+   * therefore what they owe or are owed.
+   *
+   * So the counts come from the season (what actually happened to you)
+   * and the amounts come from the ledger (what it cost). Anything on the
+   * ledger these lines don't account for shows as 其他 rather than being
+   * silently dropped — the lines have to add up to the headline, or the
+   * screen is lying about money.
+   */
   function openLedger() {
+    document.getElementById("ledger-backdrop").hidden = false;
     const wrap = document.getElementById("lg-entries");
     const total = document.getElementById("lg-total");
-    document.getElementById("ledger-backdrop").hidden = false;
+    const club = allClubs.find((c) => String(c.id) === String(currentClubId()));
+    document.getElementById("lg-sub").textContent = club ? club.name : "";
+
     if (!myLedger) {
+      total.className = "lg-total";
       total.textContent = "";
       wrap.innerHTML = '<div class="empty">載入中…</div>';
       return;
     }
-    const n = Number(myLedger.balance);
-    document.getElementById("lg-sub").textContent =
-      (allClubs.find((c) => String(c.id) === String(currentClubId())) || {}).name || "";
-    total.className = "lg-total " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
-    total.innerHTML = `<span>${n === 0 ? "已結清" : n > 0 ? "應退給你" : "你應繳"}</span>
-      <strong>${n === 0 ? "$0" : "$" + Math.abs(n)}</strong>`;
 
-    // Newest first: the recent charge is the one you're asking about.
-    const rows = myLedger.entries.slice().reverse();
-    wrap.innerHTML = rows.length
-      ? rows
-          .map((e) => {
-            const amt = Number(e.amount);
-            return `
-              <div class="lg-row">
-                <span class="lg-when">${e.recorded_at.slice(5, 10).replace("-", "/")}</span>
-                <span class="lg-what">${escapeHtml(ENTRY_LABELS[e.entry_type] || e.entry_type)}</span>
-                <span class="lg-amt ${amt >= 0 ? "plus" : "minus"}">${amt >= 0 ? "+" : "−"}$${Math.abs(amt)}</span>
-              </div>`;
-          })
-          .join("")
-      : '<div class="empty">還沒有任何帳務紀錄</div>';
+    const n = Number(myLedger.balance);
+    total.className = "lg-total " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
+    total.innerHTML =
+      `<span>${n === 0 ? "目前已結清" : n > 0 ? "應退給你" : "你應繳"}</span>` +
+      `<strong>$${Math.abs(n)}</strong>`;
+
+    wrap.innerHTML = summaryRows(myLedger, currentSeason, playerName())
+      .map(
+        (r) => `
+          <div class="lg-row">
+            <span class="lg-what">${escapeHtml(r.label)}${
+              r.detail ? `<span class="lg-detail">${escapeHtml(r.detail)}</span>` : ""
+            }</span>
+            <span class="lg-amt ${r.amount >= 0 ? "plus" : "minus"}">${
+              r.amount >= 0 ? "+" : "−"
+            }$${Math.abs(r.amount)}</span>
+          </div>`
+      )
+      .join("");
+  }
+
+  /** Everything it needs is an argument, so the rule can be tested
+   * directly — the invariant below is about money and is worth pinning
+   * down without a browser. */
+  function summaryRows(ledger, season, name) {
+    const here = (e) => !!season && e.season_id === season.id;
+    const sum = (pred) =>
+      ledger.entries.filter(pred).reduce((t, e) => t + Number(e.amount), 0);
+
+    const rows = [];
+    let accounted = 0;
+    const add = (label, detail, amount) => {
+      if (amount === 0) return;
+      rows.push({ label, detail, amount });
+      accounted += amount;
+    };
+
+    if (season) {
+      const absences = season.games.filter((g) =>
+        g.absences.some((a) => a.player_name === name)
+      );
+      const covered = absences.filter((g) =>
+        g.absences.some((a) => a.player_name === name && a.covered_by)
+      );
+      const dropIns = season.games.filter((g) =>
+        g.confirmed_drop_ins.some((d) => d.player_name === name)
+      );
+
+      add("本季季費", `${season.games.length} 場`,
+        sum((e) => here(e) && e.entry_type === "season_fee_charged"));
+      add("請假退費", `請假 ${absences.length} 次・${covered.length} 次有人代打`,
+        sum((e) => here(e) && e.entry_type === "absence_refund"));
+      add("臨打費", `${dropIns.length} 場`,
+        sum((e) => here(e) && e.entry_type === "drop_in_fee_charged"));
+      add("已收付款", null, sum((e) => here(e) && e.entry_type === "payment"));
+    }
+    add("上季結轉", null, sum((e) => !here(e)));
+
+    // The lines and the headline must never disagree: an entry type this
+    // screen doesn't know about still has to appear somewhere.
+    const rest = Number(ledger.balance) - accounted;
+    if (Math.abs(rest) >= 1) add("其他", null, rest);
+
+    return rows.length ? rows : [{ label: "還沒有任何費用", detail: null, amount: 0 }];
   }
 
   function closeLedger() { document.getElementById("ledger-backdrop").hidden = true; }

@@ -602,7 +602,6 @@ a.btn { display: block; text-decoration: none; text-align: center; }
 
 /* small pill summary row, used by the organizer overview/settings pages
    to show season parameters at a glance */
-.season-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .pill { background: var(--surface); border: 1px solid var(--rule); border-radius: 20px; padding: 5px 12px; font-size: .78rem; color: var(--ink-soft); }
 .pill strong { color: var(--ink); font-weight: 700; }
 .pill.settled { background: var(--good-soft); color: var(--good); border-color: transparent; }
@@ -800,12 +799,12 @@ textarea {
 .lg-total.owe { background: var(--bad-soft); color: var(--bad); }
 .lg-total.owed { background: var(--good-soft); color: var(--good); }
 .lg-row {
-  display: flex; align-items: center; gap: 10px; padding: 10px 2px;
+  display: flex; align-items: center; gap: 10px; padding: 11px 2px;
   border-bottom: 1px solid var(--rule); font-size: .85rem;
 }
 .lg-row:last-child { border-bottom: none; }
-.lg-when { font-family: var(--font-num); font-size: .76rem; color: var(--ink-faint); width: 42px; flex: none; }
-.lg-what { flex: 1; min-width: 0; }
+.lg-what { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; font-weight: 600; }
+.lg-detail { font-size: .72rem; font-weight: 400; color: var(--ink-faint); }
 .lg-amt { font-family: var(--font-num); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .lg-amt.plus { color: var(--good); }
 .lg-amt.minus { color: var(--ink); }
@@ -818,15 +817,26 @@ textarea {
    arrangements are a line of text under them; the settled state reads
    as a state. */
 .sm-figures {
-  display: flex; gap: 8px; background: var(--surface); border-radius: 13px;
-  padding: 13px; box-shadow: var(--shadow);
+  display: flex; width: 100%; margin-top: 12px; background: var(--surface);
+  border-radius: 13px; padding: 13px; box-shadow: var(--shadow);
 }
-.sm-figure { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sm-figure {
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  padding-right: 10px;
+}
 .sm-figure + .sm-figure { border-left: 1px solid var(--rule); padding-left: 12px; }
-.sm-label { font-size: .66rem; font-weight: 600; color: var(--ink-faint); white-space: nowrap; }
+.sm-figure:last-child { padding-right: 0; }
+.sm-label {
+  font-size: .66rem; font-weight: 600; color: var(--ink-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* A season's venue cost runs to five digits, and the three columns have
+   to share one phone width — so the figure shrinks to fit rather than
+   spilling over the divider into the column beside it. */
 .sm-value {
-  font-family: var(--font-num); font-size: 1.15rem; font-weight: 800; color: var(--ink);
-  font-variant-numeric: tabular-nums;
+  font-family: var(--font-num); font-size: clamp(.95rem, 4.2vw, 1.2rem);
+  font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis;
 }
 .sm-line {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
