@@ -1132,3 +1132,40 @@ function toast(message, kind) {
     setTimeout(() => el.remove(), 220);
   }, kind === "good" ? 1800 : 3600);
 }
+
+/** Reloads the page once when its markup is older than its scripts.
+ *
+ * GitHub Pages serves HTML with `Cache-Control: max-age=600`, and LINE's
+ * in-app browser holds it a good deal longer than that. Only shared.js
+ * and shared.css carry a `?v=` cache-buster, so "cached HTML, fresh
+ * script" is a normal state — and every change that lives in the markup
+ * rather than the script (a new form field, a new section) is simply
+ * invisible until the page happens to expire. That has now been reported
+ * as a bug more than once.
+ *
+ * The deploy stamps the same build id into a <meta> and onto this
+ * script's own URL. If they disagree, the HTML is stale: reload it with
+ * a cache-busting parameter, exactly once — the `vf_reloaded` guard
+ * stops a mismatch we can't fix (a missing meta, a failed deploy) from
+ * becoming a refresh loop.
+ */
+function assertFreshBuild() {
+  const meta = document.querySelector('meta[name="vf-build"]');
+  const script = document.querySelector('script[src*="shared.js"]');
+  if (!meta || !script) return; // local file, or before the deploy stamps it
+  const wanted = (script.getAttribute("src").split("?v=")[1] || "").trim();
+  const have = (meta.getAttribute("content") || "").trim();
+  if (!wanted || !have || wanted === have) return;
+
+  try {
+    if (sessionStorage.getItem("vf_reloaded") === wanted) return;
+    sessionStorage.setItem("vf_reloaded", wanted);
+  } catch (e) {
+    return; // private mode: better a stale page than a reload loop
+  }
+  const url = new URL(location.href);
+  url.searchParams.set("v", wanted);
+  location.replace(url.toString());
+}
+
+assertFreshBuild();

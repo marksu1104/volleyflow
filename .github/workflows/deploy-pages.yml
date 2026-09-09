@@ -40,6 +40,14 @@ jobs:
           sha="${GITHUB_SHA::8}"
           sed -i "s|src=\"shared.js\"|src=\"shared.js?v=$sha\"|g" *.html
           sed -i "s|href=\"shared.css\"|href=\"shared.css?v=$sha\"|g" *.html
+          # Stamp the build onto the page itself. Only shared.js and
+          # shared.css carried a version, so a cached HTML file served
+          # with a fresh shared.js was a normal outcome — and any change
+          # living in the markup (a new form field, a new section) simply
+          # never appeared. shared.js compares these two and reloads once
+          # when they disagree; see assertFreshBuild.
+          sed -i "s|<head>|<head>
+<meta name=\"vf-build\" content=\"$sha\">|" *.html
           grep -o 'shared\.\(js\|css\)?v=[0-9a-f]*' member.html | sort -u
 
       - uses: actions/upload-pages-artifact@v3

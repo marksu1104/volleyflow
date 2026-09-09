@@ -182,3 +182,66 @@ test("someone who said they're only a drop-in acts normally", () => {
 test("a non-member isn't blocked by this rule — the invite screen has them", () => {
   assert.equal(viewingOnlyReason(undefined, false), null);
 });
+
+// Only shared.js and shared.css carried a version, so a cached HTML file
+// served with a fresh script was a normal state — and any change living
+// in the markup was invisible until the page happened to expire. Twice
+// reported as "I can't see the thing you said you built".
+test("a page whose markup is older than its script reloads itself", () => {
+  const { assertFreshBuild } = load();
+  const replaced = [];
+  globalThis.location = { href: "https://x/organizer-settings.html", replace: (u) => replaced.push(u) };
+  globalThis.document.querySelector = (sel) =>
+    sel.includes("meta")
+      ? { getAttribute: () => "aaaaaaaa" }
+      : { getAttribute: () => "shared.js?v=bbbbbbbb" };
+
+  assertFreshBuild();
+
+  assert.equal(replaced.length, 1);
+  assert.match(replaced[0], /v=bbbbbbbb/);
+});
+
+test("a page already on the current build is left alone", () => {
+  const { assertFreshBuild } = load();
+  let replaced = 0;
+  globalThis.location = { href: "https://x/a.html", replace: () => (replaced += 1) };
+  globalThis.document.querySelector = (sel) =>
+    sel.includes("meta")
+      ? { getAttribute: () => "aaaaaaaa" }
+      : { getAttribute: () => "shared.js?v=aaaaaaaa" };
+
+  assertFreshBuild();
+
+  assert.equal(replaced, 0);
+});
+
+test("a mismatch that survives the reload doesn't loop forever", () => {
+  // A missing meta or a half-finished deploy would otherwise refresh the
+  // page over and over.
+  const { assertFreshBuild } = load();
+  let replaced = 0;
+  globalThis.location = { href: "https://x/a.html", replace: () => (replaced += 1) };
+  globalThis.document.querySelector = (sel) =>
+    sel.includes("meta")
+      ? { getAttribute: () => "aaaaaaaa" }
+      : { getAttribute: () => "shared.js?v=bbbbbbbb" };
+
+  assertFreshBuild();
+  assertFreshBuild();
+  assertFreshBuild();
+
+  assert.equal(replaced, 1);
+});
+
+test("a page served without the stamp is left alone", () => {
+  // Opening the file locally, or before the deploy step adds the meta.
+  const { assertFreshBuild } = load();
+  let replaced = 0;
+  globalThis.location = { href: "https://x/a.html", replace: () => (replaced += 1) };
+  globalThis.document.querySelector = () => null;
+
+  assertFreshBuild();
+
+  assert.equal(replaced, 0);
+});
