@@ -42,12 +42,6 @@
 
   <div class="section-label" id="cal-label" hidden>本季場次</div>
   <div id="month-cal" class="mcal" hidden></div>
-  <div class="mcal-legend" id="cal-legend" hidden>
-    <span><i class="mcal-dot"></i>有場次</span>
-    <span><i class="mcal-dot short"></i>人數不足</span>
-    <span><i class="mcal-dot full"></i>已滿</span>
-    <span><i class="mcal-dot away"></i>已取消</span>
-  </div>
 </div>
 
 <div id="game-sheet-backdrop" class="gsheet-backdrop" hidden>
@@ -152,8 +146,7 @@
       document.getElementById("season-picker").hidden = false;
       document.getElementById("cal-label").hidden = false;
       document.getElementById("month-cal").hidden = false;
-      document.getElementById("cal-legend").hidden = false;
-      renderMeta(season);
+        renderMeta(season);
       renderHero(season);
       renderCalendar();
       renderSelectedGameDetail();
@@ -227,7 +220,7 @@
       document.getElementById("month-cal"),
       currentSeason.games,
       selectGame,
-      { stateOf: calendarState, selectedId: selectedGameId }
+      { stateOf: calendarState, selectedId: selectedGameId, awayLabel: "已取消" }
     );
   }
 

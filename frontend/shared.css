@@ -114,7 +114,7 @@ h1 { font-size: 1.2rem; margin: 0 0 4px; }
 h2 { font-size: .9rem; margin: 28px 0 10px; color: var(--ink-soft); font-weight: 600; }
 .sub { color: var(--ink-soft); font-size: .84rem; margin: 0 0 18px; }
 .section-label {
-  font-size: .74rem; color: var(--ink-soft); font-weight: 700; margin: 22px 0 8px;
+  font-size: .74rem; color: var(--ink-soft); font-weight: 700; margin: 14px 0 7px;
   text-transform: uppercase; letter-spacing: .04em;
 }
 .section-label:first-child { margin-top: 0; }
@@ -258,15 +258,23 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 .mcal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .mcal-weekdays div { text-align: center; font-size: .64rem; color: var(--ink-faint); padding-bottom: 4px; font-weight: 600; }
 .mcal-cell {
-  aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  aspect-ratio: 1 / .82; display: flex; flex-direction: column; align-items: center; justify-content: center;
   border-radius: 8px; font-size: .78rem; font-variant-numeric: tabular-nums; color: var(--ink-soft);
 }
 .mcal-cell.empty { visibility: hidden; }
 .mcal-cell.today { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 .mcal-cell.has-game { cursor: pointer; font-weight: 700; background: var(--surface-2); color: var(--ink); }
 .mcal-cell.has-game:active { transform: scale(.92); }
-/* The selected day, which the card above the calendar is showing. */
-.mcal-cell.on { box-shadow: inset 0 0 0 1.5px var(--accent); background: var(--accent-soft); color: var(--accent); }
+/* The selected day. Filled, not outlined: a hairline ring on a 40px
+   cell is easy to miss, and this is the only thing tying the calendar to
+   the card above it — if you can't see which day is selected, tapping
+   around feels like nothing is happening. */
+.mcal-cell.on {
+  background: var(--accent); color: var(--surface); font-weight: 800;
+  box-shadow: 0 2px 7px rgba(21, 97, 143, .35);
+}
+.mcal-cell.on .mcal-dot { background: var(--surface); }
+.mcal-cell.on .mcal-dot.away { background: none; border-color: var(--surface); opacity: .9; }
 /* One dot, four meanings: has a game / short of players / full / you're
    away. A cell is ~40px across, so a word in it is unreadable — and the
    colour is doing the same job a label would. */
@@ -274,8 +282,11 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 .mcal-dot.short { background: var(--warn); }
 .mcal-dot.full { background: var(--good); }
 .mcal-dot.away { background: none; border: 1.5px solid currentColor; width: 6px; height: 6px; opacity: .5; }
-.mcal-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--rule); }
-.mcal-legend span { display: inline-flex; align-items: center; gap: 4px; font-size: .64rem; color: var(--ink-faint); }
+.mcal-legend {
+  display: flex; flex-wrap: wrap; gap: 9px; margin-top: 7px; padding-top: 7px;
+  border-top: 1px solid var(--rule);
+}
+.mcal-legend span { display: inline-flex; align-items: center; gap: 4px; font-size: .62rem; color: var(--ink-faint); }
 
 /* at-a-glance summary */
 .glance { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; margin: 4px 0 6px; }
@@ -684,11 +695,17 @@ textarea {
    headcount and only the date line differs. A brief lift is enough to
    say "this is the thing that just changed", and it's skipped entirely
    under prefers-reduced-motion by the global rule above. */
+/* The card is the only thing that changes when you tap a date, and a
+   3px lift was too quiet to notice — two dates with the same headcount
+   differ only in the date line. The accent ring says "this is what you
+   just changed" in the same colour as the day you pressed, which is
+   what ties the two together. */
 @keyframes cardSwap {
-  0%   { transform: translateY(3px); opacity: .55; }
-  100% { transform: translateY(0);   opacity: 1; }
+  0%   { transform: scale(.985); box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
+  60%  { transform: scale(1);    box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
+  100% { transform: scale(1);    box-shadow: 0 0 0 0 transparent, var(--shadow); }
 }
-.card-swap { animation: cardSwap .22s ease-out; }
+.card-swap { animation: cardSwap .42s ease-out; }
 
 /* ---- a game card's own controls ----
    They live inside the card, under a rule, because they act on *this*
@@ -738,3 +755,20 @@ textarea {
 }
 .att-row.queued .att-num { color: var(--warn); }
 .att-row.me { box-shadow: inset 0 0 0 1.5px var(--accent); }
+
+/* ---- one screen on a phone ----
+   The member page ran to about 760px against roughly 700 of usable LIFF
+   height, so the calendar was always half off-screen. The balance used
+   to be a labelled section of its own at the bottom, ~80px, for one
+   number. It sits in the season row instead: that row already says
+   which season this is, and the balance belongs to that season. */
+.season-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.season-row .season-picker { flex: 1; min-width: 0; margin: 0; }
+.balance-chip {
+  flex: none; border: 1px solid var(--rule); border-radius: 20px; padding: 8px 13px;
+  background: var(--surface); font-size: .82rem; font-weight: 700; cursor: pointer;
+  white-space: nowrap; color: var(--ink-soft); font-variant-numeric: tabular-nums;
+}
+.balance-chip.owe { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+.balance-chip.owed { background: var(--good-soft); color: var(--good); border-color: transparent; }
+.balance-chip.even { background: var(--surface-2); border-color: transparent; }

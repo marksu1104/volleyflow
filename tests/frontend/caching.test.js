@@ -6,7 +6,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { load, makeSelect } = require("./harness.js");
+const { load, makeSelect, makeElement } = require("./harness.js");
 
 test("with nothing cached, the network's answer is what renders", async () => {
   const { getJsonSWR } = load();
@@ -193,4 +193,46 @@ test("two guards don't invalidate each other", () => {
   const ticket = a.take();
   b.take();
   assert.equal(a.current(ticket), true);
+});
+
+// The calendar's legend is generated from what the season contains, not
+// hardcoded: an entry for 人數不足 on a season where every game is full
+// is noise, and on a phone each legend row is a row of dates pushed off
+// the screen.
+test("the legend names only the states this season actually has", () => {
+  const { renderMonthCalendar } = load();
+  const el = makeElement();
+  const games = [
+    { id: 1, date: "2026-09-08" },
+    { id: 2, date: "2026-09-15" },
+  ];
+  renderMonthCalendar(el, games, () => {}, {
+    stateOf: (g) => (g.id === 1 ? "full" : ""),
+  });
+  assert.match(el.innerHTML, /已滿/);
+  assert.match(el.innerHTML, /有場次/);
+  assert.doesNotMatch(el.innerHTML, /人數不足/);
+});
+
+test("a season in one state needs no legend at all", () => {
+  const { renderMonthCalendar } = load();
+  const el = makeElement();
+  renderMonthCalendar(el, [{ id: 1, date: "2026-09-08" }], () => {}, {
+    stateOf: () => "",
+  });
+  assert.doesNotMatch(el.innerHTML, /mcal-legend/);
+});
+
+test("the organizer's calendar says 已取消 where a member's says 你請假", () => {
+  const { renderMonthCalendar } = load();
+  const games = [{ id: 1, date: "2026-09-08" }, { id: 2, date: "2026-09-15" }];
+  const stateOf = (g) => (g.id === 1 ? "away" : "");
+
+  const member = makeElement();
+  renderMonthCalendar(member, games, () => {}, { stateOf });
+  assert.match(member.innerHTML, /你請假/);
+
+  const organizer = makeElement();
+  renderMonthCalendar(organizer, games, () => {}, { stateOf, awayLabel: "已取消" });
+  assert.match(organizer.innerHTML, /已取消/);
 });
