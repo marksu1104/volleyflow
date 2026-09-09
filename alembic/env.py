@@ -1,10 +1,10 @@
-import os
 from logging.config import fileConfig
 
 from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
+from volleyflow.db.engine import database_url
 from volleyflow.db.models import Base
 
 # this is the Alembic Config object, which provides
@@ -18,9 +18,12 @@ if config.config_file_name is not None:
 
 # DATABASE_URL comes from .env (or a real env var in deployment), not
 # alembic.ini, so the connection string never has to live in a committed
-# file. See volleyflow.db.engine for the same pattern.
+# file. database_url() is shared with the app so a URL that runs the
+# server also runs a migration — CI pasted Neon's own `postgresql://`
+# into a secret and only found out at connect time that it means
+# psycopg2.
 load_dotenv()
-config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
+config.set_main_option("sqlalchemy.url", database_url())
 
 target_metadata = Base.metadata
 

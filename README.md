@@ -100,7 +100,7 @@ a real person's ledger. See `tests/test_auth.py`.
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
-uv run pytest -q               # 292 tests
+uv run pytest -q               # 297 tests
 uv run lint-imports            # billing logic must not import the database
 node --test tests/frontend/*.test.js   # 110 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
