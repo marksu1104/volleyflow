@@ -73,9 +73,7 @@ Worked example, from this club's own invoice:
 ```
 13 games, 8 of them cooled, 18 members
 list price 66595, special discount 14305, transferred 52290
-air conditioning 540 a night (180/hour x 3 hours), as billed after the
-  discount — the same figure that gets subtracted from what was
-  transferred
+air conditioning 540 a night, as billed after the discount
 
 ac_total  = 540 x 8                  = 4320
 base_each = (52290 - 4320) / 13      = 3690
@@ -83,6 +81,25 @@ cooled    = ceil((3690 + 540) / 18)  = 235
 plain     = ceil(3690 / 18)          = 205
 collected = (235 x 8 + 205 x 5) x 18 = 52290   exactly, no surplus
 ```
+
+Where the 540 comes from, because it is not obvious and getting it
+wrong misprices every game. The venue's list price for the air
+conditioning is 180/hour over the 3.5 hours of court time, so 630 a
+night; the discount brings it to 540, which happens to be the same
+180/hour over 3. The discount is **not** applied evenly — 14.3% off the
+air conditioning against 22.1% off the court, together making the 21.5%
+off the total. So both "the air conditioning isn't discounted" and "540
+is the discounted price" are true statements about different things, and
+the figure this file wants is always the one that reconciles against
+what was actually transferred:
+
+```
+3690 x 13 + 540 x 8 = 52290
+```
+
+The first implementation inferred 630 from the hourly rate over 3.5
+hours and produced 237/202 — plausible, and wrong. The check that caught
+it is the one above: the shares have to add back up to the transfer.
 
 Whether a given night is cooled is a **forecast** when the season is
 booked and a **fact** on the evening itself. It is therefore the one
