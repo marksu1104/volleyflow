@@ -42,6 +42,27 @@ jobs:
       - name: Frontend tests
         run: node --test tests/frontend/*.test.js
 
+      # A workflow file that doesn't parse doesn't run, and GitHub reports
+      # it under its filename instead of its name — which is easy to miss
+      # next to a green CI. That is how a broken deploy-pages.yml shipped:
+      # CI passed, the deploy never happened, and the site quietly stayed
+      # on the previous build.
+      - name: Workflow files parse
+        run: |
+          python - <<'PY'
+          import pathlib, sys, yaml
+          bad = []
+          for f in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
+              try:
+                  if not yaml.safe_load(f.read_text(encoding="utf-8")).get("name"):
+                      bad.append(f"{f}: no name")
+              except Exception as e:
+                  bad.append(f"{f}: {e}")
+          print("
+".join(bad) or "all workflow files parse")
+          sys.exit(1 if bad else 0)
+          PY
+
       - name: Postgres tests
         run: uv run pytest -m postgres
         env:

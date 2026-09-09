@@ -46,8 +46,7 @@ jobs:
           # living in the markup (a new form field, a new section) simply
           # never appeared. shared.js compares these two and reloads once
           # when they disagree; see assertFreshBuild.
-          sed -i "s|<head>|<head>
-<meta name=\"vf-build\" content=\"$sha\">|" *.html
+          sed -i '/<head>/a <meta name="vf-build" content="'"$sha"'">' *.html
           grep -o 'shared\.\(js\|css\)?v=[0-9a-f]*' member.html | sort -u
 
       - uses: actions/upload-pages-artifact@v3
