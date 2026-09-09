@@ -737,12 +737,28 @@ async function withButtonFeedback(btn, busyLabel, action) {
  * as if the header were simply absent). A fresh token is fetched every
  * call rather than cached: liff.getIDToken() already handles refreshing
  * it, so caching here would just risk holding an expired one. */
-/** Whether this page is being served from a laptop rather than the real
- * site. The third lock on dev login — the other two are on the server
- * (see auth.verify_id_token). Not a security boundary by itself, but it
- * means the shipped site never even offers to send a dev token. */
+/** Whether this page is being served from a development machine rather
+ * than the real site. Not a security boundary by itself — this runs in
+ * the visitor's browser — but it means the shipped site never even
+ * offers to send a dev token. The real locks are on the server (see
+ * auth.verify_id_token).
+ *
+ * Private LAN addresses count, not just localhost. A desktop browser is
+ * not a phone: it can't show real Safari rendering, touch targets or the
+ * keyboard, and three bugs have reached a phone that every static check
+ * passed. Reaching the laptop's server from the phone over wifi is what
+ * makes "change it and look at it on the actual device" possible, and
+ * that address is 192.168.x.x, never localhost.
+ */
 function isLocalDev() {
-  return ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+  const h = location.hostname;
+  if (["localhost", "127.0.0.1", "[::1]"].includes(h)) return true;
+  // The three private IPv4 ranges (RFC 1918) — home and office wifi.
+  return (
+    /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h) ||
+    /^192\.168\.\d{1,3}\.\d{1,3}$/.test(h) ||
+    /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(h)
+  );
 }
 
 /** Who you're pretending to be, from `?as=<name>` — local only.
@@ -1242,9 +1258,12 @@ assertFreshBuild();
  * both directions: local sign-in is off there so nothing worked, and
  * anything that *did* work was writing to the real club's data.
  *
- * A page served from localhost talks to a local API. Anywhere else — the
- * deployed site, a phone — is production, unchanged.
+ * The API is taken from whatever host served the page, not written down
+ * as "localhost": on a phone opening 192.168.1.101:5500, localhost is
+ * the *phone*, so a fixed name would send every request into a device
+ * that isn't running anything. Same host, port 8000.
  */
 function apiBase() {
-  return isLocalDev() ? "http://localhost:8000" : "https://volleyflow.onrender.com";
+  if (!isLocalDev()) return "https://volleyflow.onrender.com";
+  return `http://${location.hostname}:8000`;
 }

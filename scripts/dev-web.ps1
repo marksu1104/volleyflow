@@ -9,8 +9,18 @@
 
 $frontend = Join-Path $PSScriptRoot "..\frontend"
 
+. (Join-Path $PSScriptRoot "lan-address.ps1")
+$lan = Get-LanAddress
+
 Write-Host "Pages    http://localhost:5500/member.html?as=YourName" -ForegroundColor Cyan
 Write-Host "Manage   http://localhost:5500/organizer.html?as=YourName" -ForegroundColor Cyan
+if ($lan) {
+    Write-Host ""
+    Write-Host "On your phone, same wifi:" -ForegroundColor Cyan
+    Write-Host "         http://${lan}:5500/member.html?as=YourName" -ForegroundColor Cyan
+    Write-Host "         (Windows may ask to allow python through the firewall — say yes,"
+    Write-Host "          and pick Private networks only.)" -ForegroundColor DarkGray
+}
 Write-Host "Ctrl+C to stop." -ForegroundColor DarkGray
 Write-Host ""
 

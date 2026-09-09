@@ -24,20 +24,29 @@ app = FastAPI(
 # The frontend is plain static HTML/JS served from GitHub Pages — a
 # different origin than this API — without CORS enabled, the browser
 # blocks every fetch() call before it reaches a route.
-# The local pages are served from a different port than this API, so
-# they are a different origin and need to be allowed too — but only when
-# local sign-in is already on, which production never sets. One switch
-# for the whole local setup rather than a second thing to remember.
 _ALLOWED_ORIGINS = ["https://marksu1104.github.io"]
-if os.environ.get("VOLLEYFLOW_DEV_LOGIN") == "1":
-    _ALLOWED_ORIGINS += [
-        "http://localhost:5500",
-        "http://127.0.0.1:5500",
-    ]
+
+# The local pages are served from a different port than this API, so they
+# are a different origin and need allowing too — but only when local
+# sign-in is already on, which production never sets. One switch for the
+# whole local setup rather than a second thing to remember.
+#
+# A regex rather than a list because the address isn't known in advance:
+# testing on a real phone means serving to whatever 192.168.x.x the
+# router handed out today. Confined to the three private IPv4 ranges
+# (RFC 1918) — a public address never matches.
+_PRIVATE_LAN_ORIGIN = (
+    r"http://(localhost|127\.0\.0\.1|\[::1\]"
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|192\.168\.\d{1,3}\.\d{1,3}"
+    r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(:\d+)?"
+)
+_dev_login = os.environ.get("VOLLEYFLOW_DEV_LOGIN") == "1"
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
+    allow_origin_regex=_PRIVATE_LAN_ORIGIN if _dev_login else None,
     allow_methods=["*"],
     allow_headers=["*"],
 )

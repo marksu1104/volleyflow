@@ -326,6 +326,42 @@ test("a page anywhere else talks to production", () => {
   }
 });
 
+test("a phone on the wifi talks to the laptop that served the page", () => {
+  // Not "localhost" — on the phone, localhost is the phone, and every
+  // request would go into a device running nothing. This is what makes
+  // looking at a change on a real device possible.
+  const { apiBase } = load();
+  globalThis.location = { hostname: "192.168.1.101", search: "" };
+
+  assert.equal(apiBase(), "http://192.168.1.101:8000");
+});
+
+test("a phone on the wifi is allowed to sign in as somebody", () => {
+  // The symptom when it wasn't: the page loaded on the phone, decided it
+  // was the real site, and bounced to the LINE login screen.
+  const { devIdentityName } = load();
+  globalThis.location = { hostname: "192.168.1.101", search: "?as=蘇懂" };
+
+  assert.equal(devIdentityName(), "蘇懂");
+});
+
+test("every private range counts, and nothing outside them does", () => {
+  const { isLocalDev } = load();
+  const local = ["192.168.1.101", "10.0.0.5", "172.16.0.1", "172.31.255.254"];
+  // 172.15 and 172.32 sit just outside the private block, and 11.x /
+  // 193.168.x only look like the ones above.
+  const public_ = ["172.15.0.1", "172.32.0.1", "11.0.0.5", "193.168.1.1", "8.8.8.8"];
+
+  for (const h of local) {
+    globalThis.location = { hostname: h, search: "" };
+    assert.equal(isLocalDev(), true, `${h} is a private address`);
+  }
+  for (const h of public_) {
+    globalThis.location = { hostname: h, search: "" };
+    assert.equal(isLocalDev(), false, `${h} is not`);
+  }
+});
+
 test("no page's script writes the production URL into itself", () => {
   // The guard that matters: apiBase() is only worth anything if every
   // page actually calls it. A page that hardcodes the URL again looks
