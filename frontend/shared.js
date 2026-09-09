@@ -1099,6 +1099,15 @@ function signInFailureHtml(identified) {
       { label: "重新載入", onclick: "location.reload()" }
     );
   }
+  // On a laptop that advice is impossible to follow — LINE cannot open
+  // localhost — and it's what a page with no ?as= showed. Say the thing
+  // that actually works here instead.
+  if (isLocalDev()) {
+    return emptyStateHtml(
+      "還沒選身分",
+      "本機沒有 LINE 可以登入，要在網址後面加上 ?as=名字 才知道你是誰，例如 ?as=蘇懂。"
+    );
+  }
   return emptyStateHtml(
     "請用 LINE 開啟",
     "名單和帳務只有球隊成員看得到，所以需要先用 LINE 登入。請從 LINE 裡的連結開啟這一頁。"
@@ -1225,3 +1234,17 @@ function assertFreshBuild() {
 }
 
 assertFreshBuild();
+
+/** Which API this page talks to.
+ *
+ * Every page had the production URL hardcoded, so a page served from a
+ * laptop still called the live server — which is worse than it sounds in
+ * both directions: local sign-in is off there so nothing worked, and
+ * anything that *did* work was writing to the real club's data.
+ *
+ * A page served from localhost talks to a local API. Anywhere else — the
+ * deployed site, a phone — is production, unchanged.
+ */
+function apiBase() {
+  return isLocalDev() ? "http://localhost:8000" : "https://volleyflow.onrender.com";
+}

@@ -34,6 +34,12 @@ Then open <http://localhost:5500/member.html?as=YourName>.
 The interactive API docs are at <http://localhost:8000/docs> — every
 endpoint is listed there and can be called from the page.
 
+A page served from localhost talks to the API on localhost; anywhere else
+talks to production (`apiBase()` in `shared.js`). Every page used to have
+the production URL written into it, which meant local work silently
+edited the real club's books — there is a test that fails if one does it
+again.
+
 `.env` points at the Neon **dev** branch. Production is only reachable
 through Render's environment variables and the Neon console, and nothing
 here should ever be pointed at it.
@@ -96,7 +102,7 @@ uv run ruff format .           # formatting
 uv run mypy src scripts        # types
 uv run pytest -q               # 292 tests
 uv run lint-imports            # billing logic must not import the database
-node --test tests/frontend/*.test.js   # 106 frontend tests
+node --test tests/frontend/*.test.js   # 110 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
 ```
 

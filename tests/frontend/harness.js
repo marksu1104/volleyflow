@@ -160,4 +160,4 @@ function load(page) {
   return { ...factory(), ...knobs };
 }
 
-module.exports = { load, installGlobals, makeElement, makeSelect, makeStore };
+module.exports = { load, inlineScript, installGlobals, makeElement, makeSelect, makeStore };
