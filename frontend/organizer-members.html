@@ -263,9 +263,9 @@
                 : `<span class="avatar sm">${escapeHtml((p.name || "?").slice(0, 1))}</span>`}
               <span>${escapeHtml(p.name)}${genderTag(p.gender)}${guestTag(p)}${waitingTag(p)}</span>
             </span>
-            <button type="button" class="pool-promote" onclick="promoteFromPool(${p.id})">加入本季</button>
-            ${p.linked ? `<button type="button" class="action sm" onclick="linkToRosterEntry(${p.id})">已在名單上</button>` : ""}
-            <button type="button" class="action cancel sm" onclick="removeFromClub(${p.id}, '${p.name.replace(/'/g, "\'")}')">移出球隊</button>
+            <button type="button" class="icon-btn add" title="加入本季" aria-label="加入本季" onclick="promoteFromPool(${p.id})">＋</button>
+            ${p.linked ? `<button type="button" class="icon-btn link" title="已在名單上，接到現有的人" aria-label="已在名單上" onclick="linkToRosterEntry(${p.id})">⇄</button>` : ""}
+            <button type="button" class="icon-btn remove" title="移出球隊" aria-label="移出球隊" onclick="removeFromClub(${p.id}, '${p.name.replace(/'/g, "\'")}')">−</button>
           </div>
         `
       )
