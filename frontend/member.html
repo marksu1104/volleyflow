@@ -711,7 +711,7 @@
     // way into the full roster. Floating those controls underneath made
     // them read as page-level buttons that happened to be nearby.
     wrap.innerHTML = renderGameHero(season, game, {
-      metaPills: [deadlinePill],
+      metaPills: [acPill(season, game), deadlinePill],
       statusHtml: mine.status,
       actionsHtml: mine.actions,
       moreHtml: `<button type="button" class="hero-more" onclick="openGameSheet()">
@@ -755,7 +755,7 @@
       ? `<span class="meta-pill">請假期限 <strong>賽前 ${currentSeason.change_deadline_days} 天</strong></span>`
       : "";
     renderGameDetail(el, currentSeason, game, {
-      heroMetaPills: [deadlinePill],
+      heroMetaPills: [acPill(currentSeason, game), deadlinePill],
       clubMembers,
       viewerName: playerName(),
       statusHtml: myActions(currentSeason, game).status,
@@ -898,6 +898,15 @@
   }
 
 
+
+  /** Why this game costs more than the one beside it. Only on the games
+   * it applies to — a night with no air conditioning needs no
+   * explanation, its price is just the price. */
+  function acPill(season, game) {
+    if (!game.air_conditioned || !(Number(season.ac_surcharge) > 0)) return "";
+    const each = Math.round(Number(season.ac_surcharge) / season.members.length);
+    return `<span class="meta-pill ac">含冷氣 +$${each}</span>`;
+  }
 
   function isGameFull(season, game) {
     return expectedAttendance(season, game) >= season.capacity;

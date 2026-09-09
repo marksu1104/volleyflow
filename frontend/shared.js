@@ -126,8 +126,7 @@ function renderGameHero(season, game, opts) {
         <i class="fill-f" style="width:${Math.min(100, (female / capacity) * 100)}%"></i>
       </div>
       <div class="hero-meta">
-        <span class="meta-pill">這場 <strong>$${game.share}</strong></span>
-        ${game.air_conditioned ? '<span class="meta-pill ac">冷氣場</span>' : ""}
+        <span class="meta-pill">每人 <strong>$${game.share}</strong></span>
         ${(o.metaPills || []).join("")}
       </div>
       ${o.statusHtml || ""}
