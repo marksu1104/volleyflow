@@ -450,7 +450,11 @@
       unpaidCount === 0
         ? "全部已收"
         : `${season.members.length - unpaidCount} 人已收・${unpaidCount} 人未收・季費於開季前收款`;
-    document.getElementById("fee-share-label").textContent = `每人 $${season.share_per_game * seasonBillableGames(season)} · ${seasonBillableGames(season)} 場 × $${season.share_per_game}`;
+    // Summed per game, not share x count: a cooled night costs more, so
+    // those two stopped being the same number.
+    const games = seasonBillableGames(season);
+    document.getElementById("fee-share-label").textContent =
+      `每人 $${seasonFeeFor(season)} · ${games} 場`;
   }
 
   function seasonBillableGames(season) {

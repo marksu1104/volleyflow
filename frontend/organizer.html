@@ -238,10 +238,37 @@
         : "",
       actionsHtml: cancelled
         ? ""
-        : `<button type="button" class="hact" onclick="openGameSheet()">名單與請假</button>
-           <button type="button" class="hact quiet" onclick="location.href='organizer-settings.html'">場次設定</button>`,
+        : `<button type="button" class="hact" onclick="openGameSheet()">名單與請假</button>` +
+          // Only offered when the club actually pays for air
+          // conditioning: a venue that bundles it has nothing to toggle,
+          // and a switch that changes no money is just clutter.
+          (Number(season.ac_surcharge) > 0
+            ? `<button type="button" class="hact ${game.air_conditioned ? "" : "quiet"}"
+                 onclick="toggleAirConditioning(${game.id}, ${!game.air_conditioned})">
+                 ${game.air_conditioned ? "冷氣：開" : "冷氣：關"}
+               </button>`
+            : `<button type="button" class="hact quiet" onclick="location.href='organizer-settings.html'">場次設定</button>`),
     });
     wrap.onclick = null;
+  }
+
+  /** Whether the air conditioning ran is a forecast when the season is
+   * booked and a fact on the evening, so this is the one thing about a
+   * game the organizer is expected to correct afterwards. It moves what
+   * the club owes the venue and re-prices every member's share, so it
+   * says so before doing it. */
+  async function toggleAirConditioning(gameId, on) {
+    const each = Math.round(Number(currentSeason.ac_surcharge) / currentSeason.members.length);
+    const wording = on
+      ? `要把這場改成「有開冷氣」嗎？每位成員這一場會多 $${each}。`
+      : `要把這場改成「沒開冷氣」嗎？每位成員這一場會退 $${each}。`;
+    if (!confirm(wording)) return;
+    try {
+      await postJson(API_BASE, `/games/${gameId}/air-conditioning`, { air_conditioned: on }, "PUT");
+      loadDashboard(currentSeason.id);
+    } catch (e) {
+      toast("改冷氣設定失敗：" + e.message);
+    }
   }
 
   function calendarState(game) {
