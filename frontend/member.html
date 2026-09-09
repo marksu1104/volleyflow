@@ -767,6 +767,20 @@
     });
   }
 
+  /** Opens the roster sheet with the substitute form for this absence
+   * already expanded, so 指定代打 on the card lands you where the
+   * picker actually is instead of on a list to hunt through. */
+  function openSubstitutePicker(absenceId) {
+    openGameSheet();
+    const form = document
+      .getElementById("game-detail")
+      .querySelector(`[data-sub-form="${absenceId}"]`);
+    if (form) {
+      form.hidden = false;
+      form.scrollIntoView({ block: "center" });
+    }
+  }
+
   function openGameSheet() { document.getElementById("game-sheet-backdrop").hidden = false; }
   function closeGameSheet() { document.getElementById("game-sheet-backdrop").hidden = true; }
 
@@ -843,9 +857,15 @@
               : "") + bring,
         };
       }
+      // Naming who covers for you is the thing you most want right
+      // after taking leave, and it used to live two taps deep inside
+      // 看名單 — so it read as having been removed. It is also a
+      // different act from signing someone up: a 代打 takes *your*
+      // slot, a 報名 queues for whatever slot is free.
       return {
         status: '<div class="hero-status absent">已請假這一場</div>',
         actions:
+          `<button type="button" class="hact" onclick="openSubstitutePicker(${myAbsence.id})">指定代打</button>` +
           `<button type="button" class="hact danger" onclick="cancelAbsence(${myAbsence.id}, this)">取消請假</button>` +
           bring,
       };
@@ -1214,7 +1234,16 @@
       // placeholder id — and redrew the hero, the calendar and the
       // roster a second after the tap had already visibly worked, which
       // is the stutter that made a working action feel broken.
-      if (reconcile) reconcile(result, currentSeason);
+      if (reconcile) {
+        reconcile(result, currentSeason);
+        // The screen was painted from the placeholder, so it still holds
+        // the id -1 in its onclick handlers even though the data no
+        // longer does — and the refresh below now finds nothing to
+        // change and skips the redraw. That combination left 取消請假
+        // silently doing nothing, because -1 is the "still saving" guard
+        // value. Repaint here, then the refresh really is a no-op.
+        repaintGame();
+      }
       loadSeason(currentSeasonId);
     } catch (e) {
       currentSeason = snapshot;

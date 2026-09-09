@@ -190,6 +190,43 @@ test("every control in the row is the same kind of button", () => {
 
   const html = buildMyActionHtml(season, game);
 
-  assert.equal((html.match(/class="hact/g) || []).length, 2);
+  assert.equal((html.match(/class="hact/g) || []).length, 3);
   assert.doesNotMatch(html, /class="btn |class="action/);
+});
+
+test("taking leave puts naming a substitute right there, not two taps away", () => {
+  // 代打 and 報名 are different acts — a substitute takes *your* slot,
+  // a signup queues for whatever slot is free — and burying 指定代打
+  // inside 看名單 made it look as though it had been removed, leaving
+  // 報名 as the only visible way to get someone into your place.
+  const { season, game } = fixture({
+    game: { absences: [{ id: 77, player_name: "蘇慬", covered_by: null }] },
+  });
+  as("蘇慬");
+
+  const html = buildMyActionHtml(season, game);
+
+  assert.match(html, /openSubstitutePicker\(77\)/);
+  assert.match(html, /指定代打/);
+});
+
+test("an optimistic row's controls carry a usable id once the server answers", () => {
+  // The bug this pins: a placeholder id of -1 goes into the button's
+  // onclick, the server's real id then lands in the data, and the
+  // refresh sees no difference and skips the redraw — leaving 取消請假
+  // wired to -1, which its own guard treats as "still saving" and
+  // ignores. The button must never be left holding the placeholder.
+  const { season, game } = fixture({
+    game: { absences: [{ id: -1, player_name: "蘇慬", covered_by: null }] },
+  });
+  as("蘇慬");
+
+  const pending = buildMyActionHtml(season, game);
+  assert.match(pending, /cancelAbsence\(-1,/, "the optimistic paint uses the placeholder");
+
+  game.absences[0].id = 412; // what reconcile does
+  const settled = buildMyActionHtml(season, game);
+
+  assert.match(settled, /cancelAbsence\(412,/);
+  assert.doesNotMatch(settled, /cancelAbsence\(-1,/);
 });

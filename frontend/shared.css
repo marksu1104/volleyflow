@@ -512,8 +512,20 @@ textarea.control { resize: vertical; min-height: 90px; }
 .bal.minus { color: var(--bad); }
 
 /* a join-pool / not-yet-a-fixed-member row */
-.pool-row { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--rule); margin-bottom: 5px; }
-.pool-who { display: flex; align-items: center; gap: 8px; flex: 1; }
+/* Three actions (加入本季 / 已在名單上 / 移出球隊) plus a name do not fit
+   across a phone, and 移出球隊 was running off the edge of the card. The
+   name takes the first line and the actions take the second, which is
+   also the order you read them in: who this is, then what to do about
+   them. */
+.pool-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 9px;
+  padding: 9px 10px; border-radius: 10px; background: var(--surface);
+  border: 1px solid var(--rule); margin-bottom: 5px;
+}
+.pool-who { display: flex; align-items: center; gap: 8px; flex: 1 1 100%; min-width: 0; }
+.pool-who > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pool-row > button { margin-left: auto; }
+.pool-row > button ~ button { margin-left: 0; }
 .pool-promote, .p-add {
   border: none; background: var(--good-soft); color: var(--good); font-size: .76rem;
   font-weight: 700; padding: 6px 11px; border-radius: 8px; cursor: pointer; white-space: nowrap;
@@ -753,10 +765,15 @@ textarea {
   display: flex; gap: 8px; margin-top: 13px; padding-top: 13px;
   border-top: 1px solid var(--rule);
 }
+/* Two of these is the usual case; taking leave puts three in the row
+   (指定代打 / 取消請假 / ＋帶朋友), so the label shrinks a little rather
+   than overflowing the card. */
 .hact {
-  flex: 1; min-width: 0; padding: 11px 8px; border: none; border-radius: 10px;
-  font-family: var(--font-cjk); font-size: .88rem; font-weight: 700; cursor: pointer;
+  flex: 1 1 0; min-width: 0; padding: 11px 6px; border: none; border-radius: 10px;
+  font-family: var(--font-cjk); font-size: clamp(.78rem, 3.4vw, .88rem);
+  font-weight: 700; cursor: pointer;
   background: var(--accent); color: var(--surface); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
 }
 .hact.quiet { background: var(--surface-2); color: var(--ink); }
 .hact.danger { background: var(--bad-soft); color: var(--bad); }
