@@ -236,3 +236,44 @@ test("the organizer's calendar says 已取消 where a member's says 你請假", 
   renderMonthCalendar(organizer, games, () => {}, { stateOf, awayLabel: "已取消" });
   assert.match(organizer.innerHTML, /已取消/);
 });
+
+test("a management picker lists only the clubs you organize", () => {
+  // The bug: GET /clubs returns every club you belong to in any role, so
+  // a club you are merely a member of appeared in the organizer pages'
+  // picker and opened a management screen for somebody else's club.
+  const clubs = [
+    { id: 1, name: "我開的", role: "organizer" },
+    { id: 2, name: "測試二", role: "member" },
+  ];
+  const organizerOnly = (c) => c.role === "organizer";
+  assert.deepEqual(clubs.filter(organizerOnly).map((c) => c.name), ["我開的"]);
+});
+
+test("the picker really applies the filter it is handed", async () => {
+  const { initClubAndSeasonPickers, currentClubId } = load();
+  globalThis.fetch = async (url) => ({
+    ok: true,
+    json: async () =>
+      url.endsWith("/clubs")
+        ? [
+            { id: 1, name: "我開的", role: "organizer" },
+            { id: 2, name: "測試二", role: "member" },
+          ]
+        : [],
+  });
+  const clubEl = makeSelect();
+  localStorage.setItem("vf_club", "2"); // remembered from the member page
+
+  await initClubAndSeasonPickers(
+    "http://x",
+    clubEl,
+    makeSelect(),
+    "k",
+    () => {},
+    () => {},
+    (c) => c.role === "organizer"
+  );
+
+  assert.doesNotMatch(clubEl.innerHTML, /測試二/);
+  assert.equal(currentClubId(), "1", "a member-only club must not stay selected here");
+});

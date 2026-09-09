@@ -177,7 +177,11 @@
           );
         if (id) loadMembers(id);
       },
-      (e) => showPageError(document.getElementById("no-season"), e.message)
+      (e) => showPageError(document.getElementById("no-season"), e.message),
+      // Only the clubs this person actually organizes — see
+      // initClubAndSeasonPickers. A club they merely belong to used to
+      // appear here and open a management screen they cannot use.
+      (c) => c.role === "organizer"
     );
   });
 

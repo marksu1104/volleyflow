@@ -835,14 +835,14 @@ def list_clubs(
     not in yet goes through its invite link, which carries the id; see
     GET /clubs/{id} for the name lookup that link needs.
     """
-    clubs = (
-        db.query(ClubRow)
+    rows = (
+        db.query(ClubRow, ClubMemberRow.role)
         .join(ClubMemberRow, ClubMemberRow.club_id == ClubRow.id)
         .filter(ClubMemberRow.player_id == current_player.id)
         .order_by(ClubRow.id)
         .all()
     )
-    return [ClubOut(id=c.id, name=c.name) for c in clubs]
+    return [ClubOut(id=c.id, name=c.name, role=role) for c, role in rows]
 
 
 @router.get("/clubs/{club_id}", response_model=ClubOut)

@@ -98,7 +98,11 @@
         if (id) loadDashboard(id);
         else renderNoSeason();
       },
-      (e) => showPageError(document.getElementById("hero-wrap"), e.message)
+      (e) => showPageError(document.getElementById("hero-wrap"), e.message),
+      // Only the clubs this person actually organizes — see
+      // initClubAndSeasonPickers. A club they merely belong to used to
+      // appear here and open a management screen they cannot use.
+      (c) => c.role === "organizer"
     );
   });
 
@@ -159,21 +163,47 @@
     }
   }
 
+  /** This season's terms, as figures rather than a row of small pills.
+   *
+   * They were five grey pills of the same size — the venue cost, the
+   * minimum roster, the times, the location and the settled state all
+   * weighted identically and all looking like footnotes. The two that
+   * are money and the two that are logistics are not the same kind of
+   * fact, so they no longer look the same: the numbers lead, the
+   * arrangements sit under them as a line of text, and 已結算 is a
+   * state so it reads as a state.
+   */
   function renderMeta(season) {
     const el = document.getElementById("season-meta");
     const settled = season.settled_at !== null;
-    const timePill = season.game_start_time && season.game_end_time
-      ? `<span class="pill">球局時間 <strong>${escapeHtml(season.game_start_time.slice(0, 5))}-${escapeHtml(season.game_end_time.slice(0, 5))}</strong></span>`
-      : "";
-    const locationPill = season.location
-      ? `<span class="pill">地點 <strong>${escapeHtml(season.location)}</strong></span>`
-      : "";
+    const games = season.games.length;
+    const when = [
+      season.game_start_time && season.game_end_time
+        ? `${escapeHtml(season.game_start_time.slice(0, 5))}–${escapeHtml(season.game_end_time.slice(0, 5))}`
+        : null,
+      season.location ? escapeHtml(season.location) : null,
+      `${games} 場・${season.members.length} 人`,
+    ].filter(Boolean);
+
     el.innerHTML = `
-      <span class="pill">場地費 <strong>$${season.total_venue_cost}</strong></span>
-      <span class="pill">最低人數門檻 <strong>${season.minimum_roster}</strong></span>
-      ${timePill}
-      ${locationPill}
-      <span class="pill ${settled ? "settled" : ""}">${settled ? "已結算" : "尚未結算"}</span>
+      <div class="sm-figures">
+        <div class="sm-figure">
+          <span class="sm-label">場地費總額</span>
+          <span class="sm-value">$${season.total_venue_cost}</span>
+        </div>
+        <div class="sm-figure">
+          <span class="sm-label">每人每場</span>
+          <span class="sm-value">$${season.share_per_game}</span>
+        </div>
+        <div class="sm-figure">
+          <span class="sm-label">最低人數</span>
+          <span class="sm-value">${season.minimum_roster}</span>
+        </div>
+      </div>
+      <div class="sm-line">
+        <span>${when.join(" · ")}</span>
+        ${settled ? '<span class="sm-state done">已結算</span>' : '<span class="sm-state">尚未結算</span>'}
+      </div>
     `;
   }
 
