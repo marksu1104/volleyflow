@@ -33,6 +33,27 @@ endpoint is listed there and can be called from the page.
 through Render's environment variables and the Neon console, and nothing
 here should ever be pointed at it.
 
+### Putting something in the database
+
+The dev branch starts empty, so the app opens on "no club yet" with
+nothing to click.
+
+```bash
+uv run python scripts/seed_dev.py
+```
+
+Builds a full season through the HTTP API — a roster of 18, 13 games
+priced at the club's real numbers, leave with and without a substitute,
+a guest somebody brought, one night where the air conditioning forecast
+was wrong, and members who have paid, part paid and overpaid. Re-running
+it removes its own club first, so it always lands in the same state.
+
+It goes through the API rather than inserting rows because ledger
+entries are written by the route handlers: inserting directly would mean
+reimplementing that here, and a copy that drifted would leave you
+developing against books the real code would never produce. It is also a
+smoke test — if it fails, an endpoint the app depends on is broken.
+
 ### Being somebody, without LINE
 
 Every page needs a verified identity, and a laptop has no LIFF to get
