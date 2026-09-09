@@ -64,6 +64,21 @@ the money, never the person.
 ### 2.4 Billing — the core of the project; get this wrong and the project has no point
 
 - A member's season fee is the total venue cost split evenly across members.
+- Games do not all cost the same. A `Season` carries an `ac_surcharge` —
+  what one game's air conditioning adds to the venue bill — and each
+  `Game` records whether it ran. A cooled game's share is higher, so a
+  drop-in pays for the night they actually turn up to and an absence is
+  refunded at the price of the game that was missed. `ac_surcharge` is
+  per game, never per person: the venue charges the same regardless of
+  how many people come, so a roster change has to move what each of them
+  pays for it. Zero — the default — makes every game cost the same and
+  the formula collapses to the flat split above. Added 2026-09-10; see
+  `docs/billing-rules.md` "Air conditioning" for the worked example.
+- Whether the air conditioning ran is a forecast when the season is
+  booked and a fact on the evening itself, so it is the one season
+  parameter expected to change mid-season. Flipping it moves
+  `total_venue_cost` by `ac_surcharge` and corrects every member's
+  charge with an adjustment entry, never by editing the original.
 - A member's season fee is charged to their `Ledger` when they become a fixed member of a season with games already scheduled — before the season starts, matching how the organizer actually collects it — not at season end. If the venue cost, the roster, or a game's cancelled-and-refunded status changes afterward, every current member's charge is corrected with an adjustment entry, never by editing the original one (see `docs/billing-rules.md` "Ledger").
 - A member's `Absence` is refunded one game's share **only if a `DropIn` actually covers it**.
 - A `DropIn` pays the same per-game share, collected by the organizer on the day, in person.
