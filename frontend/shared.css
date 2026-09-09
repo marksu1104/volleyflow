@@ -205,7 +205,12 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 }
 
 /* hero card: the next/selected game's headline facts */
-.hero { background: var(--surface); border-radius: 16px; padding: 16px; box-shadow: var(--shadow); border: 1px solid var(--rule); animation: fadeIn .18s ease both; }
+/* No entry animation. renderHero rewrites this element's markup on
+   every repaint, so a fade-in meant for the first paint replayed after
+   every action — taking leave flashed the whole card a moment after it
+   had already updated. The one deliberate animation here is .card-swap,
+   which fires only when you pick a different date. */
+.hero { background: var(--surface); border-radius: 16px; padding: 16px; box-shadow: var(--shadow); border: 1px solid var(--rule); }
 .hero-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .hero-date { font-family: var(--font-num); font-size: 1.5rem; font-weight: 800; letter-spacing: -.01em; display: flex; align-items: baseline; gap: 8px; }
 /* "9/8" alone doesn't read as a date at a glance — the weekday is what
@@ -512,20 +517,28 @@ textarea.control { resize: vertical; min-height: 90px; }
 .bal.minus { color: var(--bad); }
 
 /* a join-pool / not-yet-a-fixed-member row */
-/* Three actions (加入本季 / 已在名單上 / 移出球隊) plus a name do not fit
-   across a phone, and 移出球隊 was running off the edge of the card. The
-   name takes the first line and the actions take the second, which is
-   also the order you read them in: who this is, then what to do about
-   them. */
+/* One line per person. Three word-buttons wouldn't fit beside a name, so
+   stacking them was the first fix — but that made every person two rows
+   tall, and a club of twenty an endlessly long page. Square icon
+   buttons say the same thing in a quarter of the width; the words move
+   to the confirm dialog and to aria-label, which is where they still
+   have to exist. */
 .pool-row {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 9px;
-  padding: 9px 10px; border-radius: 10px; background: var(--surface);
+  display: flex; align-items: center; gap: 8px; min-height: 46px;
+  padding: 6px 8px 6px 10px; border-radius: 10px; background: var(--surface);
   border: 1px solid var(--rule); margin-bottom: 5px;
 }
-.pool-who { display: flex; align-items: center; gap: 8px; flex: 1 1 100%; min-width: 0; }
-.pool-who > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.pool-row > button { margin-left: auto; }
-.pool-row > button ~ button { margin-left: 0; }
+.pool-who { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.pool-who > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icon-btn {
+  flex: none; width: 34px; height: 34px; border: none; border-radius: 9px; cursor: pointer;
+  font-size: 1.05rem; font-weight: 700; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface-2); color: var(--ink-soft);
+}
+.icon-btn.add { background: var(--good-soft); color: var(--good); }
+.icon-btn.link { background: var(--accent-soft); color: var(--accent); font-size: .9rem; }
+.icon-btn.remove { background: var(--bad-soft); color: var(--bad); }
 .pool-promote, .p-add {
   border: none; background: var(--good-soft); color: var(--good); font-size: .76rem;
   font-weight: 700; padding: 6px 11px; border-radius: 8px; cursor: pointer; white-space: nowrap;
