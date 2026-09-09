@@ -63,12 +63,14 @@
   <select id="season-picker" class="season-picker" hidden></select>
   <div id="error"></div>
 
-  <div class="section-label">加入連結</div>
-  <div class="link-box">
-    <code id="join-link"></code>
-    <button type="button" onclick="copyJoinLink()">複製</button>
+  <div id="join-link-section" hidden>
+    <div class="section-label">加入連結</div>
+    <div class="link-box">
+      <code id="join-link"></code>
+      <button type="button" onclick="copyJoinLink()">複製</button>
+    </div>
+    <p class="hint">用 LINE 開啟這個連結，會自動選到這個球隊並提示加入。</p>
   </div>
-  <p class="hint">用 LINE 開啟這個連結，會自動選到這個球隊並提示加入。</p>
 
   <div id="settled-note" class="settled-note" hidden>
     這一季已經結算，成員名單不能再變動。
@@ -81,7 +83,7 @@
 
   <div id="no-season"></div>
 
-  <div id="guest-section">
+  <div id="guest-section" hidden>
     <div class="section-label">新增訪客</div>
     <p class="hint" style="margin-top:0">
       沒有 LINE、或不想自己操作的人。他們沒辦法自己請假或報名，都要由你代為處理。
@@ -153,8 +155,13 @@
       // The join link stays useful with no season (people can join the club
       // and wait in the pool), so only the season roster half is swapped
       // out for the empty state here.
-      document.getElementById("roster-section").hidden = !id;
-      document.getElementById("guest-section").hidden = !id;
+      // Revealed by loadMembers once the roster is in hand, not here —
+      // otherwise the section's headings and empty boxes sit on screen
+      // for the length of two requests, looking broken rather than busy.
+      if (!id) {
+        document.getElementById("roster-section").hidden = true;
+        document.getElementById("guest-section").hidden = true;
+      }
       document.getElementById("season-picker").hidden = !id;
       document.getElementById("no-season").innerHTML = id
         ? ""
@@ -173,11 +180,15 @@
     );
   });
 
+  /** Hidden until there is a link to show. It used to be on screen from
+   * the first paint with an empty box under its heading, which is the
+   * same "looks broken rather than busy" problem as the empty forms. */
   function renderJoinLink() {
     const clubId = currentClubId();
     document.getElementById("join-link").textContent = clubId
       ? `https://liff.line.me/${LIFF_ID}?club=${clubId}`
       : "";
+    document.getElementById("join-link-section").hidden = !clubId;
   }
 
   function copyJoinLink() {
@@ -189,34 +200,47 @@
       .catch(() => toast("複製失敗，請手動選取文字"));
   }
 
+  const membersLoad = staleGuard();
+
   async function loadMembers(seasonId) {
+    const ticket = membersLoad.take();
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
+    // Only on the first load. Every action on this page ends by calling
+    // it again, and a full-page spinner flashing after each one is worse
+    // than the wait it replaces.
+    const firstLoad = document.getElementById("roster-section").hidden;
+    if (firstLoad) showPageLoading(document.getElementById("no-season"));
     try {
-      const res = await fetch(`${API_BASE}/seasons/${seasonId}`, {
-        headers: authHeader(),
-      });
+      // The roster and the join pool don't depend on each other, so they
+      // go out together rather than one after the other.
+      const [res, pool] = await Promise.all([
+        fetch(`${API_BASE}/seasons/${seasonId}`, { headers: authHeader() }),
+        fetch(`${API_BASE}/seasons/${seasonId}/join-pool`, { headers: authHeader() }),
+      ]);
+      if (!membersLoad.current(ticket)) return;
       if (!res.ok) {
+        document.getElementById("no-season").innerHTML = "";
         errorEl.textContent = "找不到這一季";
         return;
       }
       currentSeason = await res.json();
+      currentPool = pool.ok ? await pool.json() : [];
+      if (!membersLoad.current(ticket)) return;
       renderMembers(currentSeason);
-      await loadJoinPool(seasonId);
+      renderJoinPool();
+      document.getElementById("no-season").innerHTML = "";
+      document.getElementById("roster-section").hidden = false;
+      document.getElementById("guest-section").hidden = false;
     } catch (e) {
+      if (!membersLoad.current(ticket)) return;
+      document.getElementById("no-season").innerHTML = "";
       errorEl.textContent = "連不上伺服器：" + e.message;
     }
   }
 
   let currentPool = [];
 
-  async function loadJoinPool(seasonId) {
-    const res = await fetch(`${API_BASE}/seasons/${seasonId}/join-pool`, {
-      headers: authHeader(),
-    });
-    currentPool = res.ok ? await res.json() : [];
-    renderJoinPool();
-  }
 
   function renderJoinPool() {
     const section = document.getElementById("pool-section");

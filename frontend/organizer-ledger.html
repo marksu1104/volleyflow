@@ -52,7 +52,7 @@
     <span data-tab="closing">季末結算</span>
   </div>
 
-  <div id="tab-fee" class="tab">
+  <div id="tab-fee" class="tab" hidden>
     <div class="balance">
       <span class="balance-label">季費已收</span>
       <span id="fee-collected" class="balance-value"></span>
@@ -162,6 +162,9 @@
    * to collect and nothing to settle — so hide them entirely rather than
    * showing three empty money screens. */
   function setHasSeason(hasSeason) {
+    // #tab-fee starts hidden in the markup too, or its 季費已收 heading
+    // and its empty white bar sit under the spinner while the numbers
+    // are still on their way.
     document.getElementById("ledger-tabs").hidden = !hasSeason;
     document.getElementById("season-picker").hidden = !hasSeason;
     document.querySelectorAll(".tab").forEach((el) => {
