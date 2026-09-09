@@ -24,7 +24,12 @@ def player_from_row(row: PlayerRow) -> Player:
 
 
 def game_from_row(row: GameRow) -> Game:
-    return Game(id=row.id, date=row.date, status=row.status)
+    return Game(
+        id=row.id,
+        date=row.date,
+        status=row.status,
+        air_conditioned=row.air_conditioned,
+    )
 
 
 def season_from_rows(
@@ -35,6 +40,7 @@ def season_from_rows(
         total_venue_cost=season_row.total_venue_cost,
         games=tuple(game_from_row(g) for g in game_rows),
         members=tuple(player_from_row(p) for p in member_rows),
+        ac_surcharge=season_row.ac_surcharge,
     )
 
 

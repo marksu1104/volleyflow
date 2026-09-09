@@ -224,3 +224,103 @@ def test_settle_member_substitute_does_not_consume_a_fifo_slot():
 
     assert alice_result.refund == Decimal("250")
     assert bob_result.refund == Decimal("250")
+
+
+def _cooled_season() -> Season:
+    """Two games, one with the air conditioning on, 5 members.
+
+    base = (10000 - 1000) / 2 = 4500 -> 900 each
+    cooled = 4500 + 1000 = 5500   -> 1100 each
+    """
+    return Season(
+        id=1,
+        total_venue_cost=Decimal("10000"),
+        games=(
+            Game(id=1, date=date(2026, 8, 4), air_conditioned=True),
+            Game(id=2, date=date(2026, 8, 11)),
+        ),
+        members=MEMBERS,
+        ac_surcharge=Decimal("1000"),
+    )
+
+
+def test_a_season_fee_is_the_sum_of_its_games_not_a_share_times_a_count():
+    # With air conditioning the games differ, so "share x games" is no
+    # longer the same number as "add the games up".
+    result = settle_member(ALICE, _cooled_season(), absences=[], drop_ins=[])
+
+    assert result.season_fee == Decimal("2000")  # 1100 + 900
+
+
+def test_a_covered_absence_refunds_that_game_s_own_price():
+    # Missing the cooled night is worth more than missing the cool one —
+    # refunding both at one flat rate would quietly move money between
+    # members.
+    season = _cooled_season()
+    cooled, plain = season.games
+
+    cooled_absence = Absence(
+        player=ALICE, game=cooled, recorded_at=datetime(2026, 7, 1)
+    )
+    plain_absence = Absence(player=BOB, game=plain, recorded_at=datetime(2026, 7, 1))
+    drop_ins = [
+        DropIn(
+            player=Player(id=91, name="Guest 1"),
+            game=cooled,
+            signed_up_at=datetime(2026, 7, 2),
+        ),
+        DropIn(
+            player=Player(id=92, name="Guest 2"),
+            game=plain,
+            signed_up_at=datetime(2026, 7, 2),
+        ),
+    ]
+
+    alice = settle_member(
+        ALICE, season, absences=[cooled_absence, plain_absence], drop_ins=drop_ins
+    )
+    bob = settle_member(
+        BOB, season, absences=[cooled_absence, plain_absence], drop_ins=drop_ins
+    )
+
+    assert alice.refund == Decimal("1100")
+    assert bob.refund == Decimal("900")
+
+
+def test_a_drop_in_pays_the_price_of_the_night_they_turn_up_to():
+    season = _cooled_season()
+    cooled, plain = season.games
+
+    on_a_hot_night = DropIn(
+        player=Player(id=93, name="Guest"),
+        game=cooled,
+        signed_up_at=datetime(2026, 7, 2),
+    )
+    on_a_cool_night = DropIn(
+        player=Player(id=93, name="Guest"),
+        game=plain,
+        signed_up_at=datetime(2026, 7, 2),
+    )
+
+    assert settle_drop_in(on_a_hot_night, season) == Decimal("1100")
+    assert settle_drop_in(on_a_cool_night, season) == Decimal("900")
+
+
+def test_turning_the_air_conditioning_off_lowers_only_that_game():
+    # What the organizer does on the day when the forecast was wrong.
+    # The club pays the venue ac_surcharge less, so the season total
+    # drops with it — and only that night gets cheaper.
+    before = _cooled_season()
+    after = Season(
+        id=1,
+        total_venue_cost=Decimal("9000"),
+        games=(
+            Game(id=1, date=date(2026, 8, 4)),
+            Game(id=2, date=date(2026, 8, 11)),
+        ),
+        members=MEMBERS,
+        ac_surcharge=Decimal("1000"),
+    )
+
+    assert settle_member(ALICE, before, [], []).season_fee == Decimal("2000")
+    assert settle_member(ALICE, after, [], []).season_fee == Decimal("1800")

@@ -230,3 +230,32 @@ test("an optimistic row's controls carry a usable id once the server answers", (
   assert.match(settled, /cancelAbsence\(412,/);
   assert.doesNotMatch(settled, /cancelAbsence\(-1,/);
 });
+
+// A member seeing 235 on one night and 205 on the next needs the reason
+// beside the number, not somewhere else on the page.
+const { acPill } = page;
+
+test("a cooled night says what the extra is for", () => {
+  const season = { ac_surcharge: "540", members: new Array(18) };
+  const html = acPill(season, { air_conditioned: true });
+
+  assert.match(html, /含冷氣/);
+  assert.match(html, /\+\$30/, "540 shared between 18 people");
+});
+
+test("the share of the air conditioning follows the roster size", () => {
+  // The venue charges the same whatever the turnout, so a smaller roster
+  // pays more each — a figure hardcoded per person would drift.
+  const html = acPill({ ac_surcharge: "540", members: new Array(12) }, { air_conditioned: true });
+  assert.match(html, /\+\$45/);
+});
+
+test("a night with no air conditioning needs no explaining", () => {
+  const season = { ac_surcharge: "540", members: new Array(18) };
+  assert.equal(acPill(season, { air_conditioned: false }), "");
+});
+
+test("a club whose venue bundles it never sees any of this", () => {
+  const season = { ac_surcharge: "0", members: new Array(18) };
+  assert.equal(acPill(season, { air_conditioned: true }), "");
+});

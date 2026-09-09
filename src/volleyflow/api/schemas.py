@@ -72,6 +72,15 @@ class ClubMemberOut(BaseModel):
 
 class SeasonCreate(BaseModel):
     total_venue_cost: Decimal
+    ac_surcharge: Decimal = Decimal("0")
+    """What one game's air conditioning adds, on the same terms as
+    total_venue_cost — both are what the club actually pays, so a
+    discounted season takes the discounted surcharge. Zero means the
+    venue bundles it, and every game then costs the same."""
+    air_conditioned_dates: list[date] = Field(default_factory=list)
+    """Which of `game_dates` are forecast to need the air conditioning.
+    A forecast only: each game can be corrected on the day — see
+    routes.set_game_air_conditioning."""
     game_dates: list[date] = Field(min_length=1)
     member_names: list[str] = Field(min_length=1)
     capacity: int = 18
@@ -90,6 +99,7 @@ class SeasonUpdate(BaseModel):
     """
 
     total_venue_cost: Decimal | None = None
+    ac_surcharge: Decimal | None = None
     capacity: int | None = None
     minimum_roster: int | None = None
     game_start_time: time | None = None
@@ -105,6 +115,10 @@ class MemberAdd(BaseModel):
     has no account to set it from themselves, and the roster's male/female
     count needs it — so it's offered at the one moment the organizer is
     already typing them in."""
+
+
+class AirConditioningUpdate(BaseModel):
+    air_conditioned: bool
 
 
 class GameOut(BaseModel):
@@ -351,6 +365,14 @@ class GameDetailOut(BaseModel):
     deadline exists to stop the roster shifting under them and they're
     the one who has to record what actually happened — so this is
     answered per caller, not per game."""
+    air_conditioned: bool
+    """Whether the air conditioning ran (or is forecast to). Set when the
+    season is created and corrected on the day — see
+    routes.set_game_air_conditioning."""
+    share: Decimal
+    """What this particular game costs one person. Differs between games
+    once air conditioning is priced, which is why an absence refund and
+    a drop-in's charge both key off the game rather than the season."""
     absences: list[AbsenceDetailOut]
     confirmed_drop_ins: list[DropInDetailOut]
     waitlist_entries: list[DropInSummary]
@@ -366,9 +388,17 @@ class SeasonDetailOut(BaseModel):
     location: str | None
     change_deadline_days: int | None
     share_per_game: Decimal
-    """Each member or drop-in's cost for one game — the number everything
-    else in billing is a multiple of. Computed here, not on the frontend:
-    rounding happens in exactly one place (pricing.share_per_game)."""
+    """What one game costs one person, for a game with no air
+    conditioning. Computed here, not on the frontend: rounding happens
+    in exactly one place (pricing.shares_by_game).
+
+    No longer the only figure in play — a cooled game costs
+    `ac_surcharge / member_count` more, and each game carries its own
+    `share` below. This stays as the headline number a season is
+    described by."""
+    ac_surcharge: Decimal
+    """What one game's air conditioning adds to the venue bill; 0 when
+    the venue bundles it or the club doesn't use it."""
     settled_at: datetime | None
     members: list[MemberOut]
     games: list[GameDetailOut]

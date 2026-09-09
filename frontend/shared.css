@@ -930,3 +930,32 @@ textarea {
 .toast.good { background: var(--good); color: var(--surface); }
 .toast.out { opacity: 0; transform: translateY(6px); transition: opacity .2s, transform .2s; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.meta-pill.ac { background: var(--warn-soft); color: var(--warn); font-weight: 700; }
+
+/* ---- a game's air conditioning ----
+   A switch rather than a button: a button shows what you *can do*, a
+   switch shows what the game currently *is*. The organizer opens this
+   card to work on the roster anyway, so the state being permanently
+   legible there is what makes them notice a wrong one — no separate
+   "have you confirmed this?" flag needed. Only rendered when the club
+   actually pays for air conditioning; a switch that moves no money is
+   clutter. */
+.ac-switch {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rule);
+}
+.ac-switch .lbl { font-size: .84rem; font-weight: 700; flex: none; }
+.ac-seg { display: flex; gap: 3px; background: var(--surface-2); padding: 3px; border-radius: 9px; flex: none; }
+.ac-seg button {
+  border: none; background: none; padding: 6px 15px; border-radius: 7px; cursor: pointer;
+  font-family: var(--font-cjk); font-size: .82rem; font-weight: 700; color: var(--ink-faint);
+}
+.ac-seg button[aria-pressed="true"] { background: var(--warn); color: var(--surface); }
+.ac-seg button.off[aria-pressed="true"] { background: var(--ink-soft); }
+.ac-cost {
+  flex: 1; text-align: right; font-size: .78rem; color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+/* Explains the price beside it, so a member seeing 235 instead of 205
+   doesn't have to ask why. */
+.meta-pill.ac { background: var(--warn-soft); color: var(--warn); font-weight: 700; }
