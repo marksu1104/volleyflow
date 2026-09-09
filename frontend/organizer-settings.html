@@ -233,11 +233,11 @@
       <div class="section-label">刪除</div>
       <div class="set-row">
         <span class="set-label">刪除這一季<span class="set-sub">場次、請假、臨打、已記的季費都會消失</span></span>
-        <button type="button" class="set-link" onclick="deleteSeason()">刪除</button>
+        <button type="button" class="mini-action danger" onclick="deleteSeason()">刪除</button>
       </div>
       <div class="set-row">
         <span class="set-label">刪除整個球隊<span class="set-sub">連同底下所有季別一起刪除</span></span>
-        <button type="button" class="set-link" onclick="deleteClub()">刪除</button>
+        <button type="button" class="mini-action danger" onclick="deleteClub()">刪除</button>
       </div>
       <p class="hint">只有主揪能刪除，而且已經結算過的季別不能刪——那是已經結清的帳。</p>
     </div>
@@ -377,7 +377,7 @@
     const startValue = document.getElementById("g-start").value;
     const weeks = Number(document.getElementById("g-weeks").value) || 0;
     if (!startValue || weeks < 1) {
-      alert("請填開始日期和週數");
+      toast("請填開始日期和週數");
       return;
     }
     // Walk forward to the first matching weekday on or after the start
@@ -405,7 +405,7 @@
     if (!value) return;
     const iso = value.trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-      alert("日期格式要像 2026-07-07");
+      toast("日期格式要像 2026-07-07");
       return;
     }
     if (!wizardDates.includes(iso)) wizardDates.push(iso);
@@ -521,11 +521,11 @@
     const memberNames = selectedNames();
 
     if (gameDates.length === 0) {
-      alert("至少要有一個場次日期");
+      toast("至少要有一個場次日期");
       return;
     }
     if (memberNames.length === 0) {
-      alert("至少要有一位固定成員");
+      toast("至少要有一位固定成員");
       return;
     }
 
@@ -548,10 +548,10 @@
       // this season and remember it — simpler than hand-updating the
       // <select> and every piece of state loadSettings depends on.
       localStorage.setItem("vf_org_season", String(season.id));
-      alert("已建立這一季");
+      toast("已建立這一季");
       location.reload();
     } catch (e) {
-      alert("建立失敗：" + e.message);
+      toast("建立失敗：" + e.message);
     }
   }
 
@@ -611,7 +611,7 @@
       const info = describeDate(g.date);
       const status = gameStatusLabel(g.status);
       const action = !settled && g.status === "scheduled"
-        ? `<button type="button" class="set-link" onclick="openCancelSheet(${g.id}, '${info.label}')">取消這場</button>`
+        ? `<button type="button" class="mini-action danger" onclick="openCancelSheet(${g.id}, '${info.label}')">取消這場</button>`
         : status
           ? `<span class="hint" style="margin:0">${status}</span>`
           : "";
@@ -663,7 +663,7 @@
       closeCancelSheet();
       loadSettings(currentSeasonId);
     } catch (e) {
-      alert("取消失敗：" + e.message);
+      toast("取消失敗：" + e.message);
     }
   }
 
@@ -678,10 +678,10 @@ ${label} 以及已經記在每個人帳上的季費都會一起消失，無法�
     try {
       await deleteJson(API_BASE, `/seasons/${currentSeasonId}`);
       localStorage.removeItem("vf_org_season");
-      alert("已刪除這一季");
+      toast("已刪除這一季");
       location.reload();
     } catch (e) {
-      alert("刪除失敗：" + e.message);
+      toast("刪除失敗：" + e.message);
     }
   }
 
@@ -697,10 +697,10 @@ ${label} 以及已經記在每個人帳上的季費都會一起消失，無法�
       await deleteJson(API_BASE, `/clubs/${currentClubId()}`);
       localStorage.removeItem(CLUB_STORAGE_KEY);
       localStorage.removeItem("vf_org_season");
-      alert("已刪除這個球隊");
+      toast("已刪除這個球隊");
       location.href = "member.html";
     } catch (e) {
-      alert("刪除失敗：" + e.message);
+      toast("刪除失敗：" + e.message);
     }
   }
 
@@ -735,10 +735,10 @@ ${label} 以及已經記在每個人帳上的季費都會一起消失，無法�
 
     try {
       await postJson(API_BASE, `/seasons/${currentSeasonId}`, payload, "PATCH");
-      alert("設定已儲存");
+      toast("設定已儲存");
       loadSettings(currentSeasonId);
     } catch (e) {
-      alert("儲存失敗：" + e.message);
+      toast("儲存失敗：" + e.message);
     }
   }
 </script>

@@ -206,24 +206,43 @@ test("without a waitlist handler the queue shows no remove button", () => {
   assert.doesNotMatch(el.innerHTML, /data-remove-waitlist/);
 });
 
-test("every row in the list is the same height, whatever is in it", () => {
-  // Rows came out 52px or 70px depending on their contents: a 代打 note
-  // is a flex child whose padding counts toward the row, while the 訪客
-  // tag is inline inside the name and whose padding doesn't — and once a
-  // note took horizontal space the name beside it wrapped to a second
-  // line. Guarded structurally: the name may not wrap, and the note may
-  // not stretch a row.
+test("every kind of row is built from the same four slots", () => {
+  // The rows came out visibly different heights next to each other, and
+  // a min-height only papered over it. The cause was structural: a
+  // member's row had four children and everyone else's had five, so the
+  // flex distribution differed and the name got a different share of the
+  // width. They are one component now, and this is what stops them
+  // drifting apart again.
   const { season, game } = fixture();
   const el = makeElement();
-  renderGameDetail(el, season, game, { viewerName: "蘇慬" });
+  renderGameDetail(el, season, game, {
+    viewerName: "蘇慬",
+    onRecordAbsence() {},
+    onCancelAbsence() {},
+    onRemoveDropIn() {},
+    onLeaveWaitlist() {},
+  });
 
-  // A member with only a 訪客 tag, and a drop-in with a 代打 note, must
-  // produce rows with the same classes carrying the height.
-  assert.match(el.innerHTML, /class="att-row"/);
-  assert.match(el.innerHTML, /class="att-row dropin"/);
-  assert.doesNotMatch(
-    el.innerHTML,
-    /class="att-name"[^>]*style=/,
-    "nothing may set a row's name height inline"
-  );
+  const rows = el.innerHTML.split('<div class="att-row').slice(1);
+  assert.ok(rows.length >= 4, "member, drop-in, absent and queued rows all present");
+
+  for (const row of rows) {
+    const seg = row.split('<div class="att-row')[0];
+    const kind = /^[^"]*/.exec(seg)[0].trim() || "member";
+    for (const slot of ["att-num", "avatar sm", "att-name", "att-side"]) {
+      assert.ok(seg.includes(`class="${slot}`), `${kind} row is missing ${slot}`);
+    }
+  }
+});
+
+test("a row with nothing to say still has its right-hand slot", () => {
+  // An empty side is an empty flex item — no width, no height — which is
+  // what keeps a plain member's row the same shape as a drop-in's.
+  const { season, game } = fixture();
+  const el = makeElement();
+  renderGameDetail(el, season, game, {}); // read-only: no controls at all
+
+  const memberRow = el.innerHTML.split('<div class="att-row">')[1].split("</div>")[0];
+  assert.match(memberRow, /class="att-side"/);
+  assert.doesNotMatch(memberRow, /roster-note/, "no controls means no controls span");
 });

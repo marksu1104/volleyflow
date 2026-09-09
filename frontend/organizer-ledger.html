@@ -272,7 +272,7 @@
       actionHtml = `
         <div class="m-keep">
           <span>保留於餘額</span>
-          <button type="button" class="m-alt" onclick="recordCashRefund(${playerId}, ${split.balance})">現金退款</button>
+          <button type="button" class="mini-action" onclick="recordCashRefund(${playerId}, ${split.balance})">現金退款</button>
         </div>
       `;
     } else {
@@ -364,7 +364,7 @@
     } catch (e) {
       balances[playerId] = before;
       renderTabsFromBalances();
-      alert("記錄失敗：" + e.message);
+      toast("記錄失敗：" + e.message);
     }
   }
 
@@ -509,7 +509,7 @@
       });
       loadLedger(currentSeason.id);
     } catch (e) {
-      alert("結算失敗：" + e.message);
+      toast("結算失敗：" + e.message);
       btn.disabled = false;
       btn.textContent = "結算此季";
     }

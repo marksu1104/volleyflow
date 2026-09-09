@@ -447,7 +447,7 @@
       if (currentSeasonId) loadSeason(currentSeasonId);
       else renderNoSeason();
     } catch (e) {
-      alert("送出失敗：" + e.message);
+      toast("送出失敗：" + e.message);
     }
   }
 
@@ -505,7 +505,7 @@
       // Not into the app yet — ask which kind of member they are first.
       renderInviteIntent();
     } catch (e) {
-      alert("加入失敗：" + e.message);
+      toast("加入失敗：" + e.message);
     }
   }
 
@@ -560,7 +560,7 @@
   });
 
   function promptJoinClub() {
-    alert(
+    toast(
       "請向主揪索取「用連結加入球隊」的網址，用 LINE 打開即可自動加入該球隊。"
     );
   }
@@ -573,7 +573,7 @@
       localStorage.setItem(CLUB_STORAGE_KEY, String(club.id));
       location.reload();
     } catch (e) {
-      alert("建立失敗：" + e.message);
+      toast("建立失敗：" + e.message);
     }
   }
 
@@ -755,7 +755,7 @@
       await postJson(API_BASE, `/absences/${absenceId}/substitute`, { player_name: name, gender }, "PUT");
       loadSeason(currentSeasonId);
     } catch (e) {
-      alert("指定代打失敗：" + e.message);
+      toast("指定代打失敗：" + e.message);
     }
   }
 
@@ -994,8 +994,8 @@
   document.getElementById("su-go").addEventListener("click", async (e) => {
     const btn = e.currentTarget;
     for (const p of suPeople) {
-      if (!p.name.trim()) return alert("還有名字沒填");
-      if (!p.playerId && !p.gender) return alert(`請幫「${p.name.trim()}」選性別`);
+      if (!p.name.trim()) return toast("還有名字沒填");
+      if (!p.playerId && !p.gender) return toast(`請幫「${p.name.trim()}」選性別`);
     }
     btn.disabled = true;
     try {
@@ -1009,7 +1009,7 @@
       closeSignup();
       await loadSeason(currentSeasonId);
     } catch (err) {
-      alert("報名失敗：" + err.message);
+      toast("報名失敗：" + err.message);
     } finally {
       btn.disabled = false;
     }
@@ -1193,7 +1193,7 @@
     } catch (e) {
       currentSeason = snapshot;
       repaintGame();
-      alert(failureMessage + e.message);
+      toast(failureMessage + e.message);
     }
   }
 

@@ -153,6 +153,10 @@ button.action {
 }
 button.action.cancel { background: var(--bad-soft); color: var(--bad); }
 button.action.ghost { background: var(--surface); color: var(--ink-soft); border: 1px solid var(--rule-strong); }
+/* The same pill, tighter, for one that sits inside a list row rather
+   than under a card. Replaces .link-btn and .member-remove, which were
+   this shape redefined page by page. */
+button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 
 /* organizer section nav — 總覽 / 帳務管理 / 成員管理 / 設定 are separate
    pages sharing one season picker (same localStorage key), styled as a
@@ -316,7 +320,16 @@ button.action.ghost { background: var(--surface); color: var(--ink-soft); border
 .gdetail-section-label { font-size: .72rem; color: var(--ink-soft); font-weight: 700; margin: 14px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
 .roster-row.absent { background: var(--bad-soft); color: var(--bad); }
 .roster-row.dropin { background: var(--good-soft); color: var(--good); }
-.roster-note { font-size: .74rem; font-weight: 400; opacity: .9; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+/* The right-hand end of a roster row: whatever note and controls this
+   particular row has. Always emitted, even when empty, so every row has
+   the same four flex children and therefore the same geometry — the
+   member rows used to be missing this slot entirely, which is why they
+   sat at a different height from the drop-in rows beside them. */
+.att-side { display: flex; align-items: center; gap: 7px; flex: none; }
+.roster-note {
+  font-size: .74rem; font-weight: 400; opacity: .9; display: flex;
+  align-items: center; gap: 8px; justify-content: flex-end; flex: none;
+}
 .gdetail-mystatus { display: flex; align-items: center; gap: 7px; font-size: .84rem; font-weight: 700; padding: 9px 11px; border-radius: 9px; margin: 10px 0 4px; }
 .gdetail-mystatus.absent { background: var(--bad-soft); color: var(--bad); }
 .gdetail-mystatus.confirmed { background: var(--good-soft); color: var(--good); }
@@ -528,13 +541,11 @@ textarea.control { resize: vertical; min-height: 90px; }
 .m-act .confirm-partial { background: var(--accent); color: var(--surface); }
 .m-done { display: flex; align-items: center; gap: 6px; font-size: .76rem; color: var(--good); font-weight: 700; margin-top: 8px; }
 .m-keep { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 9px; font-size: .78rem; color: var(--ink-soft); }
-.m-alt { border: none; background: none; color: var(--accent); font-size: .78rem; font-weight: 700; cursor: pointer; padding: 0; text-decoration: underline; }
 
 /* 主揪 · 設定 rows */
 .set-row { display: flex; align-items: center; gap: 10px; padding: 11px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 11px; margin-bottom: 5px; }
 .set-label { flex: 1; font-size: .85rem; }
 .set-sub { display: block; font-size: .73rem; color: var(--ink-faint); margin-top: 1px; }
-.set-link { border: none; background: none; color: var(--bad); font-size: .76rem; font-weight: 700; cursor: pointer; padding: 0; }
 .set-go { color: var(--ink-faint); font-size: .85rem; }
 .warn-box { font-size: .75rem; color: var(--warn); background: var(--warn-soft); border-radius: 9px; padding: 9px 11px; margin-top: 11px; line-height: 1.55; }
 
@@ -862,3 +873,20 @@ textarea {
   background: var(--warn-soft); color: var(--warn);
 }
 .sm-state.done { background: var(--good-soft); color: var(--good); }
+
+/* Toasts — see shared.js toast(). Fixed to the bottom because that is
+   the half of a phone a thumb already covers, and above everything so a
+   failure raised from inside a sheet is still readable. */
+.toasts {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 0 16px 22px; pointer-events: none;
+}
+.toast {
+  max-width: 460px; width: 100%; padding: 12px 15px; border-radius: 12px;
+  background: var(--ink); color: var(--ground); font-size: .86rem; font-weight: 600;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .28); animation: toastIn .18s ease-out;
+}
+.toast.good { background: var(--good); color: var(--surface); }
+.toast.out { opacity: 0; transform: translateY(6px); transition: opacity .2s, transform .2s; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }

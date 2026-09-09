@@ -42,10 +42,13 @@ function makeElement() {
     disabled: false,
     style: {},
     dataset: {},
-    classList: { add() {}, remove() {}, toggle() {} },
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    id: "",
+    className: "",
     onclick: null,
     onchange: null,
     addEventListener() {},
+    remove() {},
     querySelector: () => null,
     querySelectorAll: () => [],
     closest: () => null,
@@ -96,9 +99,13 @@ function installGlobals() {
     getElementById: (id) => (elements[id] = elements[id] || makeElement()),
     querySelector: () => null,
     querySelectorAll: () => [],
-    createElement: () => makeSelect(),
+    // A <select> behaves differently enough from everything else to be
+    // worth its own stub — see makeSelect. Anything else is an ordinary
+    // element, which toast() needs for appendChild and classList.
+    createElement: (tag) => (tag === "select" ? makeSelect() : makeElement()),
     addEventListener() {},
     body: { appendChild() {} },
+    querySelectorAll: () => [],
   };
   globalThis.location = { search: "", pathname: "/member.html", hash: "", href: "" };
   globalThis.history = { replaceState() {} };

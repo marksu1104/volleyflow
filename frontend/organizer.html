@@ -321,7 +321,7 @@
       );
       loadDashboard(currentSeason.id);
     } catch (e) {
-      alert("設定代打失敗：" + e.message);
+      toast("設定代打失敗：" + e.message);
     }
   }
 
@@ -335,7 +335,7 @@
       });
       loadDashboard(currentSeason.id);
     } catch (e) {
-      alert("代為請假失敗：" + e.message);
+      toast("代為請假失敗：" + e.message);
     }
   }
 
@@ -346,7 +346,7 @@
       });
       loadDashboard(currentSeason.id);
     } catch (e) {
-      alert("取消請假失敗：" + e.message);
+      toast("取消請假失敗：" + e.message);
     }
   }
 
@@ -367,7 +367,7 @@
       });
       loadDashboard(currentSeason.id);
     } catch (e) {
-      alert("新增臨打失敗：" + e.message);
+      toast("新增臨打失敗：" + e.message);
     }
   }
 
@@ -381,7 +381,7 @@
       });
       loadDashboard(currentSeason.id);
     } catch (e) {
-      alert("移除候補失敗：" + e.message);
+      toast("移除候補失敗：" + e.message);
     }
   }
 
@@ -392,7 +392,7 @@
       });
       loadDashboard(currentSeason.id);
     } catch (e) {
-      alert("取消代打失敗：" + e.message);
+      toast("取消代打失敗：" + e.message);
     }
   }
 
