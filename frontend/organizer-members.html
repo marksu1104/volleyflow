@@ -21,10 +21,6 @@
     display: flex; justify-content: space-between; align-items: center; gap: 8px;
     padding: 10px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
   }
-  .member-remove {
-    border: none; background: var(--bad-soft); color: var(--bad); font-size: .78rem;
-    font-weight: 700; padding: 5px 10px; border-radius: 7px; cursor: pointer;
-  }
   .settled-note { font-size: .82rem; color: var(--ink-soft); padding: 16px 0; }
   .row-actions { display: flex; align-items: center; gap: 8px; }
   .mini-gender { display: inline-flex; gap: 3px; }
@@ -33,17 +29,9 @@
     font-size: .74rem; padding: 4px 9px; border-radius: 7px; cursor: pointer;
   }
   .mini-gender button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
-  .link-btn {
-    border: none; background: var(--accent-soft); color: var(--accent); font-size: .76rem;
-    font-weight: 700; padding: 6px 11px; border-radius: 8px; cursor: pointer; white-space: nowrap;
-  }
   .waiting-tag {
     font-size: .68rem; font-weight: 700; padding: 2px 7px; border-radius: 999px;
     background: var(--warn-soft); color: var(--warn); margin-left: 6px; white-space: nowrap;
-  }
-  .guest-tag {
-    font-size: .68rem; font-weight: 700; padding: 2px 7px; border-radius: 999px;
-    background: var(--surface-2); color: var(--ink-faint); margin-left: 6px; white-space: nowrap;
   }
 </style>
 </head>
@@ -197,8 +185,8 @@
     if (!text) return;
     navigator.clipboard
       .writeText(text)
-      .then(() => alert("已複製連結"))
-      .catch(() => alert("複製失敗，請手動選取文字"));
+      .then(() => toast("已複製連結", "good"))
+      .catch(() => toast("複製失敗，請手動選取文字"));
   }
 
   async function loadMembers(seasonId) {
@@ -252,8 +240,8 @@
               <span>${escapeHtml(p.name)}${genderTag(p.gender)}${guestTag(p)}${waitingTag(p)}</span>
             </span>
             <button type="button" class="pool-promote" onclick="promoteFromPool(${p.id})">加入本季</button>
-            ${p.linked ? `<button type="button" class="link-btn" onclick="linkToRosterEntry(${p.id})">已在名單上</button>` : ""}
-            <button type="button" class="member-remove" onclick="removeFromClub(${p.id}, '${p.name.replace(/'/g, "\'")}')">移出球隊</button>
+            ${p.linked ? `<button type="button" class="action sm" onclick="linkToRosterEntry(${p.id})">已在名單上</button>` : ""}
+            <button type="button" class="action cancel sm" onclick="removeFromClub(${p.id}, '${p.name.replace(/'/g, "\'")}')">移出球隊</button>
           </div>
         `
       )
@@ -276,7 +264,7 @@
       });
       loadMembers(currentSeason.id);
     } catch (e) {
-      alert("加入失敗：" + e.message);
+      toast("加入失敗：" + e.message);
     }
   }
 
@@ -325,7 +313,7 @@
     } catch (e) {
       if (member) member.gender = previous;
       renderMembers(currentSeason);
-      alert("設定性別失敗：" + e.message);
+      toast("設定性別失敗：" + e.message);
     }
   }
 
@@ -341,7 +329,7 @@
   async function linkToRosterEntry(linePlayerId) {
     const guests = (currentSeason.members || []).filter((m) => !m.linked);
     if (guests.length === 0) {
-      alert("本季名單上沒有標示訪客的人可以對應。");
+      toast("本季名單上沒有標示訪客的人可以對應。");
       return;
     }
     const options = guests.map((m, i) => (i + 1) + ". " + m.name).join("\n");
@@ -349,7 +337,7 @@
     if (!choice) return;
     const picked = guests[Number(choice) - 1];
     if (!picked) {
-      alert("沒有這個編號");
+      toast("沒有這個編號");
       return;
     }
     if (!confirm(`確定「${picked.name}」就是這個 LINE 帳號嗎？
@@ -363,7 +351,7 @@
       });
       loadMembers(currentSeason.id);
     } catch (e) {
-      alert("合併失敗：" + e.message);
+      toast("合併失敗：" + e.message);
     }
   }
 
@@ -375,7 +363,7 @@
       await deleteJson(API_BASE, `/clubs/${currentClubId()}/members/${playerId}`);
       loadMembers(currentSeason.id);
     } catch (e) {
-      alert("移出球隊失敗：" + e.message);
+      toast("移出球隊失敗：" + e.message);
     }
   }
 
@@ -398,7 +386,7 @@
             <span>${escapeHtml(m.name)}${genderTag(m.gender)}${guestTag(m)}</span>
             <span class="row-actions">
               ${settled ? "" : genderButtons(m)}
-              ${settled ? "" : `<button type="button" class="member-remove" onclick="removeMember(${m.id})">移除</button>`}
+              ${settled ? "" : `<button type="button" class="action cancel sm" onclick="removeMember(${m.id})">移除</button>`}
             </span>
           </div>
         `
@@ -424,7 +412,7 @@
       genderSelect.value = "";
       loadMembers(currentSeason.id);
     } catch (e) {
-      alert("新增失敗：" + e.message);
+      toast("新增失敗：" + e.message);
     }
   }
 
@@ -444,7 +432,7 @@
     );
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      alert("移除失敗：" + (data.detail || res.statusText));
+      toast("移除失敗：" + (data.detail || res.statusText));
       return;
     }
     loadMembers(currentSeason.id);

@@ -459,6 +459,36 @@ function renderGameDetail(container, season, game, options) {
   // exactly when you most need the answer. So the app does the sum: one
   // numbered list of the people who will be on court, and a separate
   // short list of who won't be and whether anyone covered for them.
+
+  /** Every person on this screen, in every list, is this row.
+   *
+   * They used not to be. A member's row had four children and everyone
+   * else's had five — the extra one being the note — so the flex
+   * distribution differed, the name got a different share of the width,
+   * and the rows came out visibly different heights next to each other.
+   * A min-height papered over the symptom without making the rows the
+   * same object.
+   *
+   * Now the slots are fixed and always present: position, avatar, name,
+   * and a right-hand side holding whatever note and controls this row
+   * happens to have. An empty side is an empty flex item, which takes no
+   * width and adds no height, so a row with nothing to say is the same
+   * shape as a row with plenty.
+   */
+  function rosterRow({ num, person, name, tone, note, controls }) {
+    return `
+      <div class="att-row${tone ? " " + tone : ""}">
+        <span class="att-num">${num}</span>
+        <span class="avatar sm">${initial(name)}</span>
+        <span class="att-name">${escapeHtml(name)}${genderTag(
+          person ? person.gender : null
+        )}${guestTag(person)}</span>
+        <span class="att-side">${note || ""}${
+          controls ? `<span class="roster-note">${controls}</span>` : ""
+        }</span>
+      </div>`;
+  }
+
   const absentByName = {};
   for (const a of game.absences) absentByName[a.player_name] = a;
   const canEdit = !!opts.onRecordAbsence;
@@ -466,90 +496,87 @@ function renderGameDetail(container, season, game, options) {
   const attendingRows = [];
   for (const m of season.members) {
     if (absentByName[m.name]) continue;
-    const mark = canEdit
-      ? `<button type="button" class="mini-action" data-mark-absent="${escapeHtml(m.name)}">請假</button>`
-      : "";
     attendingRows.push({
-      html: `<span class="avatar sm">${initial(m.name)}</span><span class="att-name">${escapeHtml(m.name)}${genderTag(m.gender)}${guestTag(m)}</span><span class="roster-note">${mark}</span>`,
-      cls: "",
+      person: m,
+      name: m.name,
+      tone: "",
+      note: "",
+      controls: canEdit
+        ? `<button type="button" class="mini-action" data-mark-absent="${escapeHtml(m.name)}">請假</button>`
+        : "",
     });
   }
   for (const d of game.confirmed_drop_ins) {
     // A substitute is playing *in someone's place*, which is the thing
     // you want to see next to their name — not filed away elsewhere.
-    const note = d.covering
-      ? `<span class="att-note sub">代 ${escapeHtml(d.covering)}</span>`
-      : '<span class="att-note">臨打</span>';
-    const removeControl = opts.onRemoveDropIn
-      ? `<button type="button" class="mini-action danger" data-remove-drop-in="${d.id}">移除</button>`
-      : "";
     attendingRows.push({
-      html: `<span class="avatar sm">${initial(d.player_name)}</span><span class="att-name">${escapeHtml(d.player_name)}${genderTag(d.gender)}${guestTag(d)}</span>${note}<span class="roster-note">${removeControl}</span>`,
-      cls: " dropin",
+      person: d,
+      name: d.player_name,
+      tone: "dropin",
+      note: d.covering
+        ? `<span class="att-note sub">代 ${escapeHtml(d.covering)}</span>`
+        : '<span class="att-note">臨打</span>',
+      controls: opts.onRemoveDropIn
+        ? `<button type="button" class="mini-action danger" data-remove-drop-in="${d.id}">移除</button>`
+        : "",
     });
   }
   const attendingHtml = attendingRows
-    .map(
-      (row, i) =>
-        `<div class="att-row${row.cls}"><span class="att-num">${i + 1}</span>${row.html}</div>`
-    )
+    .map((row, i) => rosterRow({ ...row, num: i + 1 }))
     .join("");
 
   const absentRows = [];
   for (const absence of game.absences) {
     const allowed = canAssignSubstitute(absence);
     const covering = game.confirmed_drop_ins.find((d) => d.covering === absence.player_name);
-    const note = absence.covered_by
-      ? `<span class="att-note sub">${escapeHtml(absence.covered_by)} 代打</span>`
-      : '<span class="att-note gap">缺額</span>';
-
     const offerAssign = !!onAssignSubstitute && allowed;
-    const assignLabel = absence.covered_by ? "編輯代打" : "指定代打";
-    const assignControl = offerAssign
-      ? `<button type="button" class="mini-action" data-toggle-sub="${absence.id}">${assignLabel}</button>`
-      : "";
+    const offerCancel =
+      !!absence.covered_by && !game.locked && !!onCancelSubstitute && allowed && covering;
 
-    const offerCancel = !!absence.covered_by && !game.locked && !!onCancelSubstitute && allowed && covering;
-    const cancelControl = offerCancel
-      ? `<button type="button" class="mini-action danger" data-cancel-sub="${covering.id}">取消代打</button>`
-      : "";
-
-    const undoControl =
-      opts.onCancelAbsence && !absence.covered_by
+    const controls =
+      (offerAssign
+        ? `<button type="button" class="mini-action" data-toggle-sub="${absence.id}">${
+            absence.covered_by ? "編輯代打" : "指定代打"
+          }</button>`
+        : "") +
+      (offerCancel
+        ? `<button type="button" class="mini-action danger" data-cancel-sub="${covering.id}">取消代打</button>`
+        : "") +
+      (opts.onCancelAbsence && !absence.covered_by
         ? `<button type="button" class="mini-action" data-undo-absence="${absence.id}">取消請假</button>`
-        : "";
-    absentRows.push(`
-      <div class="att-row absent">
-        <span class="att-num">—</span>
-        <span class="avatar sm">${initial(absence.player_name)}</span>
-        <span class="att-name">${escapeHtml(absence.player_name)}</span>
-        ${note}
-        <span class="roster-note">${assignControl}${cancelControl}${undoControl}</span>
-      </div>
-      ${offerAssign ? substituteForm(absence) : ""}
-    `);
+        : "");
+
+    absentRows.push(
+      rosterRow({
+        num: "—",
+        person: season.members.find((m) => m.name === absence.player_name),
+        name: absence.player_name,
+        tone: "absent",
+        note: absence.covered_by
+          ? `<span class="att-note sub">${escapeHtml(absence.covered_by)} 代打</span>`
+          : '<span class="att-note gap">缺額</span>',
+        controls,
+      }) + (offerAssign ? substituteForm(absence) : "")
+    );
   }
 
-  // Same row as the attendance list, deliberately. These were borderless
+  // Same row as everything else — see rosterRow. These were borderless
   // text next to eighteen bordered cards, which made a queue of three
-  // read as nothing at all — reported more than once as "the waitlist
-  // disappeared" when it had been on screen the whole time. A dashed
-  // edge and a 候補 note carry "not in yet" without leaving the shape.
+  // read as nothing at all and got reported as "the waitlist
+  // disappeared" more than once.
   const waitlistRows = game.waitlist_entries
-    .map((w, i) => {
-      const isMe = viewerName && w.player_name === viewerName;
-      const remove = opts.onLeaveWaitlist
-        ? `<button type="button" class="mini-action danger" data-remove-waitlist="${w.id}">移除</button>`
-        : "";
-      return `
-        <div class="att-row queued${isMe ? " me" : ""}">
-          <span class="att-num">${i + 1}</span>
-          <span class="avatar sm">${initial(w.player_name)}</span>
-          <span class="att-name">${escapeHtml(w.player_name)}${genderTag(w.gender)}${isMe ? "（你）" : ""}</span>
-          <span class="att-note">候補</span>
-          <span class="roster-note">${remove}</span>
-        </div>`;
-    })
+    .map((w, i) =>
+      rosterRow({
+        num: i + 1,
+        person: w,
+        name: w.player_name + (viewerName && w.player_name === viewerName ? "（你）" : ""),
+        tone: "queued" + (viewerName && w.player_name === viewerName ? " me" : ""),
+        note: '<span class="att-note">候補</span>',
+        controls: opts.onLeaveWaitlist
+          ? `<button type="button" class="mini-action danger" data-remove-waitlist="${w.id}">移除</button>`
+          : "",
+      })
+    )
     .join("");
 
   // Order matters, and it used to be wrong: every control sat *after*
@@ -1036,4 +1063,35 @@ function staleGuard() {
     take: () => ++latest,
     current: (ticket) => ticket === latest,
   };
+}
+
+/** A short message that doesn't take the screen away from you.
+ *
+ * Every failure used to be an alert(), 48 of them, and inside a LIFF
+ * webview that is a system modal: it covers the page, it has to be
+ * dismissed before anything else can happen, and it looks like the app
+ * crashed rather than like a form needing another go. This says the same
+ * thing over the page and gets out of the way.
+ *
+ * Kept for messages, not decisions — confirm() still blocks, because
+ * "are you sure you want to remove this member" genuinely must be
+ * answered before anything proceeds.
+ */
+function toast(message, kind) {
+  let host = document.getElementById("vf-toasts");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "vf-toasts";
+    host.className = "toasts";
+    document.body.appendChild(host);
+  }
+  const el = document.createElement("div");
+  el.className = "toast" + (kind ? " " + kind : "");
+  el.textContent = message;
+  host.appendChild(el);
+  // Long enough to read a failure reason, short enough not to stack up.
+  setTimeout(() => {
+    el.classList.add("out");
+    setTimeout(() => el.remove(), 220);
+  }, kind === "good" ? 1800 : 3600);
 }

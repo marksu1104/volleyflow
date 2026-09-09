@@ -120,7 +120,7 @@
 
   async function saveName() {
     const name = document.getElementById("name-input").value.trim();
-    if (!name) { alert("名字不能是空的"); return; }
+    if (!name) { toast("名字不能是空的"); return; }
     if (name === me.name) return;
     try {
       const updated = await postJson(API_BASE, `/players/${me.id}/name`, { name }, "PUT");
@@ -130,10 +130,10 @@
       me.name = updated.name;
       renderProfile();
       if (updated.name !== name) {
-        alert(`「${name}」已經有人使用，改成了「${updated.name}」`);
+        toast(`「${name}」已經有人使用，改成了「${updated.name}」`);
       }
     } catch (e) {
-      alert("儲存失敗：" + e.message);
+      toast("儲存失敗：" + e.message);
     }
   }
 
@@ -151,7 +151,7 @@
     } catch (e) {
       me.gender = previous;
       renderProfile();
-      alert("設定失敗：" + e.message);
+      toast("設定失敗：" + e.message);
     }
   });
 
@@ -188,7 +188,7 @@
       img.onerror = () => {
         screenshot = null;
         preview.hidden = true;
-        alert("讀不到這張圖片，請換一張試試。");
+        toast("讀不到這張圖片，請換一張試試。");
       };
       img.src = reader.result;
     };
@@ -199,7 +199,7 @@
     const box = document.getElementById("report-text");
     const text = box.value.trim();
     if (!text) {
-      alert("請先描述一下遇到的問題");
+      toast("請先描述一下遇到的問題");
       return;
     }
     const btn = document.getElementById("report-btn");
@@ -221,11 +221,11 @@
       document.getElementById("report-preview").hidden = true;
       btn.disabled = false;
       btn.textContent = "送出回報";
-      alert("已送出，謝謝你的回報。");
+      toast("已送出，謝謝你的回報。");
     } catch (e) {
       btn.disabled = false;
       btn.textContent = "送出回報";
-      alert("送出失敗：" + e.message);
+      toast("送出失敗：" + e.message);
     }
   }
 
