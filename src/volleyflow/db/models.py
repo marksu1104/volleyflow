@@ -266,6 +266,18 @@ class DropInRow(Base):
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     signed_up_at: Mapped[datetime]
     cancelled_at: Mapped[datetime | None] = mapped_column(default=None)
+    absorbed_at: Mapped[datetime | None] = mapped_column(default=None)
+    """Set when this drop-in was cancelled *by the system* because the
+    player became a fixed member of the season, not by the player
+    changing their mind.
+
+    Both look identical in `cancelled_at`, and telling them apart is the
+    whole point: taking somebody back off the roster has to restore the
+    nights they really played, and must not resurrect a signup they
+    cancelled themselves. Without this column an add-then-remove erased
+    a game the person had attended, along with the fee owed for it —
+    reported from real use on 2026-09-10.
+    """
     covers_absence_id: Mapped[int | None] = mapped_column(
         ForeignKey("absences.id"), default=None
     )

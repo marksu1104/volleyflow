@@ -721,6 +721,10 @@ def _absorb_drop_ins_into_membership(
     )
     for drop_in in drop_ins:
         drop_in.cancelled_at = now
+        # Marked, so removing them from the roster later can tell these
+        # apart from signups the player cancelled themselves and put
+        # exactly these back — see _restore_absorbed_drop_ins.
+        drop_in.absorbed_at = now
 
     # Reverse to a target of nothing owed, rather than recomputing a
     # share and subtracting that: the share when they signed up was
@@ -754,11 +758,56 @@ def _absorb_drop_ins_into_membership(
         )
 
     # Waiting for a slot is equally moot once they're on the roster.
+    # Deleted rather than marked, and deliberately not restored if they
+    # later come off the roster: a queue place carries no money and no
+    # attendance, and putting somebody back into a queue that has moved
+    # on since would be a guess. A drop-in is the opposite — a night
+    # somebody really played and really owes for — which is why that one
+    # is marked and does come back.
     db.query(WaitlistEntryRow).filter(
         WaitlistEntryRow.player_id == player_id,
         WaitlistEntryRow.game_id.in_(game_ids),
     ).delete(synchronize_session=False)
     db.flush()
+
+
+def _restore_absorbed_drop_ins(db: Session, season: SeasonRow, player_id: int) -> None:
+    """The mirror of _absorb_drop_ins_into_membership: put back the
+    signups that were cancelled only because this player joined the
+    fixed roster, now that they have left it again.
+
+    Only rows carrying `absorbed_at` are touched, so a signup the player
+    cancelled themselves stays cancelled — they are indistinguishable in
+    `cancelled_at`, and resurrecting one would put somebody on a roster
+    they had deliberately left.
+
+    Charged at the current per-game share rather than at whatever was
+    refunded: that is what a drop-in for this game costs now, and with
+    the roster back to its previous size it is normally the same figure
+    anyway. Capacity is not rechecked — this is restoring a night that
+    already happened, not admitting somebody new.
+    """
+    game_ids = [
+        row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id).all()
+    ]
+    if not game_ids:
+        return
+
+    absorbed = (
+        db.query(DropInRow)
+        .filter(
+            DropInRow.player_id == player_id,
+            DropInRow.game_id.in_(game_ids),
+            DropInRow.absorbed_at.is_not(None),
+        )
+        .all()
+    )
+    for drop_in in absorbed:
+        drop_in.cancelled_at = None
+        drop_in.absorbed_at = None
+        _record_drop_in_charge(db, drop_in, season, reverse=False)
+    if absorbed:
+        db.flush()
 
 
 def _sync_season_fee_ledger(db: Session, season_row: SeasonRow) -> None:
@@ -1619,12 +1668,17 @@ def remove_member(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> None:
-    """Same retroactive-share caveat as adding one. Doesn't touch this
-    player's past absence/drop-in rows for this season — they simply
-    stop counting toward anyone's settlement once removed, since that
-    only ever iterates the current member list. Their season-fee charge
-    is reversed to zero and every remaining member's charge is corrected
-    for the new, higher share — see _sync_season_fee_ledger.
+    """Same retroactive-share caveat as adding one. Their season-fee
+    charge is reversed to zero and every remaining member's charge is
+    corrected for the new, higher share — see _sync_season_fee_ledger.
+
+    Absences are left alone: they stop counting toward anyone's
+    settlement once removed, since that only ever iterates the current
+    member list. Drop-ins are not left alone, which is the fix for a bug
+    reported on 2026-09-10 — adding somebody to the roster cancels the
+    signups they had already made so the same night isn't billed twice,
+    and without putting those back an add-then-remove erased a night
+    they had actually played, and the fee owed for it with it.
     """
     season = db.get(SeasonRow, season_id)
     if season is None:
@@ -1641,6 +1695,9 @@ def remove_member(
 
     db.delete(membership)
     db.flush()
+    # Before the fee sync, so the restored drop-in charges are already
+    # in the ledger when it works out what everyone owes.
+    _restore_absorbed_drop_ins(db, season, player_id)
     _sync_season_fee_ledger(db, season)
     db.commit()
 
