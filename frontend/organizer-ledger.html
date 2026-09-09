@@ -140,8 +140,15 @@
       (id) => {
         stopLoadingEscalation();
         document.getElementById("club-picker").hidden = !currentClubId();
-        setHasSeason(!!id);
-        if (id) loadLedger(id);
+        if (id) {
+          // The tabs stay hidden until loadLedger has the numbers.
+          // Revealing them here put an empty 季費已收 card on screen for
+          // the length of the fetch, which reads as broken, not busy.
+          document.getElementById("season-picker").hidden = false;
+          loadLedger(id);
+        } else {
+          setHasSeason(false);
+        }
       },
       (e) => showPageError(document.getElementById("no-season"), e.message),
       // Only the clubs this person actually organizes — see
@@ -186,17 +193,28 @@
       });
       if (!ledgerLoad.current(ticket)) return;
       if (!res.ok) {
+        document.getElementById("no-season").innerHTML = "";
         errorEl.textContent = "找不到這一季";
         return;
       }
       const season = await res.json();
       if (!ledgerLoad.current(ticket)) return;
       currentSeason = season;
+      // Started before the balances rather than after them: the two
+      // don't depend on each other, and running them back to back made
+      // this page wait out two round trips where one would do.
+      const settlementReady = fetchSettlement(season);
       await loadBalances(currentSeason);
       if (!ledgerLoad.current(ticket)) return;
+      settlementPreview = await settlementReady;
+      if (!ledgerLoad.current(ticket)) return;
       await Promise.all([renderFeeTab(), renderDropInTab(), renderClosingTab()]);
+      if (!ledgerLoad.current(ticket)) return;
+      setHasSeason(true);
     } catch (e) {
-      if (ledgerLoad.current(ticket)) errorEl.textContent = "連不上伺服器：" + e.message;
+      if (!ledgerLoad.current(ticket)) return;
+      document.getElementById("no-season").innerHTML = "";
+      errorEl.textContent = "連不上伺服器：" + e.message;
     }
   }
 
@@ -209,12 +227,32 @@
    * re-ask. */
   let balances = {};
 
+  let settlementPreview = { members: [] };
+
+  /** What settling right now would refund. Fetched alongside the
+   * balances, not after them. */
+  async function fetchSettlement(season) {
+    if (season.settled_at !== null) return { members: [] };
+    try {
+      const res = await fetch(`${API_BASE}/seasons/${season.id}/settlement`, {
+        headers: authHeader(),
+      });
+      return res.ok ? await res.json() : { members: [] };
+    } catch (e) {
+      return { members: [] };
+    }
+  }
+
   async function loadBalances(season) {
-    const res = await fetch(
-      `${API_BASE}/clubs/${currentClubId()}/balances?season_id=${season.id}`,
-      { headers: authHeader() }
-    );
-    applyBalances(res.ok ? await res.json() : []);
+    try {
+      await getJsonSWR(
+        `${API_BASE}/clubs/${currentClubId()}/balances?season_id=${season.id}`,
+        (rows) => applyBalances(rows),
+        { headers: authHeader() }
+      );
+    } catch (e) {
+      applyBalances([]);
+    }
   }
 
   /** Kept apart from the fetch above so the rows every money figure is
@@ -465,11 +503,7 @@
     document.getElementById("closing-after").hidden = !settled;
 
     if (!settled) {
-      const settlementRes = await fetch(`${API_BASE}/seasons/${season.id}/settlement`, {
-        headers: authHeader(),
-      });
-      const settlement = settlementRes.ok ? await settlementRes.json() : { members: [] };
-      const refunded = settlement.members.filter((m) => Number(m.refund) > 0);
+      const refunded = settlementPreview.members.filter((m) => Number(m.refund) > 0);
       document.getElementById("closing-preview").innerHTML = refunded.length
         ? refunded
             .map(

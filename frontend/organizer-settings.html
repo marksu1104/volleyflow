@@ -312,12 +312,15 @@
       "vf_org_season",
       (id) => {
       stopLoadingEscalation();
-      document.getElementById("page-state").innerHTML = "";
+      if (!id) document.getElementById("page-state").innerHTML = "";
       const hasClub = !!currentClubId();
       document.getElementById("club-picker").hidden = !hasClub;
       document.getElementById("no-club-note").hidden = hasClub;
       document.getElementById("create-season-form").hidden = !hasClub || !!id;
-      document.getElementById("settings-form").hidden = !id;
+      // Deliberately not revealed here: loadSettings shows it once the
+      // season is in hand. Showing it now put an entirely blank form on
+      // screen — every field empty — for as long as the fetch took,
+      // which reads as broken rather than as loading.
       // "尚無任何季別" in a picker is noise when creating the first season
       // is the only thing you can do here.
         document.getElementById("season-picker").hidden = !id;
@@ -555,22 +558,37 @@
     }
   }
 
+  const settingsLoad = staleGuard();
+
+  /** The form stays hidden and the spinner stays up until there is
+   * something to put in the fields — see the picker callback above.
+   *
+   * Read through getJsonSWR so a second visit paints from the last known
+   * season straight away: this page sits at the end of a chain of five
+   * round trips (LIFF, identify, clubs, seasons, then this one), and it
+   * was the only link in it not cached.
+   */
   async function loadSettings(seasonId) {
+    const ticket = settingsLoad.take();
     currentSeasonId = seasonId;
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
     try {
-      const res = await fetch(`${API_BASE}/seasons/${seasonId}`, {
-        headers: authHeader(),
-      });
-      if (!res.ok) {
-        errorEl.textContent = "找不到這一季";
-        return;
-      }
-      currentSeason = await res.json();
-      fillForm(currentSeason);
-      renderGames(currentSeason);
+      await getJsonSWR(
+        `${API_BASE}/seasons/${seasonId}`,
+        (season) => {
+          if (!settingsLoad.current(ticket)) return;
+          currentSeason = season;
+          fillForm(season);
+          renderGames(season);
+          document.getElementById("page-state").innerHTML = "";
+          document.getElementById("settings-form").hidden = false;
+        },
+        { headers: authHeader() }
+      );
     } catch (e) {
+      if (!settingsLoad.current(ticket)) return;
+      document.getElementById("page-state").innerHTML = "";
       errorEl.textContent = "連不上伺服器：" + e.message;
     }
   }
