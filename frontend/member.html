@@ -47,7 +47,7 @@
 
   <div class="season-row">
     <select id="season-picker" class="season-picker" hidden></select>
-    <button type="button" id="balance-chip" class="balance-chip" onclick="location.href='profile.html'" hidden></button>
+    <button type="button" id="balance-chip" class="balance-chip" onclick="openLedger()" hidden></button>
   </div>
   <div id="error"></div>
 
@@ -76,6 +76,16 @@
   <div class="gsheet">
     <button class="gsheet-close" aria-label="關閉" data-close-sheet="game">✕</button>
     <div id="game-detail"></div>
+  </div>
+</div>
+
+<div id="ledger-backdrop" class="gsheet-backdrop" hidden>
+  <div class="gsheet">
+    <button class="gsheet-close" aria-label="關閉" data-close-sheet="ledger">✕</button>
+    <h3 style="margin:0">我的帳務</h3>
+    <p class="su-when" id="lg-sub"></p>
+    <div id="lg-total" class="lg-total"></div>
+    <div id="lg-entries"></div>
   </div>
 </div>
 
@@ -164,6 +174,9 @@
     await refreshMyClubs();
     renderClubChip();
     renderManageButton();
+    // Off it goes now, alongside the season load rather than after it —
+    // the chip used to be the last thing on a finished page to appear.
+    renderBalance();
     // renderIntentAsk deliberately not called here: it needs to know
     // whether you're already on this season's roster, and no season has
     // loaded yet. Asking now both races the spinner (the question
@@ -578,6 +591,7 @@
     btn.addEventListener("click", () => {
       if (btn.dataset.closeSheet === "club") closeClubSheet();
       else if (btn.dataset.closeSheet === "signup") closeSignup();
+      else if (btn.dataset.closeSheet === "ledger") closeLedger();
       else closeGameSheet();
     });
   });
@@ -1001,41 +1015,99 @@
    * of its own at the bottom cost about 80px, which was most of the
    * reason a phone had to scroll to reach the calendar.
    *
-   * Two lines, because "已結清" on its own says nothing: the value needs
-   * to say what it is the value *of*. And the label is deliberately not
-   * 「本季」 — get_player_ledger spans every season in the club (a
-   * refund can be carried into next season, CLAUDE.md 2.4), so calling
-   * a cross-season figure "this season's" was simply wrong, which the
-   * old 本季餘額 card was.
+   * Two lines, because "已結清" on its own says nothing. The label is
+   * deliberately not 「本季」: get_player_ledger spans every season in
+   * the club (a refund can be carried forward, CLAUDE.md 2.4), so the
+   * old 本季餘額 card was labelling a cross-season figure wrongly.
    *
    * Keyed off the viewer's own player id rather than the season roster:
    * a drop-in has a balance too, and looking them up in season.members
    * meant the one group who pays cash on the day could never see what
-   * they owed. */
+   * they owed.
+   *
+   * Read through getJsonSWR so it paints from the last known figure
+   * immediately. It used to run last, after the season and the roster,
+   * and its own request on top of those — several seconds of the chip
+   * simply not being there, on a page that was otherwise finished.
+   */
+  let myLedger = null;
+
   async function renderBalance() {
     const chip = document.getElementById("balance-chip");
     if (!myPlayerId || !currentClubId()) {
       chip.hidden = true;
       return;
     }
-    const res = await fetch(
-      `${API_BASE}/clubs/${currentClubId()}/players/${myPlayerId}/ledger`,
-      { headers: authHeader() }
-    );
-    if (!res.ok) {
+    try {
+      await getJsonSWR(
+        `${API_BASE}/clubs/${currentClubId()}/players/${myPlayerId}/ledger`,
+        (ledger) => {
+          myLedger = ledger;
+          const n = Number(ledger.balance);
+          chip.innerHTML = `
+            <span class="bc-label">我的帳務</span>
+            <span class="bc-value">${
+              n === 0 ? "已結清" : n > 0 ? `餘額 +$${n}` : `應繳 $${Math.abs(n)}`
+            }<span class="bc-chev">›</span></span>`;
+          chip.className = "balance-chip " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
+          chip.hidden = false;
+        },
+        { headers: authHeader() }
+      );
+    } catch (e) {
       chip.hidden = true;
+    }
+  }
+
+  // Mirrors ledger.EntryType exactly — a name that isn't in that enum
+  // renders as the raw value, which is how the first two guesses here
+  // (payment_received, cash_refund) would have shipped unnoticed.
+  const ENTRY_LABELS = {
+    season_fee_charged: "季費",
+    drop_in_fee_charged: "臨打費",
+    absence_refund: "請假退費",
+    payment: "收付款",
+    carried_over: "上季結轉",
+  };
+
+  /** The entries behind the number. Tapping the chip used to open the
+   * profile page, which lists clubs and balances — the same number
+   * again, one screen further away. What you actually want to know is
+   * what made it up. */
+  function openLedger() {
+    const wrap = document.getElementById("lg-entries");
+    const total = document.getElementById("lg-total");
+    document.getElementById("ledger-backdrop").hidden = false;
+    if (!myLedger) {
+      total.textContent = "";
+      wrap.innerHTML = '<div class="empty">載入中…</div>';
       return;
     }
-    const n = Number((await res.json()).balance);
-    const state = n === 0 ? "even" : n > 0 ? "owed" : "owe";
-    chip.innerHTML = `
-      <span class="bc-label">我的帳務</span>
-      <span class="bc-value">${
-        n === 0 ? "已結清" : n > 0 ? `+$${n}` : `應繳 $${Math.abs(n)}`
-      } ›</span>`;
-    chip.className = "balance-chip " + state;
-    chip.hidden = false;
+    const n = Number(myLedger.balance);
+    document.getElementById("lg-sub").textContent =
+      (allClubs.find((c) => String(c.id) === String(currentClubId())) || {}).name || "";
+    total.className = "lg-total " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
+    total.innerHTML = `<span>${n === 0 ? "已結清" : n > 0 ? "應退給你" : "你應繳"}</span>
+      <strong>${n === 0 ? "$0" : "$" + Math.abs(n)}</strong>`;
+
+    // Newest first: the recent charge is the one you're asking about.
+    const rows = myLedger.entries.slice().reverse();
+    wrap.innerHTML = rows.length
+      ? rows
+          .map((e) => {
+            const amt = Number(e.amount);
+            return `
+              <div class="lg-row">
+                <span class="lg-when">${e.recorded_at.slice(5, 10).replace("-", "/")}</span>
+                <span class="lg-what">${escapeHtml(ENTRY_LABELS[e.entry_type] || e.entry_type)}</span>
+                <span class="lg-amt ${amt >= 0 ? "plus" : "minus"}">${amt >= 0 ? "+" : "−"}$${Math.abs(amt)}</span>
+              </div>`;
+          })
+          .join("")
+      : '<div class="empty">還沒有任何帳務紀錄</div>';
   }
+
+  function closeLedger() { document.getElementById("ledger-backdrop").hidden = true; }
   /**
    * Applies the change to what's on screen straight away, then sends it.
    * A round trip to a sleepy free-tier backend is long enough that a tap

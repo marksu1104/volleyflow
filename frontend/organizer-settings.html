@@ -323,7 +323,11 @@
         document.getElementById("season-picker").hidden = !id;
         if (id) loadSettings(id);
       },
-      (e) => showPageError(document.getElementById("page-state"), e.message)
+      (e) => showPageError(document.getElementById("page-state"), e.message),
+      // Only the clubs this person actually organizes — see
+      // initClubAndSeasonPickers. A club they merely belong to used to
+      // appear here and open a management screen they cannot use.
+      (c) => c.role === "organizer"
     );
   });
 
