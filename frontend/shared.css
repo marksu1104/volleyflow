@@ -787,3 +787,53 @@ textarea {
 .balance-chip.owed .bc-label { color: var(--good); opacity: .75; }
 .balance-chip.even { background: var(--surface-2); border-color: transparent; }
 .balance-chip.even .bc-value { color: var(--ink-soft); }
+
+/* The ledger behind the balance chip. Tapping it used to open the
+   profile page, which shows the same number again one screen further
+   away; what you want is what made it up. */
+.lg-total {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin: 14px 0 12px; padding: 12px 14px; border-radius: 12px;
+  background: var(--surface-2); font-size: .82rem; font-weight: 700;
+}
+.lg-total strong { font-family: var(--font-num); font-size: 1.5rem; font-weight: 800; }
+.lg-total.owe { background: var(--bad-soft); color: var(--bad); }
+.lg-total.owed { background: var(--good-soft); color: var(--good); }
+.lg-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px 2px;
+  border-bottom: 1px solid var(--rule); font-size: .85rem;
+}
+.lg-row:last-child { border-bottom: none; }
+.lg-when { font-family: var(--font-num); font-size: .76rem; color: var(--ink-faint); width: 42px; flex: none; }
+.lg-what { flex: 1; min-width: 0; }
+.lg-amt { font-family: var(--font-num); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lg-amt.plus { color: var(--good); }
+.lg-amt.minus { color: var(--ink); }
+.bc-chev { color: var(--ink-faint); margin-left: 5px; font-weight: 600; }
+
+/* ---- a season's terms on the management screen ----
+   Five identical grey pills gave the venue cost, the minimum roster, the
+   times, the location and the settled state exactly the same weight, so
+   the money read as a footnote. Money leads as figures; the
+   arrangements are a line of text under them; the settled state reads
+   as a state. */
+.sm-figures {
+  display: flex; gap: 8px; background: var(--surface); border-radius: 13px;
+  padding: 13px; box-shadow: var(--shadow);
+}
+.sm-figure { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sm-figure + .sm-figure { border-left: 1px solid var(--rule); padding-left: 12px; }
+.sm-label { font-size: .66rem; font-weight: 600; color: var(--ink-faint); white-space: nowrap; }
+.sm-value {
+  font-family: var(--font-num); font-size: 1.15rem; font-weight: 800; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.sm-line {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 9px; font-size: .78rem; color: var(--ink-soft);
+}
+.sm-state {
+  flex: none; font-size: .68rem; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+  background: var(--warn-soft); color: var(--warn);
+}
+.sm-state.done { background: var(--good-soft); color: var(--good); }
