@@ -16,6 +16,25 @@ from sqlalchemy.orm import Session, sessionmaker
 
 load_dotenv()
 
+_PSYCOPG3 = "postgresql+psycopg://"
+
+
+def database_url() -> str:
+    """DATABASE_URL, with the driver pinned to psycopg 3.
+
+    Neon's console hands out `postgresql://`, and SQLAlchemy maps that
+    scheme to psycopg2 — a driver this project doesn't install. Pasting
+    the string Neon gives you into a new place therefore fails with
+    ModuleNotFoundError at connect time, a long way from the actual
+    mistake; it cost one production deploy already. Accepting every form
+    here means the string can be pasted as-is.
+    """
+    url = os.environ["DATABASE_URL"]
+    for prefix in ("postgresql://", "postgres://"):
+        if url.startswith(prefix):
+            return _PSYCOPG3 + url.removeprefix(prefix)
+    return url
+
 
 @lru_cache
 def get_engine() -> Engine:
@@ -27,7 +46,7 @@ def get_engine() -> Engine:
     lru_cache turns this zero-argument function into a lazy singleton —
     still nothing happens at import time, only on the first real call.
     """
-    return create_engine(os.environ["DATABASE_URL"])
+    return create_engine(database_url())
 
 
 def get_session() -> Session:
