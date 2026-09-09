@@ -313,7 +313,7 @@
       actionHtml = `
         <div class="m-keep">
           <span>保留於餘額</span>
-          <button type="button" class="mini-action" onclick="recordCashRefund(${playerId}, ${split.balance})">現金退款</button>
+          <button type="button" class="mini-action" onclick="recordCashRefund(${playerId}, ${split.balance})">退款</button>
         </div>
       `;
     } else {
@@ -365,7 +365,7 @@
   }
 
   async function recordCashRefund(playerId, amount) {
-    if (!confirm(`確定要記錄現金退款 $${amount} 嗎？`)) return;
+    if (!confirm(`確定要記錄退款 $${amount} 嗎？`)) return;
     await submitPayment(playerId, -amount);
   }
 
@@ -399,9 +399,14 @@
         client_token: token,
       });
       const ticket = ledgerLoad.take();
+      const optimistic = JSON.stringify(balances);
       await loadBalances(currentSeason);
       if (!ledgerLoad.current(ticket)) return;
-      renderTabsFromBalances();
+      // Only repaint if the server disagreed with what's already on
+      // screen — which after a payment it normally doesn't. Rebuilding
+      // three tabs' worth of identical markup costs a frame and reads as
+      // the stutter that made a working tap feel broken.
+      if (JSON.stringify(balances) !== optimistic) renderTabsFromBalances();
     } catch (e) {
       balances[playerId] = before;
       renderTabsFromBalances();

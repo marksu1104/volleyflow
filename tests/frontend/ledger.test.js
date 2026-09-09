@@ -59,13 +59,15 @@ test("owing money offers to collect it, and shows why", () => {
   assert.match(html, /上季餘額/, "the carried credit has to be visible, not just netted");
 });
 
-test("being owed money offers cash but doesn't insist", () => {
-  // Leaving it on the balance is the default; handing cash back is the
-  // exception the organizer chooses.
+test("being owed money offers a refund but doesn't insist", () => {
+  // Leaving it on the balance is the default; paying it back is the
+  // exception the organizer chooses. The label says 退款 rather than
+  // 現金退款 because most of this money moves by LINE Pay.
   const html = moneyRowHtml(2, "莊", "male", splitLedger(row(705, 0, 0)), null, null);
   assert.match(html, /應退 \$705/);
   assert.match(html, /保留於餘額/);
-  assert.match(html, /現金退款/);
+  assert.match(html, /退款/);
+  assert.doesNotMatch(html, /現金/);
 });
 
 test("a settled member is shown as settled, with nothing to press", () => {

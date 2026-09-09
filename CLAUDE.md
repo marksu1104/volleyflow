@@ -242,4 +242,20 @@ with.
 - `uv` for environment and dependency management. `uv.lock` is committed.
 - `ruff` for linting and formatting — one tool, not three.
 - `pre-commit` runs `ruff` before every commit.
+- Database migrations are applied to production **by CI**, from the
+  `Migrate production` step, after the tests pass and before the Render
+  deploy that needs them. They used to be pasted by hand because
+  Render's pre-deploy command is a paid feature — which took production
+  down once (deploy first, SQL second) and made every schema change wait
+  on a human being available at the right moment. Needs the
+  `PRODUCTION_DATABASE_URL` secret; the step fails loudly rather than
+  deploying without it. `alembic upgrade head` is a no-op when there is
+  nothing to apply, so it costs nothing on the pushes that change no
+  schema.
+- `tests/visual/check.js` renders the real frontend in a real browser
+  and asserts on measured geometry — row heights, overflow, input font
+  sizes. Not in CI (a browser download per push isn't worth it at this
+  size); run it when you change layout. Three bugs reached a phone that
+  no static check could have caught, and this is what catches that
+  class.
 - GitHub Actions runs `ruff` → `mypy` → `pytest` on every push and PR; all three must pass.

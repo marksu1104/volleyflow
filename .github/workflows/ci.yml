@@ -55,6 +55,32 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+      # Migrations run here, against production, *before* the deploy that
+      # needs them. They were applied by hand until now because Render's
+      # pre-deploy command is a paid feature — which took production down
+      # once already (deploy first, SQL second, see docs/dev-log.md), and
+      # since then every schema change has needed a human to paste SQL at
+      # exactly the right moment. Nothing about that was ever going to
+      # get more reliable with practice.
+      #
+      # Alembic is idempotent: a run with nothing to do is a no-op, so
+      # this is harmless on the majority of pushes that change no schema.
+      # Skipped entirely when the secret isn't set, so a fork or a
+      # misconfigured repo fails loudly on the deploy rather than
+      # silently running migrations somewhere unexpected.
+      - name: Migrate production
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "PRODUCTION_DATABASE_URL is not set — refusing to deploy" >&2
+            exit 1
+          fi
+          uv run alembic current
+          uv run alembic upgrade head
+          uv run alembic current
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+
       # GitHub's push webhook to Render's auto-deploy stopped firing
       # after the repo got deleted and recreated (see docs/dev-log.md,
       # 2026-09-05) — several attempts to fix the GitHub App connection
