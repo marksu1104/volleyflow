@@ -475,17 +475,29 @@ function renderGameDetail(container, season, game, options) {
    * width and adds no height, so a row with nothing to say is the same
    * shape as a row with plenty.
    */
-  function rosterRow({ num, person, name, tone, note, controls }) {
+  function rosterRow({ num, person, name, tone, note, controls, guest = true }) {
+    // The note (代打 / 臨打 / 缺額 / 候補) goes *inside* the name, as an
+    // inline element, and that placement is the whole fix.
+    //
+    // As a flex child of the row it was blockified, so its vertical
+    // padding counted toward the row's height: a row whose note ran long
+    // measured 57px against its neighbours' 46px, and the note sat 9px
+    // off the controls beside it. Inline, its padding doesn't touch the
+    // line box — which is exactly why the 訪客 tag, inline in the same
+    // place, never caused any of this. Measured in a real browser, after
+    // four theories about the flex layout turned out to be wrong.
+    //
+    // Only the person's own name is allowed to be shortened, hence the
+    // inner att-who: with the truncation on the whole thing, a long name
+    // ate the 代打 note beside it and left a blank pill.
     return `
       <div class="att-row${tone ? " " + tone : ""}">
         <span class="att-num">${num}</span>
         <span class="avatar sm">${initial(name)}</span>
-        <span class="att-name">${escapeHtml(name)}${genderTag(
+        <span class="att-name"><span class="att-who">${escapeHtml(name)}</span>${genderTag(
           person ? person.gender : null
-        )}${guestTag(person)}</span>
-        <span class="att-side">${note || ""}${
-          controls ? `<span class="roster-note">${controls}</span>` : ""
-        }</span>
+        )}${guest ? guestTag(person) : ""}${note || ""}</span>
+        <span class="roster-note">${controls || ""}</span>
       </div>`;
   }
 
@@ -552,6 +564,10 @@ function renderGameDetail(container, season, game, options) {
         person: season.members.find((m) => m.name === absence.player_name),
         name: absence.player_name,
         tone: "absent",
+        // The 訪客 tag says "can't record their own absence" — which is
+        // moot on the list of people who are already absent, and it was
+        // the content that pushed this row past the width of a phone.
+        guest: false,
         note: absence.covered_by
           ? `<span class="att-note sub">${escapeHtml(absence.covered_by)} 代打</span>`
           : '<span class="att-note gap">缺額</span>',

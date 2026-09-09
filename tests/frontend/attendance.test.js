@@ -206,13 +206,14 @@ test("without a waitlist handler the queue shows no remove button", () => {
   assert.doesNotMatch(el.innerHTML, /data-remove-waitlist/);
 });
 
-test("every kind of row is built from the same four slots", () => {
-  // The rows came out visibly different heights next to each other, and
-  // a min-height only papered over it. The cause was structural: a
-  // member's row had four children and everyone else's had five, so the
-  // flex distribution differed and the name got a different share of the
-  // width. They are one component now, and this is what stops them
-  // drifting apart again.
+test("every kind of row is built from the same slots", () => {
+  // The rows came out visibly different heights next to each other. The
+  // cause was the note: as a flex child of the row it was blockified, so
+  // its vertical padding counted toward the row's height, while the 訪客
+  // tag inline in the same place cost nothing. Measured at 57px against
+  // its neighbours' 46px, with the note sitting 9px off the controls.
+  // It is inline inside the name now, and this pins the structure that
+  // depends on.
   const { season, game } = fixture();
   const el = makeElement();
   renderGameDetail(el, season, game, {
@@ -229,20 +230,40 @@ test("every kind of row is built from the same four slots", () => {
   for (const row of rows) {
     const seg = row.split('<div class="att-row')[0];
     const kind = /^[^"]*/.exec(seg)[0].trim() || "member";
-    for (const slot of ["att-num", "avatar sm", "att-name", "att-side"]) {
+    for (const slot of ["att-num", "avatar sm", "att-name", "att-who", "roster-note"]) {
       assert.ok(seg.includes(`class="${slot}`), `${kind} row is missing ${slot}`);
+    }
+    const note = /class="att-note/.test(seg);
+    if (note) {
+      const noteAt = seg.indexOf('class="att-note');
+      const nameEnd = seg.indexOf("</span>", seg.indexOf('class="roster-note'));
+      assert.ok(
+        noteAt < seg.indexOf('class="roster-note'),
+        `${kind}: the note must sit inside the name, before the controls`
+      );
+      assert.ok(nameEnd > 0);
     }
   }
 });
 
-test("a row with nothing to say still has its right-hand slot", () => {
-  // An empty side is an empty flex item — no width, no height — which is
-  // what keeps a plain member's row the same shape as a drop-in's.
+test("only the person's name gives way when a row runs out of room", () => {
+  // Truncating the whole name element ate the 代打 note beside it and
+  // left a blank pill, so the truncation is on the name alone.
   const { season, game } = fixture();
   const el = makeElement();
-  renderGameDetail(el, season, game, {}); // read-only: no controls at all
+  renderGameDetail(el, season, game, {});
+  assert.match(el.innerHTML, /<span class="att-who">/);
+});
 
-  const memberRow = el.innerHTML.split('<div class="att-row">')[1].split("</div>")[0];
-  assert.match(memberRow, /class="att-side"/);
-  assert.doesNotMatch(memberRow, /roster-note/, "no controls means no controls span");
+test("the absent list drops the 訪客 tag, which means nothing there", () => {
+  // It says "can't record their own absence" — moot for someone already
+  // absent, and it was the content that pushed the row past a phone's
+  // width.
+  const { season, game } = fixture();
+  const el = makeElement();
+  renderGameDetail(el, season, game, {});
+
+  const absent = el.innerHTML.split('<div class="att-row absent')[1].split("</div>")[0];
+  assert.doesNotMatch(absent, /guest-tag/);
+  assert.match(el.innerHTML, /guest-tag/, "but it still appears on the attendance list");
 });

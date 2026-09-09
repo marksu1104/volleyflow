@@ -325,7 +325,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
    the same four flex children and therefore the same geometry — the
    member rows used to be missing this slot entirely, which is why they
    sat at a different height from the drop-in rows beside them. */
-.att-side { display: flex; align-items: center; gap: 7px; flex: none; }
+.roster-note:empty { display: none; }
 .roster-note {
   font-size: .74rem; font-weight: 400; opacity: .9; display: flex;
   align-items: center; gap: 8px; justify-content: flex-end; flex: none;
@@ -372,6 +372,9 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
    depending on what happened to be in them, which is what makes a list
    look untidy however good the individual rows are. */
 .att-row {
+  /* Every row is the same object, so every row is the same height. What
+     used to break that was the note being a flex child rather than an
+     inline one — see rosterRow. */
   display: flex; align-items: center; gap: 8px; padding: 8px 10px; min-height: 46px;
   border-radius: 9px; background: var(--surface); border: 1px solid var(--rule); font-size: .87rem;
 }
@@ -383,13 +386,20 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 }
 /* One line, always. A roster is scanned, and a name that wraps takes
    the whole row's height with it. */
-.att-name {
-  flex: 1; min-width: 0; font-weight: 500;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+/* Deliberately NOT a flex container: the tags inside it have to stay
+   inline, or their padding starts counting toward the row's height and
+   rows come out different sizes. The name alone truncates, as an
+   inline-block, so a long one gives way before the 代打 note does. */
+.att-name { flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; }
+.att-who {
+  display: inline-block; max-width: 100%; vertical-align: bottom;
+  overflow: hidden; text-overflow: ellipsis;
 }
+/* Inline, like .guest-tag beside it — see rosterRow. A flex sibling
+   here is what made rows different heights. */
 .att-note {
-  font-size: .72rem; font-weight: 700; line-height: 1.5; padding: 2px 8px; border-radius: 999px;
-  background: var(--surface-2); color: var(--ink-soft); white-space: nowrap; flex: none;
+  font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-left: 6px;
+  background: var(--surface-2); color: var(--ink-soft); white-space: nowrap;
 }
 .att-row.dropin .att-note { background: var(--surface); color: var(--good); }
 .att-note.sub { background: var(--accent-soft); color: var(--accent); }
