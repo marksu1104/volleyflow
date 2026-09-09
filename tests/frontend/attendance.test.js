@@ -205,3 +205,25 @@ test("without a waitlist handler the queue shows no remove button", () => {
   renderGameDetail(el, season, game, { viewerName: "蘇慬", onRemoveDropIn() {} });
   assert.doesNotMatch(el.innerHTML, /data-remove-waitlist/);
 });
+
+test("every row in the list is the same height, whatever is in it", () => {
+  // Rows came out 52px or 70px depending on their contents: a 代打 note
+  // is a flex child whose padding counts toward the row, while the 訪客
+  // tag is inline inside the name and whose padding doesn't — and once a
+  // note took horizontal space the name beside it wrapped to a second
+  // line. Guarded structurally: the name may not wrap, and the note may
+  // not stretch a row.
+  const { season, game } = fixture();
+  const el = makeElement();
+  renderGameDetail(el, season, game, { viewerName: "蘇慬" });
+
+  // A member with only a 訪客 tag, and a drop-in with a 代打 note, must
+  // produce rows with the same classes carrying the height.
+  assert.match(el.innerHTML, /class="att-row"/);
+  assert.match(el.innerHTML, /class="att-row dropin"/);
+  assert.doesNotMatch(
+    el.innerHTML,
+    /class="att-name"[^>]*style=/,
+    "nothing may set a row's name height inline"
+  );
+});

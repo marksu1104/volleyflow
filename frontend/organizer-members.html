@@ -110,7 +110,7 @@
     </div>
   </div>
 
-  <div id="roster-section">
+  <div id="roster-section" hidden>
     <div class="section-label">本季固定成員</div>
     <p id="warn-note" class="hint" style="color: var(--warn)">
       新增或移除成員會重新計算整季每人每場的金額，包含已經打過的場次。
@@ -249,7 +249,7 @@
               ${p.avatar_url
                 ? `<img class="avatar sm" src="${escapeHtml(p.avatar_url)}" alt="">`
                 : `<span class="avatar sm">${escapeHtml((p.name || "?").slice(0, 1))}</span>`}
-              <span>${escapeHtml(p.name)}${genderLabel(p.gender)}${guestTag(p)}${waitingTag(p)}</span>
+              <span>${escapeHtml(p.name)}${genderTag(p.gender)}${guestTag(p)}${waitingTag(p)}</span>
             </span>
             <button type="button" class="pool-promote" onclick="promoteFromPool(${p.id})">加入本季</button>
             ${p.linked ? `<button type="button" class="link-btn" onclick="linkToRosterEntry(${p.id})">已在名單上</button>` : ""}
@@ -379,11 +379,6 @@
     }
   }
 
-  function genderLabel(g) {
-    if (g === "male") return '<span class="gender-tag male">男</span>';
-    if (g === "female") return '<span class="gender-tag female">女</span>';
-    return "";
-  }
 
   function renderMembers(season) {
     const settled = season.settled_at !== null;
@@ -400,7 +395,7 @@
       .map(
         (m) => `
           <div class="member-row">
-            <span>${escapeHtml(m.name)}${genderLabel(m.gender)}${guestTag(m)}</span>
+            <span>${escapeHtml(m.name)}${genderTag(m.gender)}${guestTag(m)}</span>
             <span class="row-actions">
               ${settled ? "" : genderButtons(m)}
               ${settled ? "" : `<button type="button" class="member-remove" onclick="removeMember(${m.id})">移除</button>`}

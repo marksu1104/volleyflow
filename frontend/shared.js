@@ -84,6 +84,16 @@ function computeGenderCounts(season, game) {
  * `opts.metaPills` — extra `<span class="meta-pill">` HTML beyond the
  * per-game share, e.g. a change deadline or the minimum-roster count.
  */
+/** The 男/女 tag beside a name. One implementation because there were
+ * three — this one, plus genderTagFor on the money screen and
+ * genderLabel on the roster screen, all identical and all needing the
+ * same edit whenever the tag changes. */
+function genderTag(g) {
+  if (g === "male") return '<span class="gender-tag male">男</span>';
+  if (g === "female") return '<span class="gender-tag female">女</span>';
+  return "";
+}
+
 function renderGameHero(season, game, opts) {
   const o = opts || {};
   const info = describeDate(game.date);
@@ -401,12 +411,6 @@ function renderGameDetail(container, season, game, options) {
   const onAssignSubstitute = opts.onAssignSubstitute;
   const onCancelSubstitute = opts.onCancelSubstitute;
   const canAssignSubstitute = opts.canAssignSubstitute || (() => true);
-
-  function genderTag(g) {
-    if (g === "male") return '<span class="gender-tag male">男</span>';
-    if (g === "female") return '<span class="gender-tag female">女</span>';
-    return "";
-  }
 
   /** Marks anyone who has never opened the app: they can't record their
    * own absence or sign themselves up, so somebody has to do it for

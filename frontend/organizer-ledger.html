@@ -46,7 +46,7 @@
 
   <div id="no-season"></div>
 
-  <div class="seg" id="ledger-tabs">
+  <div class="seg" id="ledger-tabs" hidden>
     <span class="on" data-tab="fee">季費</span>
     <span data-tab="dropin">當天臨打</span>
     <span data-tab="closing">季末結算</span>
@@ -293,7 +293,7 @@
       <div class="m-row">
         <div class="m-top">
           <span class="avatar sm">${escapeHtml((name || "?").slice(0, 1))}</span>
-          <span class="m-name">${escapeHtml(name)}${genderTagFor(gender)}${broughtTag}</span>
+          <span class="m-name">${escapeHtml(name)}${genderTag(gender)}${broughtTag}</span>
           <span class="m-net ${netCls}">${netText}</span>
         </div>
         ${breakParts.length ? `<div class="m-break">${breakParts.join("")}</div>` : ""}
@@ -302,11 +302,6 @@
     `;
   }
 
-  function genderTagFor(g) {
-    if (g === "male") return '<span class="gender-tag male">男</span>';
-    if (g === "female") return '<span class="gender-tag female">女</span>';
-    return "";
-  }
 
   // Scoped to the clicked button's own row (via closest), not a
   // page-wide id lookup — the same player can legitimately have a row
