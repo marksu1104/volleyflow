@@ -1331,6 +1331,7 @@ def start_season(
     season = SeasonRow(
         club_id=club_id,
         total_venue_cost=payload.total_venue_cost,
+        ac_surcharge=payload.ac_surcharge,
         capacity=payload.capacity,
         minimum_roster=payload.minimum_roster,
         game_start_time=payload.game_start_time,
@@ -1341,7 +1342,14 @@ def start_season(
     db.add(season)
     db.flush()
 
-    games = [GameRow(season_id=season.id, date=d) for d in payload.game_dates]
+    # Which nights are forecast to need the air conditioning. A forecast
+    # only — each game can be corrected on the evening itself, which is
+    # when anyone actually knows.
+    cooled = set(payload.air_conditioned_dates)
+    games = [
+        GameRow(season_id=season.id, date=d, air_conditioned=d in cooled)
+        for d in payload.game_dates
+    ]
     db.add_all(games)
 
     member_ids = []
@@ -1415,7 +1423,11 @@ def update_season(
     _require_organizer(db, season.club_id, current_player)
 
     updates = payload.model_dump(exclude_unset=True)
-    if "total_venue_cost" in updates and season.settled_at is not None:
+    # Both, not just the venue cost: a game's price is one subtracted
+    # from the other, so moving either after settling would re-price a
+    # season whose ledger is already closed.
+    priced = {"total_venue_cost", "ac_surcharge"} & updates.keys()
+    if priced and season.settled_at is not None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Season is already settled — venue cost can't change now",

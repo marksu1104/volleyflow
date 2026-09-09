@@ -3069,3 +3069,91 @@ def test_the_air_conditioning_cannot_be_changed_after_settling(
     )
 
     assert response.status_code == 400
+
+
+def test_a_season_can_be_created_with_cooled_nights(client: TestClient) -> None:
+    # The organizer's forecast, entered once when the season is booked.
+    club = create_club(client)
+    response = client.post(
+        f"/clubs/{club['id']}/seasons",
+        json={
+            "total_venue_cost": "52290",
+            "ac_surcharge": "540",
+            "game_dates": [f"2026-10-{d:02d}" for d in (6, 13, 20, 27)],
+            "air_conditioned_dates": ["2026-10-06", "2026-10-13"],
+            "member_names": [f"Member {i}" for i in range(18)],
+        },
+    )
+
+    assert response.status_code == 200
+    detail = client.get(f"/seasons/{response.json()['id']}").json()
+    cooled = {g["date"] for g in detail["games"] if g["air_conditioned"]}
+    assert cooled == {"2026-10-06", "2026-10-13"}
+
+
+def test_a_cooled_game_is_priced_higher_than_a_plain_one(client: TestClient) -> None:
+    # The club's own invoice, end to end through the API: 13 games, 8
+    # cooled, 52290 transferred, 540 a night for the air conditioning.
+    club = create_club(client)
+    dates = [f"2026-10-{d:02d}" for d in range(1, 14)]
+    season = client.post(
+        f"/clubs/{club['id']}/seasons",
+        json={
+            "total_venue_cost": "52290",
+            "ac_surcharge": "540",
+            "game_dates": dates,
+            "air_conditioned_dates": dates[:8],
+            "member_names": [f"Member {i}" for i in range(18)],
+        },
+    ).json()
+
+    games = client.get(f"/seasons/{season['id']}").json()["games"]
+    cooled = [Decimal(g["share"]) for g in games if g["air_conditioned"]]
+    plain = [Decimal(g["share"]) for g in games if not g["air_conditioned"]]
+
+    assert cooled == [Decimal("235")] * 8
+    assert plain == [Decimal("205")] * 5
+    assert sum(cooled + plain) * 18 == Decimal("52290")
+
+
+def test_a_drop_in_on_a_cooled_night_pays_the_cooled_price(
+    client: TestClient,
+) -> None:
+    club = create_club(client)
+    season = client.post(
+        f"/clubs/{club['id']}/seasons",
+        json={
+            "total_venue_cost": "10000",
+            "ac_surcharge": "1000",
+            "game_dates": ["2026-10-06", "2026-10-13"],
+            "air_conditioned_dates": ["2026-10-06"],
+            "member_names": ["Alice", "Bob", "Carol", "Dave", "Eve"],
+        },
+    ).json()
+    cooled, plain = season["games"]
+
+    results = []
+    for game in (cooled, plain):
+        guest = client.post(
+            f"/games/{game['id']}/drop-ins",
+            json={"people": [{"player_name": f"Guest {game['id']}", "gender": "male"}]},
+        ).json()["results"][0]
+        ledger = client.get(
+            f"/clubs/{club['id']}/players/{guest['player_id']}/ledger"
+        ).json()
+        results.append(-Decimal(ledger["balance"]))
+
+    assert results == [Decimal("1100"), Decimal("900")]
+
+
+def test_changing_the_air_conditioning_price_is_blocked_after_settling(
+    client: TestClient,
+) -> None:
+    # A game's price is the venue cost minus the surcharge, so moving
+    # either would re-price a season whose ledger is already closed.
+    season = _start_season(client, member_names=["Alice"])
+    client.post(f"/seasons/{season['id']}/settle")
+
+    response = client.patch(f"/seasons/{season['id']}", json={"ac_surcharge": "500"})
+
+    assert response.status_code == 400

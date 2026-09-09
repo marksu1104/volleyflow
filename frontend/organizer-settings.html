@@ -71,6 +71,12 @@
         <input id="c-cost" class="control" type="number" step="1" min="0" inputmode="numeric" placeholder="整季付給場地的總金額">
       </div>
 
+      <div class="field" style="margin-bottom:13px">
+        <label for="c-ac">冷氣一場多少錢</label>
+        <input id="c-ac" class="control" type="number" step="1" min="0" inputmode="numeric" placeholder="沒有另外收就留 0">
+        <span class="hint">跟場地費總額同一個基準（優惠後）。之後每一場都可以個別改開或關。</span>
+      </div>
+
       <div class="field-pair" style="margin-bottom:13px">
         <div class="field">
           <label for="c-capacity">人數上限</label>
@@ -175,6 +181,15 @@
       <label for="f-cost">場地費總額</label>
       <input id="f-cost" class="control" type="number" step="1" min="0">
       <span id="cost-locked-note" class="hint" hidden>這一季已結算，場地費不能再改。</span>
+    </div>
+
+    <div class="field">
+      <label for="f-ac">冷氣一場多少錢</label>
+      <input id="f-ac" class="control" type="number" step="1" min="0" placeholder="沒有另外收就留 0">
+      <span class="hint">
+        跟場地費總額同一個基準：場地有給優惠的話，這裡填的也是優惠後的金額。
+        有開冷氣的場次每人會多分攤這筆的 1/人數。
+      </span>
     </div>
 
     <div class="field-pair">
@@ -535,6 +550,7 @@
     const deadlineValue = document.getElementById("c-deadline").value;
     const payload = {
       total_venue_cost: document.getElementById("c-cost").value.trim() || "0",
+      ac_surcharge: document.getElementById("c-ac").value.trim() || "0",
       game_dates: gameDates,
       member_names: memberNames,
       capacity: Number(document.getElementById("c-capacity").value) || 18,
@@ -599,6 +615,7 @@
 
     const costInput = document.getElementById("f-cost");
     costInput.value = season.total_venue_cost;
+    document.getElementById("f-ac").value = season.ac_surcharge;
     costInput.disabled = settled;
     document.getElementById("cost-locked-note").hidden = !settled;
     document.getElementById("cost-warn-note").hidden = settled;
@@ -749,6 +766,10 @@ ${label} 以及已經記在每個人帳上的季費都會一起消失，無法�
     };
     if (!costInput.disabled) {
       payload.total_venue_cost = costInput.value.trim();
+      // Locked by the same rule as the venue cost: both are subtracted
+      // from each other to price a game, so a settled season can't have
+      // either moved under it.
+      payload.ac_surcharge = document.getElementById("f-ac").value.trim() || "0";
     }
 
     try {

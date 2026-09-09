@@ -126,7 +126,8 @@ function renderGameHero(season, game, opts) {
         <i class="fill-f" style="width:${Math.min(100, (female / capacity) * 100)}%"></i>
       </div>
       <div class="hero-meta">
-        <span class="meta-pill">每場 <strong>$${season.share_per_game}</strong></span>
+        <span class="meta-pill">這場 <strong>$${game.share}</strong></span>
+        ${game.air_conditioned ? '<span class="meta-pill ac">冷氣場</span>' : ""}
         ${(o.metaPills || []).join("")}
       </div>
       ${o.statusHtml || ""}
@@ -865,9 +866,30 @@ async function postJson(apiBase, path, body, method) {
  * after creating the season. Integer inputs divide exactly in IEEE754
  * below 2^53, so ceil here agrees with ROUND_CEILING on Decimal.
  */
-function previewSharePerGame(totalVenueCost, totalGames, memberCount) {
+function previewSharePerGame(totalVenueCost, totalGames, memberCount, acSurcharge, cooledGames) {
   if (!(totalGames > 0) || !(memberCount > 0)) return null;
-  return Math.ceil(Number(totalVenueCost) / (totalGames * memberCount));
+  const ac = Number(acSurcharge) || 0;
+  const cooled = Number(cooledGames) || 0;
+  const baseTotal = Number(totalVenueCost) - ac * cooled;
+  if (baseTotal < 0) return null;
+  const baseEach = baseTotal / totalGames;
+  return {
+    plain: Math.ceil(baseEach / memberCount),
+    cooled: Math.ceil((baseEach + ac) / memberCount),
+  };
+}
+
+/** A member's whole-season fee: the sum of the games they're charged
+ * for, not a share times a count.
+ *
+ * Those stopped being the same number once air conditioning made games
+ * cost different amounts — a season where half the nights are cooled is
+ * not twice the cheap half. Mirrors settlement.settle_member.
+ */
+function seasonFeeFor(season) {
+  return season.games
+    .filter((g) => g.status !== "cancelled_refunded")
+    .reduce((total, g) => total + Number(g.share), 0);
 }
 
 // --- stale-while-revalidate -------------------------------------------

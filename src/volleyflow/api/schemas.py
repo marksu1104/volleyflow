@@ -72,6 +72,15 @@ class ClubMemberOut(BaseModel):
 
 class SeasonCreate(BaseModel):
     total_venue_cost: Decimal
+    ac_surcharge: Decimal = Decimal("0")
+    """What one game's air conditioning adds, on the same terms as
+    total_venue_cost — both are what the club actually pays, so a
+    discounted season takes the discounted surcharge. Zero means the
+    venue bundles it, and every game then costs the same."""
+    air_conditioned_dates: list[date] = Field(default_factory=list)
+    """Which of `game_dates` are forecast to need the air conditioning.
+    A forecast only: each game can be corrected on the day — see
+    routes.set_game_air_conditioning."""
     game_dates: list[date] = Field(min_length=1)
     member_names: list[str] = Field(min_length=1)
     capacity: int = 18
@@ -90,6 +99,7 @@ class SeasonUpdate(BaseModel):
     """
 
     total_venue_cost: Decimal | None = None
+    ac_surcharge: Decimal | None = None
     capacity: int | None = None
     minimum_roster: int | None = None
     game_start_time: time | None = None

@@ -53,6 +53,12 @@ season total evenly across every game would make a drop-in on a cool
 night subsidise the hot ones, and would refund an absence from an
 expensive game at a cheap game's rate.
 
+`ac_surcharge` is whatever the air conditioning costs **on the same
+terms as `total_venue_cost`** — both are what the club actually pays, so
+if the venue discounts the season the surcharge entered here is the
+discounted one. The two are subtracted from each other, so mixing a list
+price with a discounted total would misprice every game.
+
 `ac_surcharge` is **per game, not per person**. The venue charges the
 same for the air conditioning whether twelve people or eighteen turn up,
 so a roster change has to move what each of them pays for it — which it
@@ -67,8 +73,9 @@ Worked example, from this club's own invoice:
 ```
 13 games, 8 of them cooled, 18 members
 list price 66595, special discount 14305, transferred 52290
-air conditioning quoted separately at 180/hour x 3 hours = 540 a night,
-  and NOT covered by the discount
+air conditioning 540 a night (180/hour x 3 hours), as billed after the
+  discount — the same figure that gets subtracted from what was
+  transferred
 
 ac_total  = 540 x 8                  = 4320
 base_each = (52290 - 4320) / 13      = 3690

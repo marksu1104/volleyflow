@@ -15,14 +15,40 @@ const { previewSharePerGame, describeDate, dateKey } = load();
 
 test("share divides cost by games and members, rounding up", () => {
   // 54990 / 13 / 18 = exactly 235
-  assert.equal(previewSharePerGame(54990, 13, 18), 235);
+  assert.equal(previewSharePerGame(54990, 13, 18).plain, 235);
   // 10000 / 7 / 5 = 285.71..., and nobody may be charged less than cost
-  assert.equal(previewSharePerGame(10000, 7, 5), 286);
-  assert.equal(previewSharePerGame(999, 1, 1), 999);
+  assert.equal(previewSharePerGame(10000, 7, 5).plain, 286);
+  assert.equal(previewSharePerGame(999, 1, 1).plain, 999);
 });
 
-test("a season fee is the share times the games", () => {
-  assert.equal(previewSharePerGame(54990, 13, 18) * 13, 3055);
+test("with no air conditioning both prices are the same price", () => {
+  // The default has to be invisible: a club whose venue bundles the air
+  // conditioning must see exactly what it saw before this existed.
+  const preview = previewSharePerGame(54990, 13, 18);
+  assert.equal(preview.plain, preview.cooled);
+});
+
+test("a cooled night costs more, and the club's real numbers come out whole", () => {
+  // Checked against the venue's invoice: 13 games, 8 cooled, 52290
+  // transferred, 540 a night for the air conditioning. Mirrors
+  // pricing.shares_by_game — a preview that disagrees with what gets
+  // charged is worse than no preview.
+  const preview = previewSharePerGame(52290, 13, 18, 540, 8);
+  assert.equal(preview.cooled, 235);
+  assert.equal(preview.plain, 205);
+  assert.equal((235 * 8 + 205 * 5) * 18, 52290);
+});
+
+test("air conditioning costing more than the whole bill gives no answer", () => {
+  assert.equal(previewSharePerGame(1000, 2, 5, 600, 2), null);
+});
+
+test("a season fee is the sum of its games, not a share times a count", () => {
+  const flat = previewSharePerGame(54990, 13, 18);
+  assert.equal(flat.plain * 13, 3055);
+
+  const mixed = previewSharePerGame(52290, 13, 18, 540, 8);
+  assert.equal(mixed.cooled * 8 + mixed.plain * 5, 2905);
 });
 
 test("exact division stays exact rather than drifting up", () => {
@@ -35,7 +61,7 @@ test("exact division stays exact rather than drifting up", () => {
     [54990, 13, 18, 235],
     [33333, 11, 7, 433],
   ]) {
-    assert.equal(previewSharePerGame(cost, games, members), expected);
+    assert.equal(previewSharePerGame(cost, games, members).plain, expected);
   }
 });
 
