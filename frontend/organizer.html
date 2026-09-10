@@ -60,6 +60,9 @@
   let currentSeason = null;
   let selectedGameId = null;
   let clubMembers = [];
+  // People this viewer has brought before — the quick picks in the
+  // substitute and signup sheets. See fetchMyGuests.
+  let myGuests = [];
   let myName = "";
 
   // Every organizer-only action here (settle, edit season settings,
@@ -170,6 +173,11 @@
       // time, so every tap drew the sheet, waited out a round trip, and
       // drew the identical sheet again: the visible flicker reported as
       // 瞬間跳針.
+      fetchMyGuests(API_BASE, currentClubId()).then((g) => {
+        if (JSON.stringify(g) === JSON.stringify(myGuests)) return;
+        myGuests = g;
+        renderSelectedGameDetail();
+      });
       fetchClubMembers(API_BASE, currentClubId()).then((m) => {
         if (JSON.stringify(m) === JSON.stringify(clubMembers)) return;
         clubMembers = m;
@@ -346,6 +354,7 @@
         ? ""
         : `<div class="hero-status absent">${statusLabel(game.status)}</div>`,
       clubMembers,
+      myGuests,
       viewerName: myName,
       onAssignSubstitute: (absenceId, name, gender) => assignSubstitute(absenceId, name, gender),
       onLeaveWaitlist: (entryId, btn) => leaveWaitlistFor(entryId, btn),
@@ -610,11 +619,9 @@
   async function cancelSubstitute(dropInId, btn) {
     if (dropInId < 0) return; // still saving; the real id isn't known yet
     await optimistically(
-      (season) => {
-        for (const g of season.games) {
-          g.confirmed_drop_ins = g.confirmed_drop_ins.filter((d) => d.id !== dropInId);
-        }
-      },
+      // Clears the absence row that named them too — see
+      // removeDropInLocally.
+      (season) => removeDropInLocally(season, dropInId),
       () => postJson(API_BASE, `/drop-ins/${dropInId}/cancel`, {}),
       "移除失敗："
     );

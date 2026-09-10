@@ -509,6 +509,25 @@ function optimisticRunner({ getState, setState, repaint }) {
   };
 }
 
+/** Takes a drop-in off the local copy — including the absence row that
+ * named them.
+ *
+ * Removing the drop-in alone left "小明 代打" sitting on the absence
+ * until the refresh landed, so 取消代打 looked like it had done nothing.
+ * The absence goes back to being a gap, which is what it is the instant
+ * the substitute is gone. */
+function removeDropInLocally(season, dropInId) {
+  for (const game of season.games) {
+    const going = game.confirmed_drop_ins.find((d) => d.id === dropInId);
+    if (!going) continue;
+    game.confirmed_drop_ins = game.confirmed_drop_ins.filter((d) => d.id !== dropInId);
+    for (const absence of game.absences) {
+      if (absence.covered_by === going.player_name) absence.covered_by = null;
+      if (absence.filled_by === going.player_name) absence.filled_by = null;
+    }
+  }
+}
+
 /** Shows one of a game sheet's three groups. Used by the tab strip and
  * by anything that needs to send you to a particular group — opening
  * the substitute picker, for instance, whose form lives in 請假. */
@@ -547,8 +566,42 @@ function renderGameDetail(container, season, game, options) {
     return escapeHtml((name || "?").trim().slice(0, 1));
   }
 
+  /** Who this member may name as their 代打.
+   *
+   * Not "everybody in the club", which is what it used to offer. Half
+   * that list is already on court for this game, and picking one of them
+   * signs the same person up twice — reported on 2026-09-10. What is
+   * left is the two groups that make sense: whoever is waiting in the
+   * queue for this game, and the people this member has brought before,
+   * so a regular friend is one tap rather than a retyped name (which is
+   * how the same person ends up in the database three times). Typing a
+   * new name still works underneath.
+   */
+  function substituteCandidates(absence) {
+    const playing = new Set(
+      season.members
+        .filter((m) => !game.absences.some((a) => a.player_name === m.name))
+        .map((m) => m.name)
+        .concat(game.confirmed_drop_ins.map((d) => d.player_name))
+    );
+    const seen = new Set();
+    const out = [];
+    for (const person of [...game.waitlist_entries, ...(opts.myGuests || [])]) {
+      if (playing.has(person.player_name || person.name)) continue;
+      const name = person.player_name || person.name;
+      if (name === absence.player_name || seen.has(name)) continue;
+      seen.add(name);
+      out.push({
+        name,
+        gender: person.gender,
+        note: person.times ? `打過 ${person.times} 次` : "候補中",
+      });
+    }
+    return out;
+  }
+
   function substituteForm(absence) {
-    const candidates = clubMembers.filter((m) => m.name !== absence.player_name);
+    const candidates = substituteCandidates(absence);
     const covering = game.confirmed_drop_ins.find((d) => d.covering === absence.player_name);
     const pickRows = candidates
       .map(
@@ -556,6 +609,7 @@ function renderGameDetail(container, season, game, options) {
           <div class="pick-row" data-pick="${absence.id}" data-pick-name="${escapeHtml(m.name)}" data-pick-gender="${m.gender || ""}">
             <i class="radio"></i><span class="avatar sm">${initial(m.name)}</span>
             <span class="pk-name">${escapeHtml(m.name)}</span>${genderTag(m.gender)}
+            <span class="pk-note">${escapeHtml(m.note)}</span>
           </div>`
       )
       .join("");
@@ -563,7 +617,13 @@ function renderGameDetail(container, season, game, options) {
     const femaleSelected = covering && covering.gender === "female" ? " selected" : "";
     return `
       <div class="sub-form" data-sub-form="${absence.id}" hidden>
-        ${candidates.length ? `<div class="sub-pick">${pickRows}</div><div class="or-line"><span>找不到人？直接輸入訪客姓名</span></div>` : ""}
+        ${
+          candidates.length
+            ? `<div class="or-line"><span>候補中的人，或你帶過的朋友</span></div>
+               <div class="sub-pick">${pickRows}</div>
+               <div class="or-line"><span>都不是？直接輸入名字</span></div>`
+            : `<div class="or-line"><span>沒有候補、也還沒帶過人 —— 直接輸入名字</span></div>`
+        }
         <input type="text" placeholder="直接輸入名字" data-sub-name="${absence.id}" value="${escapeHtml(absence.covered_by || "")}">
         <select data-sub-gender="${absence.id}">
           <option value="">性別</option>
@@ -698,15 +758,15 @@ function renderGameDetail(container, season, game, options) {
         // moot on the list of people who are already absent, and it was
         // the content that pushed this row past the width of a phone.
         guest: false,
-        // Three different states, and they used to be two. A member who
-        // arranged somebody sees that person's name; one whose slot
-        // happens to be filled by a 臨打 is told the money comes back
-        // without being told a stranger is "their" 代打; an empty slot
-        // is a gap.
+        // Three different states, and they used to be two. Somebody you
+        // arranged is your 代打; somebody who simply signed up is named
+        // too — "who filled my slot" is the first thing asked — but as
+        // 已補上, because they were never asked to stand in for you.
+        // Either way the share comes back; an empty slot is a gap.
         note: absence.covered_by
           ? `<span class="att-note sub">${escapeHtml(absence.covered_by)} 代打</span>`
-          : absence.refunded
-            ? '<span class="att-note">已有人補上</span>'
+          : absence.filled_by
+            ? `<span class="att-note">${escapeHtml(absence.filled_by)} 已補上</span>`
             : '<span class="att-note gap">缺額</span>',
         controls,
       }) + (offerAssign ? substituteForm(absence) : "")
@@ -1303,13 +1363,41 @@ async function getJsonSWR(url, onData, options) {
  * rather than beside fetchClubMembers so it is initialised before
  * clearResponseCache can reach for it. */
 const _clubMemberCache = {};
+const _myGuestCache = {};
+
+/** People this viewer has brought to this club before, for the pickers.
+ *
+ * Retyping a friend's name every week is how one person becomes three
+ * rows in the players table, each carrying its own money — so the app
+ * offers the ones already brought as a tap. Returns [] on any failure:
+ * a picker that can't load is a picker that isn't there, not a broken
+ * page, and the text field beside it still works. */
+async function fetchMyGuests(apiBase, clubId) {
+  if (Object.prototype.hasOwnProperty.call(_myGuestCache, clubId)) {
+    return _myGuestCache[clubId];
+  }
+  try {
+    const res = await fetch(`${apiBase}/clubs/${clubId}/my-guests`, {
+      headers: authHeader(),
+    });
+    const guests = res.ok ? await res.json() : [];
+    if (res.ok) _myGuestCache[clubId] = guests;
+    return guests;
+  } catch (e) {
+    console.warn("Could not load previous guests:", e);
+    return [];
+  }
+}
 
 /** Drops every cached response. Called after anything that writes, so
  * the next page doesn't paint from a copy we just invalidated. */
 function clearResponseCache() {
   // The in-memory club roster goes with them, or adding a guest would
-  // leave the substitute picker offering the list from before.
+  // leave the substitute picker offering the list from before. Same for
+  // the "people I've brought" list, which grows the moment somebody
+  // brings a new one.
   for (const key of Object.keys(_clubMemberCache)) delete _clubMemberCache[key];
+  for (const key of Object.keys(_myGuestCache)) delete _myGuestCache[key];
   try {
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith(CACHE_PREFIX)) localStorage.removeItem(key);

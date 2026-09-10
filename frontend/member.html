@@ -130,6 +130,9 @@
   let allClubs = [];
   let myClubs = [];
   let clubMembers = [];
+  // People this viewer has brought before — the quick picks in the
+  // substitute and signup sheets. See fetchMyGuests.
+  let myGuests = [];
   // Set when ?club= names a club this player hasn't joined. Holds the
   // page on the invite instead of letting the picker pick a club they
   // *are* in — see renderInviteScreen.
@@ -683,6 +686,11 @@
       // identical sheet again: the flicker reported as 瞬間跳針.
       // (paintBalance was also called twice here, once before this and
       // once after, for the same reason and with the same effect.)
+      fetchMyGuests(API_BASE, currentClubId()).then((g) => {
+        if (JSON.stringify(g) === JSON.stringify(myGuests)) return;
+        myGuests = g;
+        renderSelectedGameDetail();
+      });
       fetchClubMembers(API_BASE, currentClubId()).then((m) => {
         if (JSON.stringify(m) === JSON.stringify(clubMembers)) return;
         clubMembers = m;
@@ -780,6 +788,7 @@
     renderGameDetail(el, currentSeason, game, {
       heroMetaPills: [acPill(currentSeason, game), deadlinePill],
       clubMembers,
+      myGuests,
       viewerName: playerName(),
       statusHtml: myActions(currentSeason, game).status,
       actionsHtml: myActions(currentSeason, game).actions,
@@ -1371,14 +1380,11 @@
   async function cancelDropIn(dropInId, btn) {
     if (dropInId < 0) return;  // still saving; the real id isn't known yet
     await optimistically(
-      (season) => {
-        for (const game of season.games) {
-          game.confirmed_drop_ins = game.confirmed_drop_ins.filter((d) => d.id !== dropInId);
-        }
-      },
+      (season) => removeDropInLocally(season, dropInId),
       () => postJson(API_BASE, `/drop-ins/${dropInId}/cancel`, {}),
       "取消失敗："
     );
+    refreshSeasonQuietly();
   }
 </script>
 </body>

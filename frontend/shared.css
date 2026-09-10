@@ -460,6 +460,11 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   background: var(--surface-2); border-radius: 10px;
 }
 .sub-form[hidden] { display: none; }
+/* How often this person has played with you, beside their name — the
+   only way to tell two 王小明 apart in a picker. Pushed to the far end
+   so the names still line up. */
+.pk-note { margin-left: auto; font-size: .72rem; color: var(--ink-faint); white-space: nowrap; }
+.pk-note:empty { display: none; }
 /* The season wizard's member picker holds the same .pick-row as the
    substitute picker does, and had no layout at all — the rows sat flush
    against each other while the identical-looking list elsewhere had a

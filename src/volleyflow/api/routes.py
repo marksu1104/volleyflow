@@ -55,6 +55,7 @@ from volleyflow.api.schemas import (
     GameOut,
     Gender,
     GenderUpdate,
+    GuestOut,
     LedgerEntryOut,
     MemberAdd,
     MemberOut,
@@ -106,6 +107,12 @@ from volleyflow.settlement import (
 )
 
 router = APIRouter()
+
+# How many previously-brought people the quick picker offers. Long enough
+# for the regulars, short enough to scan on a phone — the tail is
+# one-off visitors nobody will pick again, and a text field is still
+# there for anyone not on the list.
+_MY_GUESTS_LIMIT = 12
 
 
 def _now() -> datetime:
@@ -1077,6 +1084,58 @@ def list_player_clubs(
     ]
 
 
+@router.get("/clubs/{club_id}/my-guests", response_model=list[GuestOut])
+def list_my_guests(
+    club_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> list[GuestOut]:
+    """The people this caller has brought to this club before, most
+    recent first.
+
+    Typing a friend's name again every week is how the same person ends
+    up in the database three times under three spellings, and each of
+    those copies carries its own money. Offering the ones already
+    brought — as a tap, not a text field — is what stops that.
+
+    Deliberately capped and deduplicated by player: a club that brings in
+    a lot of outside players would otherwise grow a list nobody can scan,
+    and the useful part is the handful of regulars. Cancelled signups
+    still count — somebody you brought and then couldn't is still
+    somebody you know.
+    """
+    _require_club_access(db, club_id, current_player)
+
+    rows = (
+        db.query(PlayerRow, DropInRow.signed_up_at)
+        .join(DropInRow, DropInRow.player_id == PlayerRow.id)
+        .join(GameRow, GameRow.id == DropInRow.game_id)
+        .join(SeasonRow, SeasonRow.id == GameRow.season_id)
+        .filter(
+            SeasonRow.club_id == club_id,
+            DropInRow.brought_by_player_id == current_player.id,
+            PlayerRow.id != current_player.id,
+        )
+        .order_by(DropInRow.signed_up_at.desc())
+        .all()
+    )
+
+    seen: dict[int, GuestOut] = {}
+    for player, signed_up_at in rows:
+        existing = seen.get(player.id)
+        if existing is None:
+            seen[player.id] = GuestOut(
+                id=player.id,
+                name=player.name,
+                gender=_gender(player.gender),
+                times=1,
+                last_played=signed_up_at.date(),
+            )
+        else:
+            existing.times += 1
+    return list(seen.values())[:_MY_GUESTS_LIMIT]
+
+
 @router.get("/clubs/{club_id}/members", response_model=list[ClubMemberOut])
 def list_club_members(
     club_id: int,
@@ -1980,15 +2039,19 @@ def get_season(
             (aid, name) for aid, name in absences_list if aid not in claimed_absence_ids
         ]
         fifo_drop_ins = [
-            drop_in_id
-            for drop_in_id, _player_id, _name, _gender, covers, _by in drop_ins
+            name
+            for _drop_in_id, _player_id, name, _gender, covers, _by in drop_ins
             if covers is None
         ]
-        # Refunded, but not "covered by" anybody in particular.
-        refunded_absence_ids = set(claimed_absence_ids)
+        # Who is standing in the slot — which is also what decides the
+        # refund. Named, but not "covered by": nobody asked them.
+        filled_by: dict[int, str] = {
+            aid: arranged_for_absence[absence_name_by_id[aid]]
+            for aid in claimed_absence_ids
+        }
         for i, (aid, _absence_name) in enumerate(fifo_absences):
             if i < len(fifo_drop_ins):
-                refunded_absence_ids.add(aid)
+                filled_by[aid] = fifo_drop_ins[i]
 
         games.append(
             GameDetailOut(
@@ -2005,7 +2068,7 @@ def get_season(
                         id=aid,
                         player_name=name,
                         covered_by=arranged_for_absence.get(name),
-                        refunded=aid in refunded_absence_ids,
+                        filled_by=filled_by.get(aid),
                     )
                     for aid, name in absences_list
                 ],
@@ -2243,6 +2306,14 @@ def set_substitute(
         game_id=game.id,
         signed_up_at=_now(),
         covers_absence_id=absence_id,
+        # The member whose slot this is, not whoever tapped the button.
+        # A 代打 is usually a friend with no account who will never open
+        # the app or pay through it — the member who arranged them hands
+        # the money over. Without this the money screen showed "Zoe owes
+        # $235" with nothing to say who to ask, which is exactly the
+        # "應該要跟某某某代打的人收帳" report. Same column the ordinary
+        # +1 signup fills in.
+        brought_by_player_id=absence.player_id,
     )
     db.add(drop_in)
     _record_drop_in_charge(db, drop_in, season, reverse=False)

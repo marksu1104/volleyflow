@@ -356,21 +356,25 @@ test("somebody who signed themselves up is 臨打, not anybody's 代打", () => 
   game.confirmed_drop_ins = [
     { id: 200, player_id: 9, player_name: "Taco", gender: "male", covering: null, linked: false },
   ];
-  game.absences = [{ id: 100, player_name: "楊于嫺", covered_by: null, refunded: true }];
+  game.absences = [
+    { id: 100, player_name: "楊于嫺", covered_by: null, filled_by: "Taco" },
+  ];
   const el = makeElement();
 
   renderGameDetail(el, season, game, { viewerName: "蘇慬" });
 
   assert.match(el.innerHTML, /臨打/);
   assert.doesNotMatch(el.innerHTML, /代 楊于嫺/, "he agreed to no such thing");
-  assert.match(el.innerHTML, /已有人補上/, "her money still comes back");
+  // Named, because "who took my slot" is the first thing asked — but
+  // 已補上, not 代打: he was never asked to stand in for her.
+  assert.match(el.innerHTML, /Taco 已補上/);
   assert.doesNotMatch(el.innerHTML, /Taco 代打/);
 });
 
 test("an absence nobody is filling is still a gap", () => {
   const { season, game } = fixture();
   game.confirmed_drop_ins = [];
-  game.absences = [{ id: 100, player_name: "楊于嫺", covered_by: null, refunded: false }];
+  game.absences = [{ id: 100, player_name: "楊于嫺", covered_by: null, filled_by: null }];
   const el = makeElement();
 
   renderGameDetail(el, season, game, { viewerName: "蘇慬" });

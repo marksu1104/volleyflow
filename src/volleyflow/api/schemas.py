@@ -365,6 +365,23 @@ class PlayerIdentifyOut(BaseModel):
     gender: Gender | None = None
 
 
+class GuestOut(BaseModel):
+    """Somebody the caller has brought to this club before.
+
+    `times` and `last_played` are there to tell two people with the same
+    name apart — the whole reason this list exists is that retyping a
+    name creates a second person, and a picker that shows "王小明 · 打過
+    6 次 · 上次 9/15" beside "王小明 · 打過 1 次 · 上次 7/2" makes the
+    right one obvious.
+    """
+
+    id: int
+    name: str
+    gender: Gender | None = None
+    times: int
+    last_played: date
+
+
 class DropInSummary(BaseModel):
     id: int
     """The drop-in or waitlist entry id — pass this to the cancel endpoint."""
@@ -382,10 +399,14 @@ class AbsenceDetailOut(BaseModel):
     match: that is a billing fact, not a person's arrangement, and
     presenting it as one told a member that a stranger who happened to
     sign up was "their" substitute. See `refunded`."""
-    refunded: bool = False
-    """Whether this absence gets its share back — true when anybody is
-    filling the slot, whether personally arranged or matched FIFO by
-    signup order. The money rule, unchanged; see settlement.py."""
+    filled_by: str | None = None
+    """Whoever is standing in this slot, by name — the arranged 代打 when
+    there is one, otherwise whichever 臨打 the FIFO match landed on.
+
+    Having a name here is what makes the share come back (settlement.py),
+    so this doubles as "is this refunded". Reported separately from
+    `covered_by` on purpose: both name a person, but only `covered_by`
+    means that person was asked."""
 
 
 class DropInDetailOut(BaseModel):
