@@ -190,6 +190,14 @@ class DropInOut(BaseModel):
     id: int
     player_id: int
     game_id: int
+    displaced_player_id: int | None = None
+    """Who went back to the waitlist to make room for a named substitute.
+
+    Only ever set by PUT /absences/{id}/substitute: recording an absence
+    hands the empty slot straight to the queue, so naming the person you
+    actually wanted usually means somebody has to step back out. The
+    screen has to be able to say who, or a player simply vanishes off
+    the roster with no explanation."""
 
 
 class DropInBatchEntry(BaseModel):

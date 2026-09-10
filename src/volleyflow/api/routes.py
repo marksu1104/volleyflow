@@ -591,6 +591,62 @@ def _record_drop_in_charge(
     )
 
 
+def _make_room_for_substitute(
+    db: Session, game: GameRow, season: SeasonRow
+) -> int | None:
+    """Frees the slot a named substitute is about to take, and says whose
+    it was.
+
+    Recording an absence offers the empty slot to the waitlist straight
+    away (CLAUDE.md 2.3), so by the time the member names the person they
+    actually wanted, a queued stranger is usually already standing in it.
+    Adding the substitute on top of that put a nineteenth player in an
+    eighteen-player game — reported from real use on 2026-09-10, and the
+    reason this exists.
+
+    The person bumped is the most recent signup nobody personally
+    arranged. Somebody else's named substitute is never touched: they
+    were chosen the same way this one is. Being bumped puts them back in
+    the queue at the time they originally signed up, so they keep their
+    place ahead of anyone who joined it later, and their fee comes off.
+
+    Returns None when there was already room, and raises when the only
+    people here were personally arranged — then there is no fair pick and
+    the organizer has to decide.
+    """
+    if _has_open_slot(db, game, season):
+        return None
+
+    displaced = (
+        db.query(DropInRow)
+        .filter(
+            DropInRow.game_id == game.id,
+            DropInRow.cancelled_at.is_(None),
+            DropInRow.covers_absence_id.is_(None),
+        )
+        .order_by(DropInRow.signed_up_at.desc())
+        .first()
+    )
+    if displaced is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"This game is full ({season.capacity}) and everyone in it was "
+            "personally arranged — cancel one of them first.",
+        )
+
+    displaced.cancelled_at = _now()
+    _record_drop_in_charge(db, displaced, season, reverse=True)
+    db.add(
+        WaitlistEntryRow(
+            player_id=displaced.player_id,
+            game_id=game.id,
+            queued_at=displaced.signed_up_at,
+        )
+    )
+    db.flush()
+    return int(displaced.player_id)
+
+
 def _promote_entry(db: Session, entry: WaitlistEntryRow) -> DropInRow:
     """Turn one queued person into a confirmed drop-in, charged exactly
     as a direct signup would be.
@@ -600,7 +656,14 @@ def _promote_entry(db: Session, entry: WaitlistEntryRow) -> DropInRow:
     — is written once and cannot drift between the two.
     """
     game_id = entry.game_id
-    drop_in = DropInRow(player_id=entry.player_id, game_id=game_id, signed_up_at=_now())
+    # signed_up_at is when they joined the queue, not when the slot
+    # happened to open. It is what FIFO absence coverage orders by, and
+    # it is what a later bump reads to put them back in the queue where
+    # they were — stamping "now" instead sent somebody who had waited
+    # longest to the back of the line.
+    drop_in = DropInRow(
+        player_id=entry.player_id, game_id=game_id, signed_up_at=entry.queued_at
+    )
     db.add(drop_in)
     db.delete(entry)
 
@@ -2116,6 +2179,8 @@ def set_substitute(
             "That player is already signed up for this game",
         )
 
+    displaced_player_id = _make_room_for_substitute(db, game, season)
+
     drop_in = DropInRow(
         player_id=player.id,
         game_id=game.id,
@@ -2128,7 +2193,11 @@ def set_substitute(
     db.refresh(drop_in)
 
     return DropInOut(
-        status="confirmed", id=drop_in.id, player_id=player.id, game_id=game.id
+        status="confirmed",
+        id=drop_in.id,
+        player_id=player.id,
+        game_id=game.id,
+        displaced_player_id=displaced_player_id,
     )
 
 

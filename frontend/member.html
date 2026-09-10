@@ -796,7 +796,15 @@
 
   async function assignSubstitute(absenceId, name, gender) {
     try {
-      await postJson(API_BASE, `/absences/${absenceId}/substitute`, { player_name: name, gender }, "PUT");
+      // Noted before the call: the server answers with an id, and once
+      // the page reloads that person is off the roster and unnameable.
+      const game = currentSeason.games.find((g) => g.id === selectedGameId) || {};
+      const playingBefore = game.confirmed_drop_ins || [];
+      const result = await postJson(API_BASE, `/absences/${absenceId}/substitute`, { player_name: name, gender }, "PUT");
+      const bumped = playingBefore.find((d) => d.player_id === result.displaced_player_id);
+      // Somebody stepping back out is not a detail to hide: the queue had
+      // already filled this slot, and they are owed an explanation.
+      toast(bumped ? `${name} 上場，${bumped.player_name} 回到候補` : `已指定 ${name} 代打`);
       loadSeason(currentSeasonId);
     } catch (e) {
       toast("指定代打失敗：" + e.message);

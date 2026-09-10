@@ -379,12 +379,18 @@
 
   async function assignSubstitute(absenceId, name, gender) {
     try {
-      await postJson(
+      // See member.html: the id has to be turned into a name before the
+      // reload takes that person off the roster.
+      const game = currentSeason.games.find((g) => g.id === selectedGameId) || {};
+      const playingBefore = game.confirmed_drop_ins || [];
+      const result = await postJson(
         API_BASE,
         `/absences/${absenceId}/substitute`,
         { player_name: name, gender },
         "PUT"
       );
+      const bumped = playingBefore.find((d) => d.player_id === result.displaced_player_id);
+      toast(bumped ? `${name} 上場，${bumped.player_name} 回到候補` : `已指定 ${name} 代打`);
       loadDashboard(currentSeason.id);
     } catch (e) {
       toast("設定代打失敗：" + e.message);
