@@ -72,6 +72,16 @@ check("代打選單的輸入欄位至少 16px", (m) => {
     : null;
 });
 
+check("等待中的按鈕會停用、標籤讓位給轉圈", (m) => {
+  if (!m.busy) return "沒有量到";
+  const problems = [];
+  if (!m.busy.disabled) problems.push("按鈕沒有停用");
+  if (!m.busy.spinner) problems.push("沒有轉圈");
+  if (m.busy.labelVisible) problems.push("標籤沒有讓位");
+  if (Math.abs(m.busy.widthChange) > 1) problems.push(`寬度跳動 ${m.busy.widthChange}px`);
+  return problems.length ? problems.join("、") : null;
+});
+
 check("相鄰按鈕的感應區沒有重疊（不會誤觸）", (m) => {
   const clashes = [];
   for (const row of m.tapRows) {
@@ -159,7 +169,31 @@ check("相鄰按鈕的感應區沒有重疊（不會誤觸）", (m) => {
     }
     showGameDetailTab(out, "attending");
 
+    // A control mid-request. Measured rather than trusted: the label has
+    // to give way to the spinner, the button has to stop taking taps,
+    // and the box must not resize — a button that changes width while
+    // you are waiting moves everything beside it.
+    const probe = document.querySelector("button.mini-action") ||
+      document.querySelector("button");
+    let busy = null;
+    if (probe) {
+      const before = probe.getBoundingClientRect().width;
+      const release = markBusy(probe);
+      // markBusy waits before showing anything; force it for the measure.
+      probe.classList.add("is-busy");
+      const style = getComputedStyle(probe);
+      busy = {
+        disabled: probe.disabled === true,
+        spinner: getComputedStyle(probe, "::after").content !== "none",
+        labelVisible: style.color !== "rgba(0, 0, 0, 0)" && style.color !== "transparent",
+        widthChange: Math.round(probe.getBoundingClientRect().width - before),
+      };
+      release();
+      probe.classList.remove("is-busy");
+    }
+
     return {
+      busy,
       picker,
       rows,
       tabs,

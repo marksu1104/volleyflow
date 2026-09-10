@@ -1,0 +1,136 @@
+// Two people using the same game at once, tapping faster than the
+// network answers, and then checking the screen still tells the truth.
+//
+// The API-level version of this lives in tests/api/test_chaos.py. This
+// one exists because the browser adds its own failure modes on top: an
+// optimistic update that never reconciles, a spinner that never clears,
+// a list that shows somebody twice because two repaints raced.
+//
+//     .\scripts\dev-api.ps1      (in one window)
+//     .\scripts\dev-web.ps1      (in another)
+//     uv run python scripts/seed_dev.py
+//     node tests/visual/chaos.js
+//
+// Destructive: point it only at a local server holding seed data.
+
+const { chromium } = require("playwright");
+
+const BASE = "http://localhost:5500";
+const as = (name) => encodeURIComponent(name);
+
+/** Everything that must be true of a game however it was hammered. */
+const INVARIANTS = `(() => {
+  const g = currentSeason.games.find((x) => x.id === selectedGameId);
+  const absent = new Set(g.absences.map((a) => a.player_name));
+  const playing = currentSeason.members
+    .filter((m) => !absent.has(m.name)).map((m) => m.name)
+    .concat(g.confirmed_drop_ins.map((d) => d.player_name));
+  const queued = g.waitlist_entries.map((w) => w.player_name);
+  const problems = [];
+  if (playing.length !== new Set(playing).size) problems.push("同一個人在場上出現兩次");
+  if (playing.some((p) => queued.includes(p))) problems.push("同時在場上與候補");
+  if (queued.length !== new Set(queued).size) problems.push("候補名單有重複");
+  if (playing.length > currentSeason.capacity) problems.push(playing.length + " 人超過上限 " + currentSeason.capacity);
+  // What the screen says must match what the data says.
+  const shown = Number((document.querySelector(".count-big") || {}).textContent || 0);
+  if (shown !== playing.length) problems.push("畫面顯示 " + shown + " 人，資料是 " + playing.length + " 人");
+  const stuck = document.querySelectorAll(".is-busy").length;
+  if (stuck) problems.push(stuck + " 個按鈕還卡在載入中");
+  return { problems, playing, queued, capacity: currentSeason.capacity };
+})()`;
+
+async function open(browser, page_name, who) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e).slice(0, 140)));
+  page.on("dialog", (d) => d.accept("1"));
+  await page.goto(`${BASE}/${page_name}?as=${as(who)}`, { waitUntil: "networkidle" });
+  await page.waitForFunction(
+    () => typeof currentSeason !== "undefined" && currentSeason && currentSeason.games.length,
+    null,
+    { timeout: 25000 }
+  );
+  await page.evaluate(() => {
+    const g = currentSeason.games.find((x) => !describeDate(x.date).isPast) || currentSeason.games[0];
+    selectGame(g.id);
+    openGameSheet();
+  });
+  await page.waitForTimeout(700);
+  return { page, errors, who };
+}
+
+/** Taps whatever is on screen, as fast as the browser will allow. */
+async function hammer(page, selectors, rounds) {
+  for (let i = 0; i < rounds; i += 1) {
+    for (const sel of selectors) {
+      await page
+        .evaluate((s) => {
+          const el = document.querySelector(s);
+          if (el && !el.disabled) el.click();
+        }, sel)
+        .catch(() => {});
+      await page.waitForTimeout(40); // faster than any round trip
+    }
+  }
+}
+
+(async () => {
+  const browser = await chromium.launch({ channel: "msedge" });
+  let failed = 0;
+  const report = (label, problems) => {
+    console.log((problems.length ? "FAIL " : "ok   ") + label +
+      (problems.length ? " — " + problems.join("、") : ""));
+    if (problems.length) failed += 1;
+  };
+
+  // 1. One person, tapping much faster than the server answers.
+  const solo = await open(browser, "organizer.html", "蘇懂");
+  await hammer(solo.page, [
+    "#game-detail [data-mark-absent]",
+    '#game-detail [data-gd-tab="absent"]',
+    "#game-detail [data-undo-absence]",
+    '#game-detail [data-gd-tab="attending"]',
+  ], 6);
+  await solo.page.waitForTimeout(3500);
+  const soloState = await solo.page.evaluate(INVARIANTS);
+  report("一個人狂點請假／取消請假", soloState.problems.concat(solo.errors));
+
+  // 2. Two people on the same game at the same time.
+  const organizer = await open(browser, "organizer.html", "蘇懂");
+  // 阿哲 rather than a name off the roster: a roster entry the organizer
+  // typed has no account behind it, so signing in as that name makes a
+  // second person who is not in the club and sees nothing. See
+  // scripts/seed_dev.py.
+  const member = await open(browser, "member.html", "阿哲");
+  await Promise.all([
+    hammer(organizer.page, [
+      "#game-detail [data-mark-absent]",
+      "#game-detail [data-remove-drop-in]",
+    ], 5),
+    hammer(member.page, [
+      "#hero-wrap .hact",
+      '#game-detail [data-gd-tab="queued"]',
+      '#game-detail [data-gd-tab="attending"]',
+    ], 5),
+  ]);
+  await organizer.page.waitForTimeout(4000);
+  await organizer.page.reload({ waitUntil: "networkidle" });
+  await organizer.page.waitForFunction(
+    () => typeof currentSeason !== "undefined" && currentSeason && currentSeason.games.length,
+    null,
+    { timeout: 25000 }
+  );
+  await organizer.page.evaluate(() => {
+    const g = currentSeason.games.find((x) => !describeDate(x.date).isPast) || currentSeason.games[0];
+    selectGame(g.id);
+    openGameSheet();
+  });
+  await organizer.page.waitForTimeout(900);
+  const shared = await organizer.page.evaluate(INVARIANTS);
+  report("兩個人同時操作同一場", shared.problems.concat(organizer.errors, member.errors));
+  console.log(`     場上 ${shared.playing.length}/${shared.capacity} 人・候補 ${shared.queued.length} 人`);
+
+  await browser.close();
+  console.log(failed ? `\n${failed} 項有問題。` : "\n亂按之後畫面與資料仍然一致，沒有卡住的按鈕。");
+  process.exit(failed ? 1 : 0);
+})();

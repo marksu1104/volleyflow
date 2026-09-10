@@ -1111,13 +1111,13 @@
     renderSignup();
   });
 
-  document.getElementById("su-go").addEventListener("click", async (e) => {
-    const btn = e.currentTarget;
+  document.getElementById("su-go").addEventListener("click", async () => {
+    if (!suPeople.length) return toast("請先新增報名對象");
     for (const p of suPeople) {
-      if (!p.name.trim()) return toast("還有名字沒填");
-      if (!p.playerId && !p.gender) return toast(`請幫「${p.name.trim()}」選性別`);
+      if (!p.playerId && !p.gender) return toast(`請幫「${p.name}」選性別`);
     }
-    btn.disabled = true;
+    // No manual disable: postJson marks whichever control was pressed
+    // and clears it when the request settles — see markBusy.
     try {
       await postJson(API_BASE, `/games/${suGame.id}/drop-ins`, {
         people: suPeople.map((p) => ({
@@ -1130,8 +1130,6 @@
       await loadSeason(currentSeasonId);
     } catch (err) {
       toast("報名失敗：" + err.message);
-    } finally {
-      btn.disabled = false;
     }
   });
 

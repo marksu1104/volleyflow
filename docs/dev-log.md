@@ -1271,3 +1271,80 @@ buttons that returned silently on an empty field, which reads exactly
 like a broken one.
 
 325 tests, 125 frontend tests, plus the browser checks in `tests/visual/`.
+
+## 2026-09-10/11 — What a week of real use turned up
+
+Seven rounds of "I found another one", and most of them were real. The
+pattern worth remembering: nearly every bug here was a rule that existed
+in one code path and had been forgotten in another, or a fact the code
+was inferring when it should have been recording.
+
+**The venue cost is split by `capacity`, not by the roster.** Decided
+after the screen was seen quoting $218 a night to seventeen people
+because one member had left an eighteen-person season — retroactively,
+for people who had done nothing — while the drop-in standing in the
+empty slot paid the original $205. The club collected the same gap
+twice. Splitting by capacity fixes it at the root: the price is settled
+when the season is booked and never moves, so a roster change costs only
+the person joining or leaving. The trade, accepted openly, is that an
+unfilled slot is money nobody pays.
+
+**代打 and 臨打 stopped being the same thing.** The FIFO pairing that
+decides which absence gets refunded is a billing rule; it was being
+rendered as a relationship, so a stranger who signed themselves up off
+the waitlist was shown to a member as "their" 代打, and the member was
+shown as having arranged them. Neither had agreed to anything. They are
+separate fields now: `covered_by` only when somebody was actually asked,
+`filled_by` for whoever is in the slot.
+
+**A place in the queue is given up, not lost.** Naming the third person
+in the queue as your substitute and then changing your mind deleted them
+from the game: they had left the queue to take the slot and got nothing
+back. Fixed three times before it was right — the first attempt re-queued
+everybody, which made the organizer's 移除 a no-op (they were re-promoted
+immediately), and the second resurrected a substitute who had been typed
+in by name and was never in the queue at all. It could not be inferred,
+so `from_waitlist_at` (migration `50b0afdb1cab`) records it. The rule now
+lives in one function, `_give_back_queue_place`, because the version that
+lived in two had already been forgotten in one of them.
+
+**Cancelling an absence used to be refused** once anybody was covering —
+"ask the organizer", which the app offers no way to do. A member who
+could play after all was simply stuck. It now releases whoever was
+standing in, back to their own place in the queue, refunded: the slot
+only opened because it was released, so taking that back closes it.
+
+**Two permission holes, found by writing the matrix down.** A member
+could not cancel a guest they had brought, nor the substitute they had
+arranged — both needed the organizer. And `set_substitute` never checked
+who it was naming: a typed name resolves to an existing person, so
+naming somebody with a LINE account put the real them on the roster and
+on the hook for the fee. Eight tests now state the whole matrix.
+
+**Optimistic updates, then a queue.** Every action waited out a write
+*and* a reload before anything moved. The first fix locked the buttons
+until both came back, which was worse: the screen had already updated,
+so the next tap looked live and silently did nothing. Blocking the
+person was the wrong half. The screen changes on the tap, the requests
+queue behind each other, and an action needing an id the previous
+request is still fetching waits for it inside its own turn. Measured at
+2ms from tap to repaint.
+
+**"This is working" is claimed by `postJson`, not by call sites.** It
+had been applied by hand at three places out of twenty-odd, and the
+forgotten ones are exactly the ones reported as unresponsive. Every
+write goes through two functions, so those two mark whichever control
+was pressed — after a 140ms delay, so a fast action just happens.
+
+**The tests that found things.** `tests/visual/smoke.js` presses every
+button on every page and reports the ones that do nothing: it caught the
+tab strip swallowing every other tap in the game sheet, with correct
+markup, an attached handler and passing unit tests. `check.js` grew from
+three measurements to ten — a select pushed off a panel's edge, controls
+measuring 17px against Apple's 44pt guidance. `test_chaos.py` and
+`chaos.js` run messy multi-person sequences and assert invariants rather
+than outcomes: nobody in two lists at once, nobody on court twice, never
+over capacity, nobody owing for a game they did not play.
+
+370 tests, 138 frontend tests, ten browser measurements. What is left is
+written down in `docs/backlog.md` rather than in a conversation.

@@ -118,20 +118,26 @@ a real person's ledger. See `tests/test_auth.py`.
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
-uv run pytest -q               # 321 tests
+uv run pytest -q               # 370 tests
 uv run lint-imports            # billing logic must not import the database
-node --test tests/frontend/*.test.js   # 125 frontend tests
+node --test tests/frontend/*.test.js   # 138 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
 node tests/visual/smoke.js     # presses every button and reports the dead ones
+node tests/visual/chaos.js     # two people hammering one game at once
 ```
 
-The first five run in CI on every push. The last two need a browser and
+The first five run in CI on every push. The last three need a browser and
 are run by hand — `check.js` when layout changes, `smoke.js` after
-anything that touches a click handler. It caught a bug that every static
-check passed: a handler matched a data attribute its own container
-carried, so every control in the game sheet was silently swallowed. Both
-want the local servers up, and `smoke.js` presses destructive controls
-too, so re-run `seed_dev.py` afterwards. See
+anything that touches a click handler, `chaos.js` after anything that
+changes who may be on a roster.
+
+They earn their keep. `smoke.js` caught a bug every static check passed:
+a handler matched a data attribute its own container carried, so every
+control in the game sheet was silently swallowed. `check.js` caught a
+select pushed off the edge of a panel, and rows that measured 17px
+against Apple's 44pt guidance. All three want the local servers up, and
+`smoke.js` and `chaos.js` press destructive controls, so re-run
+`seed_dev.py` afterwards. See
 [`tests/visual/README.md`](tests/visual/README.md).
 
 ## Deploying
