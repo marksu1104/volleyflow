@@ -598,6 +598,34 @@ def _record_drop_in_charge(
     )
 
 
+def _give_back_queue_place(db: Session, drop_in: DropInRow) -> None:
+    """Returns a signup's queue place, when it had one.
+
+    A place in the queue is given up, not lost: somebody who left it to
+    take a slot is owed it back at the position they held, if the slot is
+    taken off them by anybody but themselves. Somebody who was never
+    waiting — typed in by name, or signed straight into an open slot —
+    has no place to give back, and must not be put into a queue they
+    never joined, or they reappear in the next open slot.
+
+    One function because the rule has to hold in every path that takes a
+    slot away: cancelling a substitute, replacing one with somebody else,
+    and the organizer clearing a row. Replacing one was written without
+    it and silently deleted the person being replaced — reported from
+    real use on 2026-09-11 as "候補會不見".
+    """
+    if drop_in.from_waitlist_at is None:
+        return
+    db.add(
+        WaitlistEntryRow(
+            player_id=drop_in.player_id,
+            game_id=drop_in.game_id,
+            queued_at=drop_in.from_waitlist_at,
+        )
+    )
+    db.flush()
+
+
 def _release_whoever_is_covering(
     db: Session, absence: AbsenceRow, season: SeasonRow
 ) -> int | None:
@@ -1183,11 +1211,28 @@ def list_my_guests(
         .all()
     )
 
-    seen: dict[int, GuestOut] = {}
+    # Grouped by name, not by player id.
+    #
+    # A typed name always creates a new person — deliberately, since two
+    # real people can be called 小明 and one inheriting the other's
+    # ledger is not recoverable. The cost is that bringing the same
+    # friend three weeks running, by typing, made three of them. Showing
+    # that as three identical rows makes the picker useless at exactly
+    # the moment it is meant to help.
+    #
+    # So they merge here, and the row carries the most recent id: picking
+    # it signs the friend up as that person, which pulls future weeks
+    # onto one row instead of adding a fourth. The list narrows itself
+    # over time rather than growing.
+    #
+    # It cannot separate two different people who share a name — but
+    # neither could the reader, and the manual field is still there for
+    # somebody genuinely new.
+    by_name: dict[str, GuestOut] = {}
     for player, signed_up_at in rows:
-        existing = seen.get(player.id)
+        existing = by_name.get(player.name)
         if existing is None:
-            seen[player.id] = GuestOut(
+            by_name[player.name] = GuestOut(
                 id=player.id,
                 name=player.name,
                 gender=_gender(player.gender),
@@ -1196,7 +1241,9 @@ def list_my_guests(
             )
         else:
             existing.times += 1
-    return list(seen.values())[:_MY_GUESTS_LIMIT]
+            if existing.gender is None:
+                existing.gender = _gender(player.gender)
+    return list(by_name.values())[:_MY_GUESTS_LIMIT]
 
 
 @router.get("/clubs/{club_id}/members", response_model=list[ClubMemberOut])
@@ -2344,6 +2391,10 @@ def set_substitute(
     if existing is not None:
         existing.cancelled_at = _now()
         _record_drop_in_charge(db, existing, season, reverse=True)
+        # They did not withdraw — somebody else was picked instead — so
+        # if they had left the queue to take this slot, they get that
+        # place back. See _give_back_queue_place.
+        _give_back_queue_place(db, existing)
         # Flush now, before the new DropInRow below is added: SQLAlchemy's
         # unit of work orders all pending INSERTs before UPDATEs regardless
         # of the order they were issued in, so without this the new row
@@ -2752,15 +2803,8 @@ def cancel_drop_in(
     # to be this same person, they simply keep playing — as an ordinary
     # 臨打 rather than somebody's arranged substitute, which is exactly
     # what they now are.
-    if current_player.id != drop_in.player_id and drop_in.from_waitlist_at is not None:
-        db.add(
-            WaitlistEntryRow(
-                player_id=drop_in.player_id,
-                game_id=drop_in.game_id,
-                queued_at=drop_in.from_waitlist_at,
-            )
-        )
-        db.flush()
+    if current_player.id != drop_in.player_id:
+        _give_back_queue_place(db, drop_in)
 
     promoted = _promote_from_waitlist(db, drop_in.game_id)
 

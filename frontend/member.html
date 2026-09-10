@@ -94,6 +94,7 @@
   <div class="gsheet">
     <button class="gsheet-close" aria-label="關閉" data-close-sheet="signup">✕</button>
     <h3 style="margin:0">報名</h3>
+    <div id="su-picker"></div>
     <p id="su-when" class="su-when"></p>
 
     <div class="su-cap">
@@ -104,10 +105,9 @@
       <div class="su-bar"><i class="now" id="su-bar-now"></i><i class="adding" id="su-bar-add"></i><i class="over" id="su-bar-over"></i></div>
     </div>
 
-    <div class="su-q">報幾位？</div>
-    <div class="su-seg" id="su-seg"></div>
-
+    <div class="su-q">報名名單</div>
     <div class="su-who" id="su-who"></div>
+    <button type="button" class="su-add" id="su-add">＋ 新增報名對象</button>
 
     <div class="su-total">
       <span>合計 <span class="su-breakdown" id="su-breakdown"></span></span>
@@ -792,7 +792,8 @@
       viewerName: playerName(),
       statusHtml: myActions(currentSeason, game).status,
       actionsHtml: myActions(currentSeason, game).actions,
-      onAssignSubstitute: (absenceId, name, gender) => assignSubstitute(absenceId, name, gender),
+      onAssignSubstitute: (absenceId, name, gender, target) =>
+        assignSubstitute(absenceId, name, gender, target),
       onLeaveWaitlist: (entryId, btn) => leaveWaitlist(entryId, btn),
       onCancelSubstitute: (dropInId, btn) => cancelDropIn(dropInId, btn),
       onRemoveDropIn: (dropInId, btn) => cancelDropIn(dropInId, btn),
@@ -826,7 +827,11 @@
   function openGameSheet() { document.getElementById("game-sheet-backdrop").hidden = false; }
   function closeGameSheet() { document.getElementById("game-sheet-backdrop").hidden = true; }
 
-  async function assignSubstitute(absenceId, name, gender) {
+  async function assignSubstitute(absenceId, name, gender, target) {
+    // Not optimistic: naming a substitute can bump somebody else, and
+    // guessing who would be worse than waiting. So it says it is
+    // working instead — see whileBusy.
+    return whileBusy(target, async () => {
     try {
       // Noted before the call: the server answers with an id, and once
       // the page reloads that person is off the roster and unnameable.
@@ -841,6 +846,7 @@
     } catch (e) {
       toast("指定代打失敗：" + e.message);
     }
+    });
   }
 
   async function cancelAbsence(absenceId, btn) {
@@ -912,9 +918,12 @@
 
     // Honest about what the button does: if you're already on the sheet,
     // the signup panel is for the people you're bringing, not for you.
+    // One label, whether you are on the list already or not: the sheet
+    // is where you say who it is for. "＋ 代人報名候補" said the same
+    // thing twice and neither half plainly.
     const bring = `<button type="button" class="hact${playing ? " quiet" : ""}" onclick="openSignup(${game.id})">${
-      playing ? "＋ 代人報名" : "＋ 報名"
-    }${full ? "候補" : ""}</button>`;
+      full ? "＋ 報名候補" : "＋ 報名"
+    }</button>`;
 
     if (isMember && myAbsence) {
       if (myAbsence.covered_by) {
@@ -994,8 +1003,12 @@
       suGame.confirmed_drop_ins.some((d) => d.player_name === playerName()) ||
       suGame.waitlist_entries.some((w) => w.player_name === playerName()) ||
       currentSeason.members.some((m) => m.name === playerName());
+    // Already playing: the list starts empty and you add whoever you are
+    // bringing. It used to start with one blank row, which the rebuilt
+    // sheet drew as a nameless entry sitting there as if somebody were
+    // signed up.
     suPeople = alreadyIn
-      ? [{ name: "", gender: null, playerId: null }]
+      ? []
       : [{ name: playerName(), gender: null, playerId: myPlayerId, self: true }];
     document.getElementById("su-when").textContent = describeGameWhen(currentSeason, suGame);
     renderSignup();
@@ -1010,42 +1023,32 @@
 
   function closeSignup() { document.getElementById("signup-backdrop").hidden = true; }
 
-  /** The friends this member has brought before, as taps.
-   *
-   * Typing a name again every week is how one real person becomes
-   * several rows in the database, each carrying its own money — a bare
-   * name always means a new person, deliberately, because two people
-   * really can be called 小明. Picking from here sends their id
-   * instead, so the regular stays one person with one ledger.
-   *
-   * Only shown on an empty row, and never for somebody already on this
-   * game's list — picking them would sign the same person up twice.
-   */
-  function quickPicks(person, index) {
-    if (person.self || person.name.trim() || person.playerId) return "";
-    const already = new Set(
+  /** Who is already spoken for on this game — nobody may be added twice.
+   * Members on the roster who haven't taken leave count too. */
+  function alreadyOnThisGame() {
+    return new Set(
       currentSeason.members
         .filter((m) => !suGame.absences.some((a) => a.player_name === m.name))
         .map((m) => m.name)
         .concat(suGame.confirmed_drop_ins.map((d) => d.player_name))
         .concat(suGame.waitlist_entries.map((w) => w.player_name))
-        .concat(suPeople.map((p) => p.name.trim()))
+        .concat(suPeople.map((p) => p.name))
     );
-    const picks = myGuests.filter((g) => !already.has(g.name));
-    if (!picks.length) return "";
-    return `
-      <div class="su-recent">
-        <span class="su-recent-label">曾報名過</span>
-        ${picks
-          .map(
-            (g) => `
-          <button type="button" class="su-recent-pick" data-recent="${index}"
-            data-pid="${g.id}" data-name="${escapeHtml(g.name)}" data-gender="${g.gender || ""}">
-            ${escapeHtml(g.name)}<span class="su-recent-times">${g.times}</span>
-          </button>`
-          )
-          .join("")}
-      </div>`;
+  }
+
+  /** One shared panel, opened on demand — not a list repeated under
+   * every row. Signing up three people used to draw the whole "people
+   * you've brought before" list three times on one phone screen. */
+  async function addSignupPerson() {
+    const taken = alreadyOnThisGame();
+    const picked = await choosePerson(document.getElementById("su-picker"));
+    if (!picked) return;
+    if (taken.has(picked.name)) {
+      toast(`${picked.name} 已經在這一場的名單上`);
+      return;
+    }
+    suPeople.push({ name: picked.name, gender: picked.gender, playerId: picked.id });
+    renderSignup();
   }
 
   function renderSignup() {
@@ -1054,6 +1057,17 @@
     const confirmed = Math.min(suPeople.length, slots);
     const waiting = suPeople.length - confirmed;
     const share = Number(currentSeason.share_per_game);
+
+    // The panel is rebuilt each time so its candidate list excludes
+    // whoever has just been added.
+    const taken = alreadyOnThisGame();
+    renderPersonPicker(document.getElementById("su-picker"), {
+      title: "新增報名對象",
+      hint: "選過去報名過的人，可沿用同一筆紀錄與帳務。",
+      candidates: myGuests
+        .filter((g) => !taken.has(g.name))
+        .map((g) => ({ id: g.id, name: g.name, gender: g.gender, note: `報名過 ${g.times} 次` })),
+    });
 
     document.getElementById("su-now").textContent = playing + confirmed;
     document.getElementById("su-cap").textContent = currentSeason.capacity;
@@ -1064,97 +1078,38 @@
     document.getElementById("su-bar-add").style.width = pct(confirmed);
     document.getElementById("su-bar-over").style.width = pct(waiting);
 
-    document.getElementById("su-seg").innerHTML = [1, 2, 3]
-      .map(
-        (n) =>
-          `<button type="button" data-n="${n}" aria-pressed="${n === suPeople.length}">${n}</button>`
-      )
-      .join("");
-
-    document.getElementById("su-who").innerHTML = suPeople
-      .map((p, i) => {
-        const wait = playing + i >= currentSeason.capacity;
-        // Offered, never applied on its own — see DropInBatchEntry.
-        const clash =
-          !p.self && !p.playerId && p.name.trim()
-            ? clubMembers.find((m) => m.name === p.name.trim())
-            : null;
-        return `
-          <div class="su-row${wait ? " wait" : ""}">
-            <span class="n">${i + 1}</span>
-            <input type="text" data-i="${i}" value="${escapeHtml(p.name)}"
-              placeholder="${i === 0 ? "你的名字" : "朋友的名字"}" ${p.self ? "disabled" : ""}>
-            <span class="su-g">
-              <button type="button" data-g="male" data-i="${i}" aria-pressed="${p.gender === "male"}">男</button>
-              <button type="button" class="f" data-g="female" data-i="${i}" aria-pressed="${p.gender === "female"}">女</button>
-            </span>
-            ${wait ? '<span class="su-wait-tag">候補</span>' : ""}
-          </div>
-          ${clash ? `<button type="button" class="su-same" data-same="${i}" data-pid="${clash.id}">↳ 就是球隊裡那個「${escapeHtml(clash.name)}」，不要新增一個</button>` : ""}
-          ${p.playerId && !p.self ? `<button type="button" class="su-same" data-unsame="${i}">↳ 已選既有成員，改成新的人</button>` : ""}
-          ${quickPicks(p, i)}
-        `;
-      })
-      .join("");
+    document.getElementById("su-who").innerHTML = suPeople.length
+      ? suPeople
+          .map((p, i) => {
+            const wait = playing + i >= currentSeason.capacity;
+            return `
+              <div class="su-row${wait ? " wait" : ""}">
+                <span class="n">${i + 1}</span>
+                <span class="su-name">${escapeHtml(p.name)}${p.self ? "（你）" : ""}</span>
+                ${genderTag(p.gender)}
+                ${wait ? '<span class="su-wait-tag">候補</span>' : ""}
+                ${p.self ? "" : `<button type="button" class="su-drop" data-drop="${i}" aria-label="移除">✕</button>`}
+              </div>`;
+          })
+          .join("")
+      : '<div class="empty" style="padding:14px 0">尚未加入任何人</div>';
 
     document.getElementById("su-amt").textContent = "$" + confirmed * share;
     document.getElementById("su-breakdown").textContent =
       `${confirmed} 位 × $${share}` + (waiting ? `（候補 ${waiting} 位不計）` : "");
-    document.getElementById("su-go").textContent =
-      confirmed === 0 ? "加入候補" : "確認報名";
+    const go = document.getElementById("su-go");
+    go.textContent = confirmed === 0 ? "加入候補" : "確認報名";
+    go.disabled = suPeople.length === 0;
   }
 
-  document.getElementById("su-seg").addEventListener("click", (e) => {
-    const b = e.target.closest("button[data-n]");
-    if (!b) return;
-    const n = Number(b.dataset.n);
-    while (suPeople.length < n) suPeople.push({ name: "", gender: null, playerId: null });
-    suPeople.length = n;
-    renderSignup();
-  });
+  document.getElementById("su-add").addEventListener("click", addSignupPerson);
 
   document.getElementById("su-who").addEventListener("click", (e) => {
-    const g = e.target.closest("button[data-g]");
-    if (g) {
-      const i = Number(g.dataset.i);
-      suPeople[i].gender = suPeople[i].gender === g.dataset.g ? null : g.dataset.g;
-      renderSignup();
-      return;
-    }
-    const same = e.target.closest("[data-same]");
-    if (same) {
-      suPeople[Number(same.dataset.same)].playerId = Number(same.dataset.pid);
-      renderSignup();
-      return;
-    }
-    const unsame = e.target.closest("[data-unsame]");
-    if (unsame) {
-      suPeople[Number(unsame.dataset.unsame)].playerId = null;
-      renderSignup();
-      return;
-    }
-    // Picking a friend brought before: their id goes with the signup, so
-    // they stay one person rather than becoming a new one with the same
-    // name. See quickPicks.
-    const recent = e.target.closest("[data-recent]");
-    if (recent) {
-      const person = suPeople[Number(recent.dataset.recent)];
-      person.name = recent.dataset.name;
-      person.playerId = Number(recent.dataset.pid);
-      person.gender = recent.dataset.gender || null;
-      renderSignup();
-    }
+    const drop = e.target.closest("[data-drop]");
+    if (!drop) return;
+    suPeople.splice(Number(drop.dataset.drop), 1);
+    renderSignup();
   });
-
-  document.getElementById("su-who").addEventListener("input", (e) => {
-    if (e.target.dataset.i === undefined) return;
-    const p = suPeople[Number(e.target.dataset.i)];
-    p.name = e.target.value;
-    p.playerId = null; // typing a different name is a different person
-  });
-  // Re-render on blur rather than on every keystroke: redrawing mid-word
-  // would take the caret with it.
-  document.getElementById("su-who").addEventListener("focusout", () => renderSignup());
 
   document.getElementById("su-go").addEventListener("click", async (e) => {
     const btn = e.currentTarget;

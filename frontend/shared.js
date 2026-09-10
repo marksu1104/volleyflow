@@ -415,7 +415,7 @@ function renderMonthCalendar(container, games, onPick, opts) {
  *     underneath as a fallback for someone not in the list yet.
  *   viewerName — the current viewer's resolved name, used only to mark
  *     "(你)" on their own waitlist row.
- *   onAssignSubstitute(absenceId, name, gender) — if given, an
+ *   onAssignSubstitute(absenceId, name, gender, button) — if given, an
  *     uncovered absent row gets a 設定代打/編輯代打 control that calls
  *     this — available any time, even once the game is locked, since
  *     swapping who covers a slot doesn't create the last-minute-
@@ -526,6 +526,106 @@ function removeDropInLocally(season, dropInId) {
       if (absence.filled_by === going.player_name) absence.filled_by = null;
     }
   }
+}
+
+/** One panel for choosing a person, wherever a person has to be chosen.
+ *
+ * Both places that pick somebody — naming a 代打 and adding people to a
+ * signup — need the same thing: the handful of people you already know,
+ * as taps, with a text field for anyone else. Building it twice let them
+ * drift, and the signup version was worse: it repeated the whole list
+ * under every row, so signing up three people meant three long lists on
+ * one phone screen.
+ *
+ * `candidates` are `{ id, name, gender, note }`. `id` is what keeps a
+ * regular one person instead of a new row each week — a typed name
+ * always means somebody new, deliberately, because two people really can
+ * be called 小明.
+ */
+function renderPersonPicker(container, { title, candidates, hint }) {
+  const rows = (candidates || [])
+    .map(
+      (c) => `
+      <div class="pick-row" data-person-pick
+        data-person-id="${c.id === null || c.id === undefined ? "" : c.id}"
+        data-person-name="${escapeHtml(c.name)}"
+        data-person-gender="${c.gender || ""}">
+        <i class="radio"></i><span class="avatar sm">${escapeHtml((c.name || "?").trim().slice(0, 1))}</span>
+        <span class="pk-name">${escapeHtml(c.name)}</span>${genderTag(c.gender)}
+        <span class="pk-note">${escapeHtml(c.note || "")}</span>
+      </div>`
+    )
+    .join("");
+
+  container.innerHTML = `
+    <div class="picker-backdrop" data-person-picker hidden>
+      <div class="picker">
+        <div class="picker-head">
+          <span>${escapeHtml(title)}</span>
+          <button type="button" class="picker-close" data-person-cancel aria-label="關閉">✕</button>
+        </div>
+        ${hint ? `<p class="hint" style="margin-top:0">${escapeHtml(hint)}</p>` : ""}
+        ${
+          rows
+            ? `<div class="or-line"><span>曾報名過的對象</span></div>
+               <div class="sub-pick">${rows}</div>
+               <div class="or-line"><span>以上皆非，請直接輸入姓名</span></div>`
+            : `<div class="or-line"><span>請輸入姓名</span></div>`
+        }
+        <div class="picker-manual">
+          <input type="text" placeholder="輸入姓名" data-person-name-input>
+          <select data-person-gender-input>
+            <option value="">性別</option>
+            <option value="male">男</option>
+            <option value="female">女</option>
+          </select>
+        </div>
+        <button type="button" class="btn btn-primary" data-person-confirm>加入</button>
+      </div>
+    </div>`;
+}
+
+/** Opens the panel built above and resolves with the person chosen, or
+ * null if it was closed. A promise rather than a callback because every
+ * caller does the same thing with the answer and nothing else until it
+ * arrives. */
+function choosePerson(container) {
+  const backdrop = container.querySelector("[data-person-picker]");
+  if (!backdrop) return Promise.resolve(null);
+  backdrop.hidden = false;
+  return new Promise((resolve) => {
+    const done = (value) => {
+      backdrop.hidden = true;
+      backdrop.onclick = null;
+      resolve(value);
+    };
+    backdrop.onclick = (e) => {
+      if (e.target === backdrop || e.target.closest("[data-person-cancel]")) {
+        done(null);
+        return;
+      }
+      const row = e.target.closest("[data-person-pick]");
+      if (row) {
+        done({
+          id: row.dataset.personId ? Number(row.dataset.personId) : null,
+          name: row.dataset.personName,
+          gender: row.dataset.personGender || null,
+        });
+        return;
+      }
+      if (e.target.closest("[data-person-confirm]")) {
+        const nameEl = backdrop.querySelector("[data-person-name-input]");
+        const genderEl = backdrop.querySelector("[data-person-gender-input]");
+        const name = nameEl ? nameEl.value.trim() : "";
+        if (!name) {
+          toast("請輸入姓名");
+          if (nameEl && nameEl.focus) nameEl.focus();
+          return;
+        }
+        done({ id: null, name, gender: (genderEl && genderEl.value) || null });
+      }
+    };
+  });
 }
 
 /** Shows one of a game sheet's three groups. Used by the tab strip and
@@ -985,7 +1085,12 @@ function renderGameDetail(container, season, game, options) {
         toast("請先選一個人，或直接輸入名字");
         return;
       }
-      onAssignSubstitute(Number(id), name, (genderSelect && genderSelect.value) || null);
+      onAssignSubstitute(
+        Number(id),
+        name,
+        (genderSelect && genderSelect.value) || null,
+        confirmSub
+      );
       return;
     }
     const cancelSub = e.target.closest("[data-cancel-sub]");
@@ -1072,6 +1177,34 @@ async function withButtonFeedback(btn, busyLabel, action) {
     btn.disabled = false;
     btn.textContent = original;
     throw e;
+  }
+}
+
+/** Runs something that has to wait on the network, with the control
+ * saying so and refusing further taps until it is done.
+ *
+ * A spinner rather than swapped-out words: the label is what tells you
+ * which button you pressed, and replacing it with "處理中…" takes that
+ * away at the exact moment you are waiting to find out. The label
+ * dims, a spinner appears beside it, and the button is disabled — so a
+ * second tap cannot land, which is what produced duplicate requests and
+ * stale-id errors before.
+ *
+ * Restores the button whatever happens, including on failure, because a
+ * control stuck spinning forever is worse than the error it is hiding.
+ * Anything the screen can show immediately should be optimistic instead
+ * — this is for the rest.
+ */
+async function whileBusy(el, action) {
+  if (!el || !el.classList) return action();
+  if (el.classList.contains("is-busy")) return undefined;
+  el.classList.add("is-busy");
+  if ("disabled" in el) el.disabled = true;
+  try {
+    return await action();
+  } finally {
+    el.classList.remove("is-busy");
+    if ("disabled" in el) el.disabled = false;
   }
 }
 
