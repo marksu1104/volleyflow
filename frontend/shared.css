@@ -996,3 +996,37 @@ textarea {
 /* Explains the price beside it, so a member seeing 235 instead of 205
    doesn't have to ask why. */
 .meta-pill.ac { background: var(--warn-soft); color: var(--warn); font-weight: 700; }
+
+/* A picker that owns the screen while it is open.
+   Choosing who stands in for somebody is a decision of its own, and it
+   was a panel wedged between two roster rows — you scrolled a list
+   inside a list, on a phone, with the names you were comparing pushed
+   off screen. Same shape as every other sheet here. */
+.picker-backdrop {
+  position: fixed; inset: 0; background: var(--scrim); z-index: 60;
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.picker-backdrop[hidden] { display: none !important; }
+.picker {
+  background: var(--surface); width: 100%; max-width: 520px;
+  border-radius: 16px 16px 0 0; padding: 16px 16px 22px;
+  max-height: 82vh; overflow-y: auto; animation: slideUp .18s ease;
+}
+.picker-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; font-weight: 700; font-size: .95rem; margin-bottom: 10px;
+}
+.picker-close {
+  border: none; background: var(--surface-2); color: var(--ink-soft);
+  width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 1rem;
+}
+.picker .sub-pick { display: flex; flex-direction: column; gap: 4px; }
+.picker-manual { display: flex; gap: 8px; margin: 4px 0 2px; }
+.picker-manual input { flex: 1; }
+/* 16px, or iOS zooms the page the moment one is focused. */
+.picker-manual input, .picker-manual select {
+  font-size: 1rem; padding: 10px 12px; border: 1px solid var(--rule);
+  border-radius: 9px; background: var(--surface); color: var(--ink);
+  font-family: var(--font-cjk);
+}
+.picker-manual select { flex: 0 0 92px; }

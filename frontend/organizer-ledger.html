@@ -83,7 +83,7 @@
       </div>
       <div class="section-label">尚未結清的餘額</div>
       <div id="closing-list" class="money"></div>
-      <p id="closing-all-clear" class="empty" hidden>大家都已經結清了</p>
+      <p id="closing-all-clear" class="empty" hidden>所有成員均已結清</p>
     </div>
   </div>
 </div>
@@ -175,7 +175,7 @@
     document.getElementById("no-season").innerHTML = hasSeason
       ? ""
       : emptyStateHtml(
-          "這個球隊還沒有開季",
+          "這個球隊尚未開季",
           "季費、當天臨打和季末結算都是跟著一季走的。建立第一季之後，每個人的應收金額就會出現在這裡。",
           { label: "建立第一季", href: "organizer-settings.html" }
         );
@@ -329,7 +329,7 @@
     // roster, where it would be noise rather than an answer.
     const brought = balanceOf(playerId).brought_by;
     const broughtTag = brought
-      ? `<span class="m-brought">${escapeHtml(brought)} 帶</span>`
+      ? `<span class="m-brought">${escapeHtml(brought)} 報名</span>`
       : "";
 
     return `
@@ -456,7 +456,7 @@
       .join("");
 
     document.getElementById("fee-list").innerHTML =
-      rowsHtml || '<div class="empty">這一季還沒有固定成員</div>';
+      rowsHtml || '<div class="empty">這一季尚無固定成員</div>';
     document.getElementById("fee-collected").textContent = `$${Math.round(collected)} / $${Math.round(total)}`;
     document.getElementById("fee-progress").style.width = total > 0 ? `${Math.min(100, (collected / total) * 100)}%` : "0%";
     const unpaidCount = season.members.filter(

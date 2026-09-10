@@ -168,7 +168,7 @@
       document.getElementById("no-season").innerHTML = id
         ? ""
         : emptyStateHtml(
-            "這個球隊還沒有開季",
+            "這個球隊尚未開季",
             "固定成員名單是跟著一季走的。可以先把上面的連結分享出去讓大家加入球隊，等開季時再從待加入名單挑人。",
             { label: "建立第一季", href: "organizer-settings.html" }
           );
@@ -402,7 +402,7 @@
 
     const list = document.getElementById("member-list");
     if (season.members.length === 0) {
-      list.innerHTML = '<div class="empty">還沒有成員</div>';
+      list.innerHTML = '<div class="empty">尚無成員</div>';
       return;
     }
     list.innerHTML = season.members

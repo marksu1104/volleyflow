@@ -50,7 +50,7 @@
   <div id="page-state"></div>
 
   <p id="no-club-note" class="empty-club-note" hidden>
-    還沒有加入任何球隊——請先到<a href="member.html">會員頁</a>用 LINE 開啟，建立或加入一個球隊。
+    尚未加入任何球隊——請先到<a href="member.html">會員頁</a>用 LINE 開啟，建立或加入一個球隊。
   </p>
 
   <div id="create-season-form" class="settings-form" hidden>
@@ -482,7 +482,7 @@
 
     const summary = document.getElementById("gen-summary");
     if (wizardDates.length === 0) {
-      summary.innerHTML = '<span>還沒有場次</span>';
+      summary.innerHTML = '<span>尚無場次</span>';
     } else {
       const span = `${describeDate(wizardDates[0]).label} – ${describeDate(wizardDates[wizardDates.length - 1]).label}`;
       summary.innerHTML =
@@ -504,7 +504,7 @@
               </div>`
           )
           .join("")
-      : '<div class="empty">球隊裡還沒有其他人，可以在下面直接輸入名字</div>';
+      : '<div class="empty">球隊裡尚無其他對象，請於下方直接輸入姓名</div>';
 
     document.getElementById("extra-names").innerHTML = extraNames
       .map(
@@ -515,7 +515,7 @@
     const preview = document.getElementById("create-preview");
     if (!cost || !wizardDates.length || !capacity) {
       preview.innerHTML = emptyStateHtml(
-        "還差一點",
+        "資料尚未齊全",
         `目前：場地費 $${cost || 0}、${wizardDates.length} 場、上限 ${capacity || 0} 人。三個都填好才算得出每個人要收多少。`
       );
       return;
@@ -529,7 +529,7 @@
       <p class="hint" style="margin-top:0">
         $${cost} ÷ ${wizardDates.length} 場 ÷ 上限 ${capacity} 人 = 每人每場 $${share}，整季 $${seasonFee}。
         ${acSurcharge > 0 ? `有開冷氣的那幾場是每人 $${prices.cooled}，開季後逐場切換。` : ""}
-        ${memberCount ? `建立後這筆金額會直接記到 ${memberCount} 個人的帳上，可以在「帳務 · 季費」收款。` : "還沒挑成員，可以之後再加 —— 加人不會改變其他人的金額。"}
+        ${memberCount ? `建立後這筆金額會直接記到 ${memberCount} 個人的帳上，可以在「帳務 · 季費」收款。` : "尚未選擇成員，可於開季後再新增；新增成員不會變動其他人的金額。"}
       </p>
       <p class="hint" style="margin-top:6px">
         金額是用<b>人數上限</b>算的，所以之後加人退人都只動到那個人自己的帳，其他人不受影響。

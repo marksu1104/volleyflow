@@ -73,7 +73,7 @@
       <textarea id="report-text" class="control" rows="4"
         placeholder="哪個畫面、按了什麼、發生什麼事？例如：帳務頁按「已收」之後金額沒有變。"></textarea>
       <p class="hint">
-        你是誰、在哪一頁、用什麼裝置會自動附上，不用自己打。送出後會直接傳到開發者的 LINE。
+        身分、頁面與裝置資訊會自動附上，無須自行填寫。送出後將直接傳送給開發者。
       </p>
     </div>
     <div class="field">
@@ -122,12 +122,12 @@
 
   async function saveName() {
     const name = document.getElementById("name-input").value.trim();
-    if (!name) { toast("名字不能是空的"); return; }
+    if (!name) { toast("名稱不得為空白"); return; }
     // Both of these used to be silent: pressing 儲存 with the name
     // unchanged returned without a word, and a successful save said
     // nothing unless the name had been taken. A button that does
     // nothing visible is indistinguishable from a broken one.
-    if (name === me.name) { toast("名字沒有變"); return; }
+    if (name === me.name) { toast("名稱未變更"); return; }
     try {
       const updated = await postJson(API_BASE, `/players/${me.id}/name`, { name }, "PUT");
       // initLiffIdentity caches "who am I" for the session; the name in
@@ -196,7 +196,7 @@
       img.onerror = () => {
         screenshot = null;
         preview.hidden = true;
-        toast("讀不到這張圖片，請換一張試試。");
+        toast("無法讀取此圖片，請改用其他檔案。");
       };
       img.src = reader.result;
     };
@@ -269,7 +269,7 @@
           </div>
         `;
       })
-      .join("") || '<div class="empty">還沒有加入任何球隊</div>';
+      .join("") || '<div class="empty">尚未加入任何球隊</div>';
   }
 </script>
 </body>

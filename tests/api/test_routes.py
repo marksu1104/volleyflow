@@ -429,17 +429,41 @@ def test_cancel_absence_rejects_already_cancelled(client: TestClient) -> None:
     assert response.status_code == 400
 
 
-def test_cancel_absence_rejects_when_covered_by_a_drop_in(client: TestClient) -> None:
+def test_cancelling_an_absence_puts_the_stand_in_back_in_the_queue(
+    client: TestClient,
+) -> None:
+    """The member is playing after all, so the slot they released closes
+    again and Bob returns to where he was waiting.
+
+    This used to be refused outright ("ask the organizer"), which was a
+    dead end — the app offers no way to ask, so a member who could play
+    after all was simply stuck. Changed 2026-09-10; the change deadline
+    is what limits the churn, not an outright block.
+    """
     season = _start_season(client, member_names=["Alice"], capacity=1)
     game_id = season["games"][0]["id"]
     absence = client.post(
         "/absences", json={"player_name": "Alice", "game_id": game_id}
     ).json()
-    client.post("/drop-ins", json={"player_name": "Bob", "game_id": game_id})
+    bob = client.post(
+        "/drop-ins", json={"player_name": "Bob", "game_id": game_id}
+    ).json()
 
     response = client.post(f"/absences/{absence['id']}/cancel")
 
-    assert response.status_code == 400
+    assert response.status_code == 200
+    assert response.json()["released_player_id"] == bob["player_id"]
+    game = next(
+        g
+        for g in client.get(f"/seasons/{season['id']}").json()["games"]
+        if g["id"] == game_id
+    )
+    assert game["confirmed_drop_ins"] == []
+    assert [w["player_name"] for w in game["waitlist_entries"]] == ["Bob"]
+    ledger = client.get(
+        f"/clubs/{season['club_id']}/players/{bob['player_id']}/ledger"
+    ).json()
+    assert ledger["balance"] == "0", "charged when promoted, refunded when released"
 
 
 def test_cancel_absence_for_unknown_id_returns_404(client: TestClient) -> None:

@@ -127,5 +127,5 @@ test("an unknown entry type surfaces rather than vanishing", () => {
 
 test("someone with nothing charged yet is told so, not shown a blank", () => {
   const rows = rowsFor({ balance: 0, games: [game({})], entries: [] });
-  assert.deepEqual(rows.map((r) => r.label), ["還沒有任何費用"]);
+  assert.deepEqual(rows.map((r) => r.label), ["尚無任何費用"]);
 });

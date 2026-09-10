@@ -169,6 +169,11 @@ class AbsenceOut(BaseModel):
 class AbsenceCancelOut(BaseModel):
     id: int
     cancelled_at: datetime
+    released_player_id: int | None = None
+    """Who went back to the queue because this member is playing after
+    all. The slot only opened because it was released, so taking that
+    back closes it — but the screen has to name the person, or they
+    disappear off the roster with no explanation."""
 
 
 class SubstituteCreate(BaseModel):
