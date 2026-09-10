@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VolleyFlow 球隊管理 · 名單</title>
 <link rel="preconnect" href="https://volleyflow.onrender.com" crossorigin>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏐</text></svg>">
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
 <link rel="stylesheet" href="shared.css">
@@ -424,7 +425,13 @@
     const input = document.getElementById("new-member-name");
     const genderSelect = document.getElementById("new-member-gender");
     const name = input.value.trim();
-    if (!name) return;
+    // Checked here rather than left to the server: an empty name got a
+    // 400 back, which reaches the reader as nothing at all happening.
+    if (!name) {
+      toast("請先輸入訪客的名字");
+      input.focus();
+      return;
+    }
     if (!confirm(`新增「${name}」會重新計算整季每人每場的金額，包含已經打過的場次。要繼續嗎？`)) {
       return;
     }

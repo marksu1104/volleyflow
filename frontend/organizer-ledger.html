@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VolleyFlow 球隊管理 · 帳務</title>
 <link rel="preconnect" href="https://volleyflow.onrender.com" crossorigin>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏐</text></svg>">
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
 <link rel="stylesheet" href="shared.css">
@@ -361,7 +362,16 @@
   async function recordPartialPayment(btn, playerId) {
     const input = btn.closest(".m-act").querySelector("input");
     const amount = input.value.trim();
-    if (!amount) return;
+    if (!amount) {
+      toast("請先填金額");
+      input.focus();
+      return;
+    }
+    if (!(Number(amount) > 0)) {
+      toast("金額要大於 0");
+      input.focus();
+      return;
+    }
     await submitPayment(playerId, amount);
   }
 
