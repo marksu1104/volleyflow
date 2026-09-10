@@ -288,7 +288,7 @@
       await postJson(API_BASE, `/seasons/${currentSeason.id}/members`, {
         player_name: player.name,
       });
-      loadMembers(currentSeason.id);
+      await loadMembers(currentSeason.id);
     } catch (e) {
       toast("加入失敗：" + e.message);
     }
@@ -335,7 +335,7 @@
     renderMembers(currentSeason);
     try {
       await postJson(API_BASE, `/players/${playerId}/gender`, { gender }, "PUT");
-      loadMembers(currentSeason.id);
+      await loadMembers(currentSeason.id);
     } catch (e) {
       if (member) member.gender = previous;
       renderMembers(currentSeason);
@@ -375,7 +375,7 @@
       await postJson(API_BASE, `/clubs/${currentClubId()}/players/${picked.id}/link`, {
         line_player_id: linePlayerId,
       });
-      loadMembers(currentSeason.id);
+      await loadMembers(currentSeason.id);
     } catch (e) {
       toast("合併失敗：" + e.message);
     }
@@ -387,7 +387,7 @@
 他們之後可以再用邀請連結加入。`)) return;
     try {
       await deleteJson(API_BASE, `/clubs/${currentClubId()}/members/${playerId}`);
-      loadMembers(currentSeason.id);
+      await loadMembers(currentSeason.id);
     } catch (e) {
       toast("移出球隊失敗：" + e.message);
     }
@@ -442,7 +442,7 @@
       });
       input.value = "";
       genderSelect.value = "";
-      loadMembers(currentSeason.id);
+      await loadMembers(currentSeason.id);
     } catch (e) {
       toast("新增失敗：" + e.message);
     }

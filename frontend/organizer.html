@@ -289,7 +289,7 @@
     if (!confirm(wording)) return;
     try {
       await postJson(API_BASE, `/games/${gameId}/air-conditioning`, { air_conditioned: on }, "PUT");
-      loadDashboard(currentSeason.id);
+      await loadDashboard(currentSeason.id);
     } catch (e) {
       toast("改冷氣設定失敗：" + e.message);
     }
@@ -391,7 +391,7 @@
       );
       const bumped = playingBefore.find((d) => d.player_id === result.displaced_player_id);
       toast(bumped ? `${name} 上場，${bumped.player_name} 回到候補` : `已指定 ${name} 代打`);
-      loadDashboard(currentSeason.id);
+      await loadDashboard(currentSeason.id);
     } catch (e) {
       toast("設定代打失敗：" + e.message);
     }
@@ -405,7 +405,7 @@
           game_id: selectedGameId,
         });
       });
-      loadDashboard(currentSeason.id);
+      await loadDashboard(currentSeason.id);
     } catch (e) {
       toast("代為請假失敗：" + e.message);
     }
@@ -416,7 +416,7 @@
       await withButtonFeedback(btn, "處理中...", async () => {
         await postJson(API_BASE, `/absences/${absenceId}/cancel`, {});
       });
-      loadDashboard(currentSeason.id);
+      await loadDashboard(currentSeason.id);
     } catch (e) {
       toast("取消請假失敗：" + e.message);
     }
@@ -437,7 +437,7 @@
             .catch(() => {});
         }
       });
-      loadDashboard(currentSeason.id);
+      await loadDashboard(currentSeason.id);
     } catch (e) {
       toast("新增臨打失敗：" + e.message);
     }
@@ -451,7 +451,7 @@
       await withButtonFeedback(btn, "移除中...", async () => {
         await postJson(API_BASE, `/waitlist/${entryId}/cancel`, {});
       });
-      loadDashboard(currentSeason.id);
+      await loadDashboard(currentSeason.id);
     } catch (e) {
       toast("移除候補失敗：" + e.message);
     }
@@ -468,44 +468,38 @@
    * first-in-line rule take the slot before this person could, and each
    * of those promotions is a real charge and refund on somebody's
    * ledger. */
-  async function promoteFromWaitlist(entryId, btn) {
+  async function promoteFromWaitlist(entryId, target, replacingDropInId) {
     const game = currentSeason.games.find((g) => g.id === selectedGameId);
     const entry = game.waitlist_entries.find((w) => w.id === entryId);
-    const playing = game.confirmed_drop_ins;
-    let replacing = null;
+    const replacing = replacingDropInId
+      ? game.confirmed_drop_ins.find((d) => d.id === replacingDropInId)
+      : null;
 
-    if (isGameFull(currentSeason, game)) {
-      if (playing.length === 0) {
-        toast(`這一場已滿 ${currentSeason.capacity} 人，且全是固定成員 —— 請先讓某位請假，或到設定調高上限。`);
-        return;
-      }
-      const choice = prompt(
-        `這一場已滿 ${currentSeason.capacity} 人。要讓「${entry.player_name}」上場，` +
-          `請輸入要換下來的臨打編號：\n\n` +
-          playing.map((d, i) => `${i + 1}. ${d.player_name}`).join("\n"),
-        ""
-      );
-      if (choice === null) return;
-      const picked = playing[Number(choice) - 1];
-      if (!picked) {
-        toast("沒有這個編號，沒有做任何更動。");
-        return;
-      }
-      replacing = picked;
+    if (isGameFull(currentSeason, game) && !replacing) {
+      toast(`這一場已滿 ${currentSeason.capacity} 人，且沒有臨打可以換下來 —— 請先讓某位請假，或到設定調高上限。`);
+      return;
     }
 
-    try {
-      await withButtonFeedback(btn, "遞補中...", async () => {
-        await postJson(API_BASE, `/waitlist/${entryId}/promote`, {
-          replacing_drop_in_id: replacing ? replacing.id : null,
-        });
+    // The target is a button when there was room, and a row of the
+    // swap picker when there wasn't. withButtonFeedback swaps an
+    // element's textContent, which would wipe a row's avatar and name,
+    // so it only runs on the button.
+    const send = () =>
+      postJson(API_BASE, `/waitlist/${entryId}/promote`, {
+        replacing_drop_in_id: replacing ? replacing.id : null,
       });
+    try {
+      if (target && target.tagName === "BUTTON") {
+        await withButtonFeedback(target, "遞補中...", send);
+      } else {
+        await send();
+      }
       toast(
         replacing
-          ? `${entry.player_name} 上場，${replacing.player_name} 換下。`
-          : `${entry.player_name} 已遞補上場。`
+          ? `${entry.player_name} 上場，${replacing.player_name} 回到候補`
+          : `${entry.player_name} 已遞補上場`
       );
-      loadDashboard(currentSeason.id);
+      await loadDashboard(currentSeason.id);
     } catch (e) {
       toast("遞補失敗：" + e.message);
     }
@@ -516,7 +510,7 @@
       await withButtonFeedback(btn, "取消中...", async () => {
         await postJson(API_BASE, `/drop-ins/${dropInId}/cancel`, {});
       });
-      loadDashboard(currentSeason.id);
+      await loadDashboard(currentSeason.id);
     } catch (e) {
       toast("取消代打失敗：" + e.message);
     }

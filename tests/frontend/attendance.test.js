@@ -346,6 +346,72 @@ test("only the organizer is offered 遞補 on a queued person", () => {
   assert.match(asOrganizer.innerHTML, /data-promote-waitlist="300"/);
 });
 
+test("a second tap is dropped while the first change is still in flight", () => {
+  // Reported from real use: pressing 請假 and 取消請假 quickly enough
+  // got "這場已請假" back for a game showing no absence. The taps
+  // outran the round trips, so each request carried an id the server
+  // had already moved past.
+  const { season, game } = fixture();
+  const el = makeElement();
+  const calls = [];
+  let release;
+  renderGameDetail(el, season, game, {
+    viewerName: "蘇慬",
+    onRecordAbsence: (name) => {
+      calls.push(name);
+      return new Promise((r) => {
+        release = r;
+      });
+    },
+  });
+  const tap = () =>
+    el.onclick({
+      target: {
+        closest: (s) =>
+          s === "[data-mark-absent]" ? { dataset: { markAbsent: "阿May" } } : null,
+      },
+    });
+
+  tap();
+  tap();
+  tap();
+
+  assert.deepEqual(calls, ["阿May"], "three taps, one change");
+  release();
+});
+
+test("a full game offers who to swap out as tappable names", () => {
+  // The first version put a numbered list in a prompt() and asked for a
+  // digit. Same picker rows as everything else on this screen now.
+  const { season, game } = fixture();
+  season.capacity = 4; // 2 members playing + 2 drop-ins = full
+  const el = makeElement();
+
+  renderGameDetail(el, season, game, {
+    viewerName: "蘇慬",
+    onPromoteFromWaitlist() {},
+  });
+
+  assert.match(el.innerHTML, /data-swap-form="300"/);
+  assert.match(el.innerHTML, /data-swap-in="300"[^>]*data-swap-out="200"/);
+  assert.match(el.innerHTML, /data-swap-out="201"/);
+  assert.doesNotMatch(el.innerHTML, /輸入.*編號/, "no numbers to type");
+});
+
+test("a game with room promotes straight away, with nobody to choose", () => {
+  const { season, game } = fixture();
+  season.capacity = 18; // plenty of room
+  const el = makeElement();
+
+  renderGameDetail(el, season, game, {
+    viewerName: "蘇慬",
+    onPromoteFromWaitlist() {},
+  });
+
+  assert.match(el.innerHTML, /data-promote-waitlist="300"/);
+  assert.doesNotMatch(el.innerHTML, /data-swap-form/, "nothing to swap out");
+});
+
 test("遞補 and 移除 are separate ids on the same queued person", () => {
   // Both controls sit on one row, and the two tables have overlapping
   // id sequences — routing either through the other's handler acts on
