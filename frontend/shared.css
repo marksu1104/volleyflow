@@ -1066,23 +1066,34 @@ textarea {
 }
 .su-drop:hover { background: var(--bad-soft); color: var(--bad); }
 
-/* A control waiting on the network. The label stays — it is what tells
-   you which button you pressed — and dims, with a spinner beside it.
-   Swapping the words out for 處理中… removed that information at the
-   moment it was most wanted. */
+/* A control waiting on the network: its label fades out, a spinner
+   takes its place, and it stops accepting taps.
+   The class only lands after a short delay (see BUSY_AFTER_MS), so a
+   fast action just happens rather than flashing a spinner at you. */
 .is-busy { position: relative; pointer-events: none; }
-.is-busy > * { opacity: .35; }
+.is-busy > *,
+.is-busy::first-line { opacity: 0; }
+/* A button's label is a bare text node, which no selector can reach —
+   fading the colour is what hides it, and the box keeps its size so
+   nothing around it moves while it waits. */
+/* No transition on the colour. The delay before this class lands is
+   what makes it feel considered; fading on top of that only means the
+   label is half-visible under the spinner for a moment — and made the
+   state impossible to measure, since a computed colour mid-transition
+   is neither one thing nor the other. */
+.is-busy { color: transparent !important; }
 .is-busy::after {
   content: ""; position: absolute; top: 50%; left: 50%;
   width: 16px; height: 16px; margin: -8px 0 0 -8px;
-  border: 2px solid currentColor; border-right-color: transparent;
-  border-radius: 50%; animation: spin .6s linear infinite; opacity: .9;
+  border: 2px solid var(--ink-soft); border-right-color: transparent;
+  border-radius: 50%; animation: spin .6s linear infinite;
 }
-/* A button's text is a bare text node, not an element, so the rule
-   above cannot dim it — fade the whole control and let the spinner sit
-   over it instead. */
-button.is-busy { color: transparent; }
-button.is-busy::after { color: var(--ink-soft); border-color: currentColor; border-right-color: transparent; }
+/* On a filled button the spinner has to read against the fill. */
+.btn-primary.is-busy::after, button.action.is-busy::after {
+  border-color: currentColor; border-right-color: transparent;
+  filter: none; opacity: .85;
+}
+.btn-primary.is-busy::after { border-color: var(--surface); border-right-color: transparent; }
 @media (prefers-reduced-motion: reduce) {
   .is-busy::after { animation-duration: 1.6s; }
 }

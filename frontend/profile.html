@@ -212,7 +212,7 @@
     }
     const btn = document.getElementById("report-btn");
     try {
-      await withButtonFeedback(btn, "送出中…", async () => {
+      await whileBusy(btn, async () => {
         await postJson(API_BASE, "/reports", {
           message: text,
           // Sent rather than asked for: "it broke" is only actionable

@@ -594,10 +594,8 @@
       return;
     }
 
-    // The target is a button when there was room, and a row of the
-    // swap picker when there wasn't. withButtonFeedback swaps an
-    // element's textContent, which would wipe a row's avatar and name,
-    // so it only runs on the button.
+    // The target is a button when there was room, and a row of the swap
+    // picker when there wasn't; whileBusy handles either.
     const send = () =>
       postJson(API_BASE, `/waitlist/${entryId}/promote`, {
         replacing_drop_in_id: replacing ? replacing.id : null,

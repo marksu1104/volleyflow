@@ -561,7 +561,7 @@
     if (!confirm("確定要結算這一季嗎？結算後會鎖住名單與場地費，且無法重複結算。")) return;
     const btn = document.getElementById("settle-btn");
     try {
-      await withButtonFeedback(btn, "結算中...", async () => {
+      await whileBusy(btn, async () => {
         await postJson(API_BASE, `/seasons/${currentSeason.id}/settle`, {});
       });
       loadLedger(currentSeason.id);

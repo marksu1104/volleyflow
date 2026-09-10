@@ -1167,16 +1167,67 @@ function renderGameDetail(container, season, game, options) {
  * restoring it on failure (a successful action usually re-renders the
  * whole page anyway). Makes a tap feel acknowledged immediately instead
  * of sitting dead until the network call resolves. */
-async function withButtonFeedback(btn, busyLabel, action) {
-  const original = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = busyLabel;
+/* ---- "this is working" ----
+ *
+ * Every control that waits on the network says so, and none of them had
+ * to be changed one at a time to do it. Marking them by hand meant
+ * remembering at twenty-odd call sites, and the ones that got forgotten
+ * are exactly the ones reported as unresponsive.
+ *
+ * Instead: note which control was pressed, and let the request itself
+ * mark it. Every write in this app goes through postJson or deleteJson,
+ * so that is the one place that knows a wait has begun and the one place
+ * that knows it has ended.
+ */
+let _pressed = null;
+
+if (typeof document !== "undefined" && document.addEventListener) {
+  // Capture phase, so it runs before the handler that fires the request.
+  document.addEventListener(
+    "click",
+    (e) => {
+      _pressed = e.target && e.target.closest ? e.target.closest("button, .pick-row") : null;
+    },
+    true
+  );
+}
+
+/** Held so a control stays busy through several requests from one tap
+ * (adding a drop-in also sets their gender, for instance) and only
+ * clears when the last of them finishes. */
+const _busyDepth = new WeakMap();
+
+/** Long enough that a fast action just happens, short enough that a slow
+ * one never feels ignored. Without it every request flashed a spinner
+ * for 40ms, which reads as a glitch rather than as progress. */
+const BUSY_AFTER_MS = 140;
+
+function markBusy(el) {
+  if (!el || !el.classList) return () => {};
+  const depth = (_busyDepth.get(el) || 0) + 1;
+  _busyDepth.set(el, depth);
+  if ("disabled" in el) el.disabled = true;
+  el.setAttribute("aria-busy", "true");
+  const timer = setTimeout(() => el.classList.add("is-busy"), BUSY_AFTER_MS);
+  return () => {
+    clearTimeout(timer);
+    const left = (_busyDepth.get(el) || 1) - 1;
+    _busyDepth.set(el, left);
+    if (left > 0) return;
+    el.classList.remove("is-busy");
+    el.removeAttribute("aria-busy");
+    if ("disabled" in el) el.disabled = false;
+  };
+}
+
+/** Runs something with a named control showing the wait — for the few
+ * places that know better than the click does which element to mark. */
+async function whileBusy(el, action) {
+  const done = markBusy(el);
   try {
-    await action();
-  } catch (e) {
-    btn.disabled = false;
-    btn.textContent = original;
-    throw e;
+    return await action();
+  } finally {
+    done();
   }
 }
 
@@ -1384,12 +1435,22 @@ async function initLiffIdentity(apiBase, liffId) {
 }
 
 async function postJson(apiBase, path, body, method) {
-  const res = await fetch(`${apiBase}${path}`, {
-    method: method || "POST",
-    headers: { "Content-Type": "application/json", ...authHeader() },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
+  // Whichever control was pressed shows the wait, and stops taking
+  // taps, for as long as this takes — see markBusy. Claimed here rather
+  // than at the call sites so no write can forget to do it.
+  const done = markBusy(_pressed);
+  let res;
+  let data;
+  try {
+    res = await fetch(`${apiBase}${path}`, {
+      method: method || "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify(body),
+    });
+    data = await res.json().catch(() => ({}));
+  } finally {
+    done();
+  }
   if (!res.ok) {
     const error = new Error(data.detail || res.statusText);
     // Callers that retry need to tell "the server didn't answer" from
@@ -1655,10 +1716,16 @@ function signInFailureHtml(identified) {
  * the mirror of postJson, including clearing the response cache so the
  * next read doesn't paint from a copy of something just deleted. */
 async function deleteJson(apiBase, path) {
-  const res = await fetch(`${apiBase}${path}`, {
-    method: "DELETE",
-    headers: authHeader(),
-  });
+  const done = markBusy(_pressed);
+  let res;
+  try {
+    res = await fetch(`${apiBase}${path}`, {
+      method: "DELETE",
+      headers: authHeader(),
+    });
+  } finally {
+    done();
+  }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.detail || res.statusText);

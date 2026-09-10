@@ -9,7 +9,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { load, inlineScript } = require("./harness.js");
+const { load, inlineScript, makeElement } = require("./harness.js");
 
 test("a rejected token says to open it in LINE", () => {
   const { signInFailureHtml } = load();
@@ -392,4 +392,68 @@ test("no page's script writes the production URL into itself", () => {
     .filter((f) => inlineScript(f).includes("onrender.com"));
 
   assert.deepEqual(offenders, [], "these must use apiBase() instead");
+});
+
+// "This is working": a control that waits on the network says so, stops
+// taking taps, and lets go whatever happens. Reported twice as buttons
+// feeling unresponsive, both times because the state was applied by
+// hand at some call sites and forgotten at others — it is claimed by
+// postJson/deleteJson now, so no write can skip it.
+test("a control that is waiting is disabled and marked busy", () => {
+  const { markBusy } = load();
+  const btn = makeElement();
+  btn.tagName = "BUTTON";
+  const added = [];
+  btn.classList = { add: (c) => added.push(c), remove() {}, toggle() {}, contains: () => false };
+  const attrs = {};
+  btn.setAttribute = (k, v) => (attrs[k] = v);
+  btn.removeAttribute = (k) => delete attrs[k];
+  let fire;
+  globalThis.setTimeout = (fn) => ((fire = fn), 1);
+  globalThis.clearTimeout = () => {};
+
+  const done = markBusy(btn);
+
+  assert.equal(btn.disabled, true, "no second tap can land");
+  assert.equal(attrs["aria-busy"], "true");
+  fire(); // the delay elapses
+  assert.deepEqual(added, ["is-busy"]);
+  done();
+  assert.equal(btn.disabled, false, "and it always lets go again");
+});
+
+test("a fast action never flashes a spinner", () => {
+  // The class only lands after a delay, so a 40ms request just happens.
+  const { markBusy } = load();
+  const btn = makeElement();
+  const added = [];
+  btn.classList = { add: (c) => added.push(c), remove() {}, toggle() {}, contains: () => false };
+  btn.setAttribute = () => {};
+  btn.removeAttribute = () => {};
+  globalThis.setTimeout = () => 1; // never fires: the request came back first
+  globalThis.clearTimeout = () => {};
+
+  markBusy(btn)();
+
+  assert.deepEqual(added, [], "nothing was shown for a request that was quick");
+});
+
+test("one tap firing several requests clears only when the last returns", () => {
+  // Adding a drop-in also sets their gender. The control must not go
+  // live again between the two.
+  const { markBusy } = load();
+  const btn = makeElement();
+  btn.classList = { add() {}, remove() {}, toggle() {}, contains: () => false };
+  btn.setAttribute = () => {};
+  btn.removeAttribute = () => {};
+  globalThis.setTimeout = () => 1;
+  globalThis.clearTimeout = () => {};
+
+  const first = markBusy(btn);
+  const second = markBusy(btn);
+  first();
+
+  assert.equal(btn.disabled, true, "still waiting on the second");
+  second();
+  assert.equal(btn.disabled, false);
 });
