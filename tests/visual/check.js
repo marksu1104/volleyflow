@@ -58,6 +58,20 @@ check("可點擊的東西至少 32px 高（手指按得到）", (m) => {
   return `目標過小: ${worst.join(", ")}`;
 });
 
+check("代打選單沒有元素被擠出面板", (m) => {
+  if (!m.picker) return "選單沒有打開，這項沒有量到";
+  return m.picker.overflowing.length
+    ? `超出面板: ${[...new Set(m.picker.overflowing)].join(", ")}`
+    : null;
+});
+
+check("代打選單的輸入欄位至少 16px", (m) => {
+  if (!m.picker) return null;
+  return m.picker.smallInputs.length
+    ? `字級過小: ${[...new Set(m.picker.smallInputs)].join(", ")}`
+    : null;
+});
+
 check("相鄰按鈕的感應區沒有重疊（不會誤觸）", (m) => {
   const clashes = [];
   for (const row of m.tapRows) {
@@ -121,9 +135,32 @@ check("相鄰按鈕的感應區沒有重疊（不會誤觸）", (m) => {
         rows.push({ tab: key, cls: r.className, h: round(r.getBoundingClientRect().height) });
       }
     }
+    // The substitute picker, opened. It is hidden by default, so
+    // nothing above would ever have measured it — and the 性別 select
+    // was overflowing the panel on a phone, which is exactly the class
+    // of bug this file exists for.
+    showGameDetailTab(out, "absent");
+    const opener = out.querySelector("[data-toggle-sub]");
+    let picker = null;
+    if (opener) {
+      opener.click();
+      const panel = out.querySelector(".picker");
+      if (panel) {
+        const box = panel.getBoundingClientRect();
+        picker = {
+          overflowing: [...panel.querySelectorAll("*")]
+            .filter((e) => e.getBoundingClientRect().right > box.right + 0.5)
+            .map((e) => e.className || e.tagName),
+          smallInputs: [...panel.querySelectorAll("input, select")]
+            .filter((e) => parseFloat(getComputedStyle(e).fontSize) < 16)
+            .map((e) => e.className || e.tagName),
+        };
+      }
+    }
     showGameDetailTab(out, "attending");
 
     return {
+      picker,
       rows,
       tabs,
       tabTargets: [...document.querySelectorAll(".gd-tab")].map((t) =>
