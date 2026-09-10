@@ -2431,6 +2431,19 @@ def promote_from_waitlist(
         replaced_player_id = replaced.player_id
         replaced.cancelled_at = _now()
         _record_drop_in_charge(db, replaced, season, reverse=True)
+        # Back into the queue, at the time they originally joined it.
+        # They did not withdraw — the organizer picked somebody else —
+        # so dropping them entirely would quietly delete a person who is
+        # still waiting to play, and would make the screen's "X 回到候補"
+        # a lie. Matches _make_room_for_substitute.
+        db.add(
+            WaitlistEntryRow(
+                player_id=replaced.player_id,
+                game_id=game.id,
+                queued_at=replaced.signed_up_at,
+            )
+        )
+        db.flush()
         # Deliberately not _promote_from_waitlist here: that is the rule
         # for a slot opening on its own, and this slot is already spoken
         # for. Running it would put the queue's first person in the seat

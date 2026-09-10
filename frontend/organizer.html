@@ -349,7 +349,12 @@
       viewerName: myName,
       onAssignSubstitute: (absenceId, name, gender) => assignSubstitute(absenceId, name, gender),
       onLeaveWaitlist: (entryId, btn) => leaveWaitlistFor(entryId, btn),
-      onPromoteFromWaitlist: (entryId, btn) => promoteFromWaitlist(entryId, btn),
+      // All three arguments: the third says who steps out to make room,
+      // and an arrow that forwarded only two silently dropped it — the
+      // swap picker then reported "nobody to swap out" about the very
+      // person just tapped.
+      onPromoteFromWaitlist: (entryId, target, replacingDropInId) =>
+        promoteFromWaitlist(entryId, target, replacingDropInId),
       onCancelSubstitute: (dropInId, btn) => cancelSubstitute(dropInId, btn),
       // The organizer arranges all of this for other people: half the
       // club tells them in person or in the group chat, and members with
