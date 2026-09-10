@@ -786,7 +786,10 @@ function renderGameDetail(container, season, game, options) {
       const nameInput = container.querySelector(`[data-sub-name="${id}"]`);
       const genderSelect = container.querySelector(`[data-sub-gender="${id}"]`);
       const name = nameInput ? nameInput.value.trim() : "";
-      if (!name) return;
+      if (!name) {
+        toast("請先選一個人，或直接輸入名字");
+        return;
+      }
       onAssignSubstitute(Number(id), name, (genderSelect && genderSelect.value) || null);
       return;
     }
@@ -831,7 +834,14 @@ function renderGameDetail(container, season, game, options) {
       const nameInput = container.querySelector("[data-new-dropin]");
       const genderSelect = container.querySelector("[data-new-dropin-gender]");
       const name = nameInput ? nameInput.value.trim() : "";
-      if (!name) return;
+      // Say why, rather than ignoring the tap. A control that does
+      // nothing visible is indistinguishable from a broken one, and
+      // "沒反應" is how it gets reported.
+      if (!name) {
+        toast("請先輸入臨打的名字");
+        if (nameInput && nameInput.focus) nameInput.focus();
+        return;
+      }
       opts.onAddDropIn(name, (genderSelect && genderSelect.value) || null, addDropIn);
     }
   };

@@ -263,6 +263,25 @@ test("only the chosen group is shown", () => {
   assert.match(el.innerHTML, /data-gd-panel="queued"[^>]*hidden/);
 });
 
+test("新增臨打 with no name signs nobody up", () => {
+  // The other half — that it says why rather than ignoring the tap —
+  // can't be seen from here: toast() resolves inside the loaded scope,
+  // so a stub on globalThis never reaches it. tests/visual/smoke.js
+  // presses this in a real browser and fails if nothing happens at all.
+  const { season, game } = fixture();
+  const el = makeElement();
+  const added = [];
+  renderGameDetail(el, season, game, {
+    viewerName: "蘇慬",
+    onAddDropIn: (name) => added.push(name),
+  });
+  el.querySelector = () => ({ value: "   ", focus() {} });
+
+  el.onclick({ target: { closest: (s) => (s === "[data-add-dropin]" ? {} : null) } });
+
+  assert.deepEqual(added, [], "a blank name must never become a person");
+});
+
 test("a tap on a roster button is not swallowed by the tab strip", () => {
   // The bug, mine, found by clicking in a real browser: the container
   // remembers the open tab in a data attribute, and the tab handler

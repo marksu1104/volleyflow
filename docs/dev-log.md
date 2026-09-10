@@ -1205,3 +1205,69 @@ model was designed and thrown away — it was an indirection over simply
 storing what a game costs.
 
 256 tests (2 postgres-only), plus 65 frontend tests under `node --test`.
+
+## 2026-09-09/10 — Air conditioning shipped, a laptop to develop on, and an audit of every button
+
+**Air conditioning is built.** `Season.ac_surcharge` plus a per-game
+`air_conditioned` flag, priced by `pricing.shares_by_game`: the cooled
+nights carry the surcharge and the rest split what's left, so this club's
+real numbers come out at 235 and 205 exactly (`3690×13 + 540×8 = 52290`).
+The figure was wrong the first time — 630, inferred from the hourly rate
+over the wrong number of hours — and the reconciliation above is what
+caught it. Flipping the flag on the night moves `total_venue_cost` and
+corrects every member with an adjustment entry, never by editing the
+original.
+
+**A local environment, because there wasn't one.** Every page had the
+production URL compiled in, so the only way to see a member's view was a
+phone against the live club. Now: `scripts/dev-api.ps1` and
+`dev-web.ps1` (one script each, because `VAR=1 cmd` and `&&` are bash and
+PowerShell rejects both), `scripts/seed_dev.py` to fill the dev branch
+through the real API, and `?as=<name>` to be somebody without LINE.
+`apiBase()` takes the API from whatever host served the page, so a phone
+on the same wifi reaches the laptop — a desktop browser can't show
+Safari's rendering or what a thumb actually hits.
+
+**CI applies migrations now**, and had been failing for five pushes
+before anyone noticed: the `Migrate production` step refuses to run
+without `PRODUCTION_DATABASE_URL`, and `Deploy to Render` sits after it.
+The frontend deploys from its own workflow, so production ran a new
+frontend against a five-commit-old backend and the game-ordering fix sat
+in `main` looking done. Check the run after pushing, not the commit.
+
+**The connection string** is normalised in one place
+(`db/engine.database_url`), shared with `alembic/env.py`. Neon hands out
+`postgresql://`, SQLAlchemy maps that to psycopg2, and this project
+installs psycopg 3 — so pasting the string Neon gives you failed at
+connect time with `ModuleNotFoundError`, a long way from the paste.
+
+**A drop-in could vanish.** Adding somebody to the fixed roster cancels
+the signups they had already made, so the same night isn't billed twice.
+Removing them again never put those back: a night they had actually
+played disappeared, and the fee owed for it went with it. `absorbed_at`
+(migration `6f13559e49d7`) marks the ones the system cancelled, so
+removal restores exactly those and leaves alone the ones the player
+cancelled themselves. Reported from real use, reproduced as a failing
+test before it was fixed.
+
+**The game sheet is three tabs** — 出席 / 請假 / 候補 — because eighteen
+players is eighteen rows however it's arranged, and reaching the other
+groups meant scrolling past all of them. The counts sit in the strip, so
+the summary is always on screen, and they show at zero: a queue section
+that only appeared once somebody was in it meant nobody knew the feature
+existed. The organizer can now promote a specific queued person rather
+than taking whoever the queue offers, naming who comes off when the game
+is full — one request, so the ledger only moves for the two people
+actually swapping.
+
+**Then every button on every page was pressed** (`tests/visual/smoke.js`).
+It found that the tab strip was swallowing every other tap in the sheet:
+the container recorded its open tab in a data attribute, the handler
+matched a bare `[data-gd-tab]`, and `closest()` walked up from any button
+and hit the container. 請假, 移除, 遞補, 指定代打 — all dead, with correct
+markup, an attached handler and passing tests. It also found the roster's
+controls measured 17px tall against Apple's 44pt guidance, and four
+buttons that returned silently on an empty field, which reads exactly
+like a broken one.
+
+325 tests, 125 frontend tests, plus the browser checks in `tests/visual/`.

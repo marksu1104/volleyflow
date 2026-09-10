@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VolleyFlow 個人資料</title>
 <link rel="preconnect" href="https://volleyflow.onrender.com" crossorigin>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏐</text></svg>">
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
 <link rel="stylesheet" href="shared.css">
@@ -122,7 +123,11 @@
   async function saveName() {
     const name = document.getElementById("name-input").value.trim();
     if (!name) { toast("名字不能是空的"); return; }
-    if (name === me.name) return;
+    // Both of these used to be silent: pressing 儲存 with the name
+    // unchanged returned without a word, and a successful save said
+    // nothing unless the name had been taken. A button that does
+    // nothing visible is indistinguishable from a broken one.
+    if (name === me.name) { toast("名字沒有變"); return; }
     try {
       const updated = await postJson(API_BASE, `/players/${me.id}/name`, { name }, "PUT");
       // initLiffIdentity caches "who am I" for the session; the name in
@@ -130,9 +135,11 @@
       sessionStorage.removeItem("vf_identity");
       me.name = updated.name;
       renderProfile();
-      if (updated.name !== name) {
-        toast(`「${name}」已經有人使用，改成了「${updated.name}」`);
-      }
+      toast(
+        updated.name !== name
+          ? `「${name}」已經有人使用，改成了「${updated.name}」`
+          : "已儲存"
+      );
     } catch (e) {
       toast("儲存失敗：" + e.message);
     }
