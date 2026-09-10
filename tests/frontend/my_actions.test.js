@@ -173,7 +173,7 @@ test("the button says who the signup is for", () => {
   // themselves up a second time.
   const onRoster = fixture();
   as("蘇慬");
-  assert.match(buildMyActionHtml(onRoster.season, onRoster.game), /帶朋友/);
+  assert.match(buildMyActionHtml(onRoster.season, onRoster.game), /代人報名/);
 
   const guest = fixture();
   as("Ricky"); // not on the roster

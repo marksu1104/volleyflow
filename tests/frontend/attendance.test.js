@@ -145,7 +145,7 @@ test("a game with nobody in it says so rather than showing an empty box", () => 
   game.confirmed_drop_ins = [];
   const el = makeElement();
   renderGameDetail(el, season, game, {});
-  assert.match(el.innerHTML, /沒有人出席/);
+  assert.match(el.innerHTML, /尚無出席名單/);
 });
 
 test("controls come before the lists, never after them", () => {
@@ -248,8 +248,8 @@ test("a group with nobody in it still gets a tab, showing zero", () => {
   renderGameDetail(el, season, quiet, { viewerName: "蘇慬" });
 
   assert.match(el.innerHTML, /data-gd-tab="queued"[^>]*>候補 <b>0<\/b>/);
-  assert.match(el.innerHTML, /沒有人在候補/);
-  assert.match(el.innerHTML, /沒有人請假/);
+  assert.match(el.innerHTML, /無人候補/);
+  assert.match(el.innerHTML, /無人請假/);
 });
 
 test("only the chosen group is shown", () => {
@@ -380,7 +380,7 @@ test("an absence nobody is filling is still a gap", () => {
   renderGameDetail(el, season, game, { viewerName: "蘇慬" });
 
   assert.match(el.innerHTML, /缺額/);
-  assert.doesNotMatch(el.innerHTML, /已有人補上/);
+  assert.doesNotMatch(el.innerHTML, /已補上/);
 });
 
 test("a member is only offered the signups that are theirs to undo", () => {

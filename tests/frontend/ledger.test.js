@@ -99,7 +99,7 @@ test("a guest's row names who to collect the cash from", () => {
 
   const html = moneyRowHtml(7, "小明", "male", splitLedger(row(-235, -235, 0)), null, null);
 
-  assert.match(html, /蘇慬 帶/);
+  assert.match(html, /蘇慬 報名/);
 });
 
 test("someone who signed themselves up gets no such tag", () => {

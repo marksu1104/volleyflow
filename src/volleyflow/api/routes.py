@@ -598,6 +598,64 @@ def _record_drop_in_charge(
     )
 
 
+def _release_whoever_is_covering(
+    db: Session, absence: AbsenceRow, season: SeasonRow
+) -> int | None:
+    """Puts the stand-in back in the queue when the member returns.
+
+    The named 代打 first, if there is one — the member arranged them, so
+    the member may un-arrange them. Otherwise whichever 臨打 the FIFO
+    match had landed on, which is the person the slot actually went to.
+    Somebody else's named substitute is never touched: that slot belongs
+    to a different absence.
+
+    They go back at the time they originally queued, so they keep their
+    place, and the fee comes off. Returns whose it was, so the screen can
+    say — a player silently vanishing off a roster is worse than the
+    swap itself.
+    """
+    arranged = (
+        db.query(DropInRow)
+        .filter(
+            DropInRow.covers_absence_id == absence.id,
+            DropInRow.cancelled_at.is_(None),
+        )
+        .first()
+    )
+    releasing = arranged
+    if releasing is None:
+        if not _is_absence_covered(db, absence):
+            return None
+        # The FIFO match: the earliest unclaimed signup is the one this
+        # absence's refund is paying for, so it is the one that steps
+        # back out. Same ordering as settlement.covered_absences.
+        releasing = (
+            db.query(DropInRow)
+            .filter(
+                DropInRow.game_id == absence.game_id,
+                DropInRow.cancelled_at.is_(None),
+                DropInRow.covers_absence_id.is_(None),
+            )
+            .order_by(DropInRow.signed_up_at.desc())
+            .first()
+        )
+    if releasing is None:
+        return None
+
+    released_player_id = int(releasing.player_id)
+    releasing.cancelled_at = _now()
+    _record_drop_in_charge(db, releasing, season, reverse=True)
+    db.add(
+        WaitlistEntryRow(
+            player_id=releasing.player_id,
+            game_id=absence.game_id,
+            queued_at=releasing.signed_up_at,
+        )
+    )
+    db.flush()
+    return released_player_id
+
+
 def _make_room_for_substitute(
     db: Session, game: GameRow, season: SeasonRow
 ) -> int | None:
@@ -2186,10 +2244,23 @@ def cancel_absence(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> AbsenceCancelOut:
-    """The member is attending after all. Only allowed while nothing is
-    covering this absence yet (see _is_absence_covered) — undoing it out
-    from under someone who already committed to cover needs the
-    organizer, not a silent auto-fix.
+    """The member is attending after all.
+
+    Anybody standing in the slot goes back to the queue, at the position
+    they originally held, and their fee comes off. That restores exactly
+    the state before the absence was recorded, which is the fair reading:
+    the slot only opened because this member released it, so taking the
+    release back closes it again. The stand-in is no worse off than if
+    the absence had never happened, and keeps their place ahead of anyone
+    who queued later.
+
+    This used to be refused outright — "someone is already covering,
+    ask the organizer" — which was a dead end, because the app offers no
+    way to ask. The member was simply stuck, on a game they had said
+    they could play. Changed 2026-09-10 after that was reported.
+
+    The change deadline still applies, and is what stops this being used
+    to shuffle people in and out on the night.
     """
     absence = db.get(AbsenceRow, absence_id)
     if absence is None:
@@ -2205,17 +2276,17 @@ def cancel_absence(
     _require_self_or_organizer(db, season.club_id, current_player, absence.player_id)
     _require_within_change_deadline(db, game, season, current_player)
 
-    if _is_absence_covered(db, absence):
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Someone is already covering this absence — ask the organizer",
-        )
+    released_player_id = _release_whoever_is_covering(db, absence, season)
 
     absence.cancelled_at = _now()
     db.commit()
     db.refresh(absence)
 
-    return AbsenceCancelOut(id=absence.id, cancelled_at=absence.cancelled_at)
+    return AbsenceCancelOut(
+        id=absence.id,
+        cancelled_at=absence.cancelled_at,
+        released_player_id=released_player_id,
+    )
 
 
 @router.put("/absences/{absence_id}/substitute", response_model=DropInOut)
@@ -2277,6 +2348,13 @@ def set_substitute(
         db.flush()
 
     player = _get_or_create_player(db, season.club_id, payload.player_name)
+    # The same rule the ordinary signup applies, and it was missing here.
+    # A typed name resolves to an existing person when one in this club
+    # already has it, so naming somebody who has a LINE account put the
+    # real them on the roster — and on the hook for the fee — with no say
+    # in it. A guest with no account is still fair game: they cannot sign
+    # themselves up, so somebody has to.
+    _require_may_sign_up(db, season.club_id, current_player, player)
     if player.gender is None and payload.gender is not None:
         player.gender = payload.gender
 
@@ -2298,6 +2376,15 @@ def set_substitute(
             status.HTTP_400_BAD_REQUEST,
             "That player is already signed up for this game",
         )
+
+    # A queued person named as the substitute leaves the queue: they are
+    # on the court now. Without this they appeared in both lists at once,
+    # counted once and waiting once — reported from real use.
+    db.query(WaitlistEntryRow).filter(
+        WaitlistEntryRow.player_id == player.id,
+        WaitlistEntryRow.game_id == game.id,
+    ).delete(synchronize_session=False)
+    db.flush()
 
     displaced_player_id = _make_room_for_substitute(db, game, season)
 

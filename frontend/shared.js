@@ -594,7 +594,7 @@ function renderGameDetail(container, season, game, options) {
       out.push({
         name,
         gender: person.gender,
-        note: person.times ? `打過 ${person.times} 次` : "候補中",
+        note: person.times ? `報名過 ${person.times} 次` : "候補中",
       });
     }
     return out;
@@ -615,22 +615,33 @@ function renderGameDetail(container, season, game, options) {
       .join("");
     const maleSelected = covering && covering.gender === "male" ? " selected" : "";
     const femaleSelected = covering && covering.gender === "female" ? " selected" : "";
+    // Its own layer over the sheet, not a panel wedged between two roster
+    // rows. Picking a person is a decision of its own: it wants the whole
+    // screen, a title saying whose slot is being filled, and one way out.
     return `
-      <div class="sub-form" data-sub-form="${absence.id}" hidden>
-        ${
-          candidates.length
-            ? `<div class="or-line"><span>候補中的人，或你帶過的朋友</span></div>
-               <div class="sub-pick">${pickRows}</div>
-               <div class="or-line"><span>都不是？直接輸入名字</span></div>`
-            : `<div class="or-line"><span>沒有候補、也還沒帶過人 —— 直接輸入名字</span></div>`
-        }
-        <input type="text" placeholder="直接輸入名字" data-sub-name="${absence.id}" value="${escapeHtml(absence.covered_by || "")}">
-        <select data-sub-gender="${absence.id}">
-          <option value="">性別</option>
-          <option value="male"${maleSelected}>男</option>
-          <option value="female"${femaleSelected}>女</option>
-        </select>
-        <button type="button" data-confirm-sub="${absence.id}">確認</button>
+      <div class="picker-backdrop" data-sub-form="${absence.id}" hidden>
+        <div class="picker">
+          <div class="picker-head">
+            <span>指定 ${escapeHtml(absence.player_name)} 的代打</span>
+            <button type="button" class="picker-close" data-close-sub="${absence.id}" aria-label="關閉">✕</button>
+          </div>
+          ${
+            candidates.length
+              ? `<div class="or-line"><span>候補名單，或你曾報名過的對象</span></div>
+                 <div class="sub-pick">${pickRows}</div>
+                 <div class="or-line"><span>以上皆非，請直接輸入姓名</span></div>`
+              : `<div class="or-line"><span>目前無可選對象，請直接輸入姓名</span></div>`
+          }
+          <div class="picker-manual">
+            <input type="text" placeholder="輸入姓名" data-sub-name="${absence.id}" value="${escapeHtml(absence.covered_by || "")}">
+            <select data-sub-gender="${absence.id}">
+              <option value="">性別</option>
+              <option value="male"${maleSelected}>男</option>
+              <option value="female"${femaleSelected}>女</option>
+            </select>
+          </div>
+          <button type="button" class="btn btn-primary" data-confirm-sub="${absence.id}">確認指定</button>
+        </div>
       </div>
     `;
   }
@@ -896,20 +907,20 @@ function renderGameDetail(container, season, game, options) {
       ).join("")}
     </div>
     <div class="gd-panel" data-gd-panel="attending"${activeTab === "attending" ? "" : " hidden"}>
-      <div class="att-list">${attendingHtml || emptyPanel("這一場還沒有人出席")}</div>
+      <div class="att-list">${attendingHtml || emptyPanel("這一場本場尚無出席名單")}</div>
     </div>
     <div class="gd-panel" data-gd-panel="absent"${activeTab === "absent" ? "" : " hidden"}>
       ${
         absentRows.length
           ? `<div class="att-list">${absentRows.join("")}</div>`
-          : emptyPanel("沒有人請假")
+          : emptyPanel("本場無人請假")
       }
     </div>
     <div class="gd-panel" data-gd-panel="queued"${activeTab === "queued" ? "" : " hidden"}>
       ${
         waitlistRows
           ? `<div class="att-list">${waitlistRows}</div>`
-          : emptyPanel("沒有人在候補")
+          : emptyPanel("本場無人候補")
       }
     </div>
   `;
@@ -938,6 +949,18 @@ function renderGameDetail(container, season, game, options) {
     if (toggleSub) {
       const form = container.querySelector(`[data-sub-form="${toggleSub.dataset.toggleSub}"]`);
       if (form) form.hidden = !form.hidden;
+      return;
+    }
+    const closeSub = e.target.closest("[data-close-sub]");
+    if (closeSub) {
+      const form = container.querySelector(`[data-sub-form="${closeSub.dataset.closeSub}"]`);
+      if (form) form.hidden = true;
+      return;
+    }
+    // Tapping the dimmed area outside the panel closes it, the way every
+    // other sheet in this app does.
+    if (e.target.classList && e.target.classList.contains("picker-backdrop")) {
+      e.target.hidden = true;
       return;
     }
     const pick = e.target.closest("[data-pick]");
@@ -1485,8 +1508,8 @@ function signInFailureHtml(identified) {
   // that actually works here instead.
   if (isLocalDev()) {
     return emptyStateHtml(
-      "還沒選身分",
-      "本機沒有 LINE 可以登入，要在網址後面加上 ?as=名字 才知道你是誰，例如 ?as=蘇懂。"
+      "尚未選擇身分",
+      "本機沒有 LINE 可以登入，要在網址後面加上 ?as=名字 才知道身分，例如 ?as=蘇懂。"
     );
   }
   return emptyStateHtml(

@@ -119,11 +119,11 @@
     document.getElementById("season-picker").hidden = true;
     document.getElementById("hero-wrap").innerHTML = currentClubId()
       ? emptyStateHtml(
-          "這個球隊還沒有開季",
+          "這個球隊尚未開季",
           "建立第一季之後，這裡會顯示下一場的出席人數、男女比，以及需要你處理的事情。",
           { label: "建立第一季", href: "organizer-settings.html" }
         )
-      : emptyStateHtml("還沒有球隊", "請先到會員頁用 LINE 開啟，建立或加入一個球隊。", {
+      : emptyStateHtml("尚未加入任何球隊", "請先到會員頁用 LINE 開啟，建立或加入一個球隊。", {
           label: "前往會員頁",
           href: "member.html",
         });
@@ -236,7 +236,7 @@
       season.games.find((g) => g.id === selectedGameId) ||
       season.games.find((g) => !describeDate(g.date).isPast) ||
       season.games[season.games.length - 1];
-    if (!game) { wrap.innerHTML = '<div class="empty">這一季還沒有場次</div>'; return; }
+    if (!game) { wrap.innerHTML = '<div class="empty">這一季尚無場次</div>'; return; }
     selectedGameId = game.id;
     const expected = expectedAttendance(season, game);
     const shortPill = expected < season.minimum_roster
@@ -340,7 +340,7 @@
     const el = document.getElementById("game-detail");
     const game = currentSeason && currentSeason.games.find((g) => g.id === selectedGameId);
     if (!currentSeason || !game) {
-      el.innerHTML = '<div class="empty">這一季還沒有場次</div>';
+      el.innerHTML = '<div class="empty">這一季尚無場次</div>';
       return;
     }
     renderGameDetail(el, currentSeason, game, {
@@ -495,7 +495,7 @@
           id = await pendingAbsenceId[absenceKey(gameId, playerName)];
           delete pendingAbsenceId[absenceKey(gameId, playerName)];
         }
-        if (!(id > 0)) throw new Error("這筆請假還沒建立成功");
+        if (!(id > 0)) throw new Error("這筆請假尚未建立成功");
         return postJson(API_BASE, `/absences/${id}/cancel`, {});
       },
       "取消請假失敗："

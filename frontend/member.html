@@ -316,18 +316,18 @@
     let html;
     if (!club) {
       html = emptyStateHtml(
-        "還沒有球隊",
+        "尚未加入任何球隊",
         "點左上角的球隊按鈕，可以建立一個新的球隊，或用主揪給你的連結加入。"
       );
     } else if (mine && mine.role === "organizer") {
       html = emptyStateHtml(
-        `「${club.name}」還沒有開季`,
+        `「${club.name}」尚未開季`,
         "先建立第一季：輸入場地費、場次日期和固定成員，系統會自動算出每個人的季費。",
         { label: "建立第一季", href: "organizer-settings.html" }
       );
     } else {
       html = emptyStateHtml(
-        `「${club.name}」還沒有開季`,
+        `「${club.name}」尚未開季`,
         "主揪開季之後，這裡就會出現本季的場次、你的請假狀態和帳務。"
       );
     }
@@ -568,7 +568,7 @@
       `;
     });
     document.getElementById("club-rows").innerHTML =
-      rows.join("") || '<div class="empty">還沒有任何球隊</div>';
+      rows.join("") || '<div class="empty">尚未加入任何球隊</div>';
   }
 
   document.getElementById("club-rows").addEventListener("click", (e) => {
@@ -730,7 +730,7 @@
       season.games.find((g) => !describeDate(g.date).isPast) ||
       season.games[season.games.length - 1];
     if (!game) {
-      wrap.innerHTML = '<div class="empty">這一季還沒有場次</div>';
+      wrap.innerHTML = '<div class="empty">這一季尚無場次</div>';
       return;
     }
     selectedGameId = game.id;
@@ -779,7 +779,7 @@
     const el = document.getElementById("game-detail");
     const game = currentSeason && currentSeason.games.find((g) => g.id === selectedGameId);
     if (!currentSeason || !game) {
-      el.innerHTML = '<div class="empty">這一季還沒有場次</div>';
+      el.innerHTML = '<div class="empty">這一季尚無場次</div>';
       return;
     }
     const deadlinePill = currentSeason.change_deadline_days !== null
@@ -862,7 +862,7 @@
         // nothing on screen, which has already shown the cancellation.
         let id = absenceId;
         if (!(id > 0)) id = await pendingAbsenceId[absenceKey(gameId, name)];
-        if (!(id > 0)) throw new Error("這筆請假還沒建立成功");
+        if (!(id > 0)) throw new Error("這筆請假尚未建立成功");
         delete pendingAbsenceId[absenceKey(gameId, name)];
         return postJson(API_BASE, `/absences/${id}/cancel`, {});
       },
@@ -913,7 +913,7 @@
     // Honest about what the button does: if you're already on the sheet,
     // the signup panel is for the people you're bringing, not for you.
     const bring = `<button type="button" class="hact${playing ? " quiet" : ""}" onclick="openSignup(${game.id})">${
-      playing ? "＋ 帶朋友" : "＋ 報名"
+      playing ? "＋ 代人報名" : "＋ 報名"
     }${full ? "候補" : ""}</button>`;
 
     if (isMember && myAbsence) {
@@ -1276,7 +1276,7 @@
     const rest = Number(ledger.balance) - accounted;
     if (Math.abs(rest) >= 1) add("其他", null, rest);
 
-    return rows.length ? rows : [{ label: "還沒有任何費用", detail: null, amount: 0 }];
+    return rows.length ? rows : [{ label: "尚無任何費用", detail: null, amount: 0 }];
   }
 
   function closeLedger() { document.getElementById("ledger-backdrop").hidden = true; }
