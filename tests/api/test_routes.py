@@ -362,7 +362,7 @@ def test_get_season_reflects_absences_signups_and_waitlist(
             "id": alice_absence["id"],
             "player_name": "Alice",
             "covered_by": None,
-            "refunded": True,
+            "filled_by": "Bob",
         }
     ]
     assert game["confirmed_drop_ins"] == [
@@ -540,7 +540,7 @@ def test_set_substitute_replaces_an_existing_one(client: TestClient) -> None:
             "id": absence["id"],
             "player_name": "Alice",
             "covered_by": "Eve",
-            "refunded": True,
+            "filled_by": "Eve",
         }
     ]
 
@@ -679,7 +679,7 @@ def test_cancelling_a_substitute_uncovers_the_absence_and_refunds_it(
             "id": absence["id"],
             "player_name": "Alice",
             "covered_by": None,
-            "refunded": False,
+            "filled_by": None,
         }
     ]
     dave_ledger = client.get(
