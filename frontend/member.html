@@ -415,6 +415,12 @@
   function shouldAskIntent(settled, membership, onRoster) {
     if (!settled) return false;
     if (!membership) return false; // not in this club — the join prompt's job
+    // The organizer decides the roster; asking them to apply to
+    // themselves and wait for their own approval is incoherent, and it
+    // is what the screen did — "主揪確認後才會加入名單", shown to the
+    // 主揪. They put themselves on the roster from the members page like
+    // anyone else, and they are legitimately allowed not to be on it.
+    if (membership.role === "organizer") return false;
     if (onRoster) return false; // already a fixed member; nothing to ask
     return membership.wants_fixed_membership === null;
   }
@@ -431,14 +437,24 @@
       return;
     }
     el.hidden = false;
+    // Worded so it doesn't contradict the live ＋報名 button below it.
+    // The old copy — "主揪確認後才會加入名單" — read as "you are blocked
+    // until approved" while single-game signup was working the whole
+    // time, and that contradiction got reported as a bug. Answering this
+    // is about the whole season; one night is a separate decision and
+    // stays open either way. (Not answering deliberately blocks nothing:
+    // see viewingOnlyReason.)
     el.innerHTML = `
       <div class="empty-state" style="text-align:left">
         <h3>已加入「${escapeHtml(mine.name)}」</h3>
-        <p>請問你是這一季的固定成員嗎？主揪確認後才會加入名單。</p>
+        <p>你想固定打這一季嗎？這只關係到整季，單場報名兩種都可以用。</p>
         <div class="btn-row" style="margin-top:12px">
-          <button type="button" class="btn btn-primary" onclick="answerIntent(true)">我是固定成員</button>
-          <button type="button" class="btn btn-quiet" onclick="answerIntent(false)">我只是臨打</button>
+          <button type="button" class="btn btn-primary" onclick="answerIntent(true)">我要固定打整季</button>
+          <button type="button" class="btn btn-quiet" onclick="answerIntent(false)">我只想單場報名</button>
         </div>
+        <p class="hint" style="margin-top:10px">
+          選「固定打整季」會送出申請，主揪把你加進名單後就會收整季的季費。
+        </p>
       </div>
     `;
   }
@@ -805,7 +821,7 @@
       // Somebody stepping back out is not a detail to hide: the queue had
       // already filled this slot, and they are owed an explanation.
       toast(bumped ? `${name} 上場，${bumped.player_name} 回到候補` : `已指定 ${name} 代打`);
-      loadSeason(currentSeasonId);
+      await loadSeason(currentSeasonId);
     } catch (e) {
       toast("指定代打失敗：" + e.message);
     }
@@ -1264,7 +1280,7 @@
         // value. Repaint here, then the refresh really is a no-op.
         repaintGame();
       }
-      loadSeason(currentSeasonId);
+      await loadSeason(currentSeasonId);
     } catch (e) {
       currentSeason = snapshot;
       repaintGame();

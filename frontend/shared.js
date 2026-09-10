@@ -442,6 +442,34 @@ function emptyPanel(text) {
   return `<div class="empty gd-empty">${text}</div>`;
 }
 
+let _actionInFlight = false;
+
+/** Whether a change is still on its way to the server.
+ *
+ * Taps arrive faster than a round trip, and every change here ends in a
+ * reload that redraws the buttons — so a second tap lands on a freshly
+ * drawn control describing state the server has already moved past.
+ * Pressing 請假 and 取消請假 quickly enough got "這場已請假" back for a
+ * game that showed no absence, with the two requests interleaved and
+ * each one's id stale by the time it arrived.
+ *
+ * One change at a time. The extra taps are dropped rather than queued:
+ * somebody double-tapping 請假 means it once, and replaying the queue
+ * would undo what they just did.
+ */
+function actionInFlight() {
+  return _actionInFlight;
+}
+
+/** Marks the app busy until this change and its reload have finished. */
+function runExclusive(result) {
+  if (!result || typeof result.then !== "function") return result;
+  _actionInFlight = true;
+  return result.finally(() => {
+    _actionInFlight = false;
+  });
+}
+
 /** Shows one of a game sheet's three groups. Used by the tab strip and
  * by anything that needs to send you to a particular group — opening
  * the substitute picker, for instance, whose form lives in 請假. */
@@ -631,6 +659,36 @@ function renderGameDetail(container, season, game, options) {
     );
   }
 
+  /** Who comes off, so a queued person can come on — shown only when
+   * the game is already full.
+   *
+   * The first version asked for a number in a `prompt()` against a
+   * numbered list, which meant reading a dialog, matching a name to an
+   * index and typing a digit to move one person. Same rows as every
+   * other picker on this screen: tap the name.
+   */
+  function swapOutPicker(entry) {
+    if (!isGameFull(season, game)) return "";
+    const swappable = game.confirmed_drop_ins;
+    if (!swappable.length) return "";
+    return `
+      <div class="sub-form" data-swap-form="${entry.id}" hidden>
+        <div class="or-line"><span>這一場已滿，選一位換下來</span></div>
+        <div class="sub-pick">
+          ${swappable
+            .map(
+              (d) => `
+            <div class="pick-row" data-swap-in="${entry.id}" data-swap-out="${d.id}">
+              <i class="radio"></i><span class="avatar sm">${initial(d.player_name)}</span>
+              <span class="pk-name">${escapeHtml(d.player_name)}</span>${genderTag(d.gender)}
+              ${d.covering ? `<span class="att-note sub">代 ${escapeHtml(d.covering)}</span>` : ""}
+            </div>`
+            )
+            .join("")}
+        </div>
+      </div>`;
+  }
+
   // Same row as everything else — see rosterRow. These were borderless
   // text next to eighteen bordered cards, which made a queue of three
   // read as nothing at all and got reported as "the waitlist
@@ -654,7 +712,7 @@ function renderGameDetail(container, season, game, options) {
           (opts.onLeaveWaitlist
             ? `<button type="button" class="mini-action danger" data-remove-waitlist="${w.id}">移除</button>`
             : ""),
-      })
+      }) + (opts.onPromoteFromWaitlist ? swapOutPicker(w) : "")
     )
     .join("");
 
@@ -762,6 +820,12 @@ function renderGameDetail(container, season, game, options) {
       showGameDetailTab(container, tab.dataset.gdTab);
       return;
     }
+    // Everything below this line changes something on the server. While
+    // one of those is still in flight the buttons on screen describe
+    // state that has already moved, so a second tap acts on a stale id —
+    // see actionInFlight. Opening a picker above is local and safe.
+    if (actionInFlight()) return;
+
     const toggleSub = e.target.closest("[data-toggle-sub]");
     if (toggleSub) {
       const form = container.querySelector(`[data-sub-form="${toggleSub.dataset.toggleSub}"]`);
@@ -790,43 +854,65 @@ function renderGameDetail(container, season, game, options) {
         toast("請先選一個人，或直接輸入名字");
         return;
       }
-      onAssignSubstitute(Number(id), name, (genderSelect && genderSelect.value) || null);
+      runExclusive(
+        onAssignSubstitute(Number(id), name, (genderSelect && genderSelect.value) || null)
+      );
       return;
     }
     const cancelSub = e.target.closest("[data-cancel-sub]");
     if (cancelSub && onCancelSubstitute) {
-      onCancelSubstitute(Number(cancelSub.dataset.cancelSub), cancelSub);
+      runExclusive(onCancelSubstitute(Number(cancelSub.dataset.cancelSub), cancelSub));
       return;
     }
     const markAbsent = e.target.closest("[data-mark-absent]");
     if (markAbsent && opts.onRecordAbsence) {
-      opts.onRecordAbsence(markAbsent.dataset.markAbsent, markAbsent);
+      runExclusive(opts.onRecordAbsence(markAbsent.dataset.markAbsent, markAbsent));
       return;
     }
     const undoAbsence = e.target.closest("[data-undo-absence]");
     if (undoAbsence && opts.onCancelAbsence) {
-      opts.onCancelAbsence(Number(undoAbsence.dataset.undoAbsence), undoAbsence);
+      runExclusive(opts.onCancelAbsence(Number(undoAbsence.dataset.undoAbsence), undoAbsence));
       return;
     }
     const removeDropIn = e.target.closest("[data-remove-drop-in]");
     if (removeDropIn && opts.onRemoveDropIn) {
-      opts.onRemoveDropIn(Number(removeDropIn.dataset.removeDropIn), removeDropIn);
+      runExclusive(opts.onRemoveDropIn(Number(removeDropIn.dataset.removeDropIn), removeDropIn));
       return;
     }
     // Separate hook, not a shared one: a queue place lives in its own
     // table with its own id sequence, and routing it through the
     // drop-in handler cancels whoever happens to hold that number.
+    // Choosing who steps out so this queued person can play. One tap on
+    // a name, rather than reading a numbered list out of a dialog box.
+    const swapOut = e.target.closest("[data-swap-out]");
+    if (swapOut && opts.onPromoteFromWaitlist) {
+      runExclusive(
+        opts.onPromoteFromWaitlist(
+          Number(swapOut.dataset.swapIn),
+          swapOut,
+          Number(swapOut.dataset.swapOut)
+        )
+      );
+      return;
+    }
     const promoteWaitlist = e.target.closest("[data-promote-waitlist]");
     if (promoteWaitlist && opts.onPromoteFromWaitlist) {
-      opts.onPromoteFromWaitlist(
-        Number(promoteWaitlist.dataset.promoteWaitlist),
-        promoteWaitlist
-      );
+      const id = Number(promoteWaitlist.dataset.promoteWaitlist);
+      // With room to spare there is nothing to choose, so this goes
+      // straight through; on a full game it opens the picker instead.
+      const picker = container.querySelector(`[data-swap-form="${id}"]`);
+      if (picker) {
+        picker.hidden = !picker.hidden;
+        return;
+      }
+      runExclusive(opts.onPromoteFromWaitlist(id, promoteWaitlist, null));
       return;
     }
     const removeWaitlist = e.target.closest("[data-remove-waitlist]");
     if (removeWaitlist && opts.onLeaveWaitlist) {
-      opts.onLeaveWaitlist(Number(removeWaitlist.dataset.removeWaitlist), removeWaitlist);
+      runExclusive(
+        opts.onLeaveWaitlist(Number(removeWaitlist.dataset.removeWaitlist), removeWaitlist)
+      );
       return;
     }
     const addDropIn = e.target.closest("[data-add-dropin]");
@@ -842,7 +928,7 @@ function renderGameDetail(container, season, game, options) {
         if (nameInput && nameInput.focus) nameInput.focus();
         return;
       }
-      opts.onAddDropIn(name, (genderSelect && genderSelect.value) || null, addDropIn);
+      runExclusive(opts.onAddDropIn(name, (genderSelect && genderSelect.value) || null, addDropIn));
     }
   };
 }
