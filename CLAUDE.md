@@ -53,13 +53,76 @@ the money, never the person.
 - A club is typically 20–30 people: fixed members plus drop-ins.
 - A season is configurable: pay-per-use, monthly, or a full season block. When starting a season, the organizer enters: rental mode, the fixed weekday, an explicit list of dates (individually editable), the total venue cost, and the fixed member list. The system generates all games from that.
 
-### 2.3 Signup and waitlist
+### 2.3 Signup, waitlist, absence and substitute
 
-- Members are expected by default; they only need to record an `Absence`, never sign up.
-- A `DropIn` can sign up for any future game (+1); once full, further signups queue on the waitlist in order.
-- When a member records an `Absence`, the waitlist is offered the slot in order.
-- A `DropIn` can cancel; the cancellation deadline is a configurable parameter (default: no deadline).
-- Games are auto-reminded before kickoff with the current roster. If the roster is short, **only the organizer is notified** — never the waitlist.
+Rewritten 2026-09-10 after a week of real use turned up cases the
+original five bullets didn't answer. The governing idea, and the tie-
+breaker for anything not listed: **a slot opens only because somebody
+released it, and closes again when they take that back.**
+
+**Who is expected**
+- Members are expected by default; they record an `Absence`, never a signup.
+- A member may not also sign up as a `DropIn` for a game they're already
+  expected at — that would charge them twice and count them twice.
+
+**Capacity is a hard limit.** Nothing may put more people on court than
+`Season.capacity`, including the organizer. When the game is full the
+app says so and offers the swap that would make room; it never quietly
+overfills. (Decided 2026-09-10, choosing a clear refusal over silently
+sending somebody to the waitlist.)
+
+**One person is in exactly one list.** Playing, away, or queued — never
+two at once. Naming a queued person as a substitute takes them out of
+the queue.
+
+**The waitlist**
+- A `DropIn` signs up for a future game; once full, further signups queue
+  in order of `queued_at`.
+- Recording an `Absence`, or cancelling a confirmed `DropIn`, offers the
+  freed slot to the queue in order — automatically, first-queued-first.
+- The organizer may override that order by promoting a specific person;
+  on a full game they must name who steps out, and both happen in one
+  transaction so only those two ledgers move. Ordinary members cannot
+  reorder the queue.
+- Anyone bumped out of a confirmed slot returns to the queue at the
+  time they originally joined it, so they keep their place, and their
+  fee comes off.
+
+**`covers` vs. a FIFO match — two different things**
+- A `代打` is a substitute a member *personally arranged*
+  (`covers_absence_id`). It is a relationship between two people.
+- Anyone else filling a slot is a plain `DropIn`. The FIFO pairing that
+  decides *which absence gets refunded* is a billing rule and nothing
+  more: it never makes somebody "X's 代打", and the UI must not say it
+  does.
+- Naming a substitute when the game is already full displaces the most
+  recent unarranged `DropIn` (never somebody else's arranged one), who
+  goes back to the queue.
+
+**Taking it back**
+- Cancelling an `Absence` releases whoever was filling that slot — the
+  arranged substitute first, otherwise the FIFO-matched drop-in — back to
+  the queue, refunded. Somebody else's arranged substitute is never
+  touched. (Changed 2026-09-10: this used to be refused outright with
+  "ask the organizer", which the app gave no way to do.)
+- The change deadline is a configurable parameter (default: none) and is
+  what limits churn. It never applies to the organizer, who has to be
+  able to record what actually happened on the night.
+
+**Who may act for whom**
+- A member may act on their own attendance, on guests they signed up,
+  and on the substitute they arranged.
+- A member may sign up anybody **without** a LINE account (they cannot
+  act for themselves), and **never** somebody who has one — that would
+  commit a real person to a fee they never agreed to. Applies equally to
+  `+1` signups and to naming a substitute.
+- The organizer may do any of it inside their own club. The member
+  screen still shows only what is the member's to change; the management
+  screen is where everything else lives.
+
+**Reminders.** Games are auto-reminded before kickoff with the current
+roster. If the roster is short, **only the organizer is notified** —
+never the waitlist.
 
 ### 2.4 Billing — the core of the project; get this wrong and the project has no point
 
