@@ -13,12 +13,23 @@ const { load } = require("./harness.js");
 
 const { previewSharePerGame, describeDate, dateKey } = load();
 
-test("share divides cost by games and members, rounding up", () => {
+test("share divides cost by games and capacity, rounding up", () => {
   // 54990 / 13 / 18 = exactly 235
   assert.equal(previewSharePerGame(54990, 13, 18).plain, 235);
   // 10000 / 7 / 5 = 285.71..., and nobody may be charged less than cost
   assert.equal(previewSharePerGame(10000, 7, 5).plain, 286);
   assert.equal(previewSharePerGame(999, 1, 1).plain, 999);
+});
+
+test("the price is a pair of numbers, never an object stringified", () => {
+  // The wizard printed "每人每場 $[object Object]" and "整季 $NaN": it
+  // used the return value directly instead of one of its two prices.
+  const preview = previewSharePerGame(54990, 13, 18);
+
+  assert.equal(typeof preview.plain, "number");
+  assert.equal(typeof preview.cooled, "number");
+  assert.ok(Number.isFinite(preview.plain * 13), "a season total stays a number");
+  assert.doesNotMatch(String(preview.plain), /object|NaN/);
 });
 
 test("with no air conditioning both prices are the same price", () => {

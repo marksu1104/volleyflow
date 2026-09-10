@@ -1073,16 +1073,21 @@ async function postJson(apiBase, path, body, method) {
  * after creating the season. Integer inputs divide exactly in IEEE754
  * below 2^53, so ceil here agrees with ROUND_CEILING on Decimal.
  */
-function previewSharePerGame(totalVenueCost, totalGames, memberCount, acSurcharge, cooledGames) {
-  if (!(totalGames > 0) || !(memberCount > 0)) return null;
+function previewSharePerGame(totalVenueCost, totalGames, capacity, acSurcharge, cooledGames) {
+  // capacity, not the number of members picked: the price is what one
+  // slot costs, and a season with room for 18 charges 18ths whether or
+  // not the eighteenth person has been found yet. Dividing by the
+  // roster instead made the quoted price fall every time a name was
+  // added in the wizard, and then jump the first time somebody left.
+  if (!(totalGames > 0) || !(capacity > 0)) return null;
   const ac = Number(acSurcharge) || 0;
   const cooled = Number(cooledGames) || 0;
   const baseTotal = Number(totalVenueCost) - ac * cooled;
   if (baseTotal < 0) return null;
   const baseEach = baseTotal / totalGames;
   return {
-    plain: Math.ceil(baseEach / memberCount),
-    cooled: Math.ceil((baseEach + ac) / memberCount),
+    plain: Math.ceil(baseEach / capacity),
+    cooled: Math.ceil((baseEach + ac) / capacity),
   };
 }
 

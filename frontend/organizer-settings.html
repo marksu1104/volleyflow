@@ -471,7 +471,14 @@
 
     const cost = Number(document.getElementById("c-cost").value) || 0;
     const memberCount = selectedNames().length;
-    const share = previewSharePerGame(cost, wizardDates.length, memberCount);
+    // Divided by the capacity, not by how many names are picked — the
+    // price is what one slot costs and doesn't move as the roster fills.
+    // A new season starts with no cooled nights (the organizer flips
+    // them per game), so `plain` is the figure to quote.
+    const capacity = Number(document.getElementById("c-capacity").value) || 0;
+    const acSurcharge = Number(document.getElementById("c-ac").value) || 0;
+    const prices = previewSharePerGame(cost, wizardDates.length, capacity, acSurcharge, 0);
+    const share = prices ? prices.plain : null;
 
     const summary = document.getElementById("gen-summary");
     if (wizardDates.length === 0) {
@@ -506,10 +513,10 @@
       .join("");
 
     const preview = document.getElementById("create-preview");
-    if (!cost || !wizardDates.length || !memberCount) {
+    if (!cost || !wizardDates.length || !capacity) {
       preview.innerHTML = emptyStateHtml(
         "還差一點",
-        `目前：場地費 $${cost || 0}、${wizardDates.length} 場、${memberCount} 位成員。三個都填好才算得出每個人要收多少。`
+        `目前：場地費 $${cost || 0}、${wizardDates.length} 場、上限 ${capacity || 0} 人。三個都填好才算得出每個人要收多少。`
       );
       return;
     }
@@ -520,9 +527,13 @@
         <span class="balance-value">$${seasonFee}</span>
       </div>
       <p class="hint" style="margin-top:0">
-        $${cost} ÷ ${wizardDates.length} 場 ÷ ${memberCount} 人 = 每人每場 $${share}，整季 $${seasonFee}。
-        建立後這筆金額會直接記到 ${memberCount} 個人的帳上，可以在「帳務 · 季費」收款。
-        之後加人、退人或改場地費，系統會自動補一筆差額，不會動到原本的紀錄。
+        $${cost} ÷ ${wizardDates.length} 場 ÷ 上限 ${capacity} 人 = 每人每場 $${share}，整季 $${seasonFee}。
+        ${acSurcharge > 0 ? `有開冷氣的那幾場是每人 $${prices.cooled}，開季後逐場切換。` : ""}
+        ${memberCount ? `建立後這筆金額會直接記到 ${memberCount} 個人的帳上，可以在「帳務 · 季費」收款。` : "還沒挑成員，可以之後再加 —— 加人不會改變其他人的金額。"}
+      </p>
+      <p class="hint" style="margin-top:6px">
+        金額是用<b>人數上限</b>算的，所以之後加人退人都只動到那個人自己的帳，其他人不受影響。
+        名單沒滿又沒有臨打補上的場次，收到的就會少於場地費。
       </p>
     `;
   }

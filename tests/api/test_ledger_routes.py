@@ -6,7 +6,7 @@ from tests.api.factories import auth_headers, create_club, identify, start_seaso
 
 
 def test_sign_up_charges_the_drop_in_fee(client: TestClient) -> None:
-    season = start_season(client, member_names=["Alice"], capacity=18)
+    season = start_season(client, member_names=["Alice"], capacity=2)
     game_id = season["games"][0]["id"]
 
     signup = client.post("/drop-ins", json={"player_name": "Carol", "game_id": game_id})
@@ -14,7 +14,8 @@ def test_sign_up_charges_the_drop_in_fee(client: TestClient) -> None:
 
     ledger = client.get(f"/clubs/{season['club_id']}/players/{player_id}/ledger").json()
 
-    assert ledger["balance"] == "-5000"  # ceil(10000/2 games/1 member)=5000
+    # A drop-in pays what anybody playing pays: ceil(10000/2 games/capacity 2)
+    assert ledger["balance"] == "-2500"
     assert len(ledger["entries"]) == 1
     assert ledger["entries"][0]["entry_type"] == "drop_in_fee_charged"
 
@@ -51,7 +52,7 @@ def test_promoted_from_waitlist_gets_charged(client: TestClient) -> None:
 
     assert len(ledger["entries"]) == 1
     assert ledger["entries"][0]["entry_type"] == "drop_in_fee_charged"
-    assert ledger["balance"] == "-5000"  # ceil(10000/2 games/1 member)=5000
+    assert ledger["balance"] == "-2500"  # ceil(10000/2 games/capacity 2)
 
 
 def test_settle_season_charges_fees_and_credits_refunds(client: TestClient) -> None:
@@ -60,6 +61,9 @@ def test_settle_season_charges_fees_and_credits_refunds(client: TestClient) -> N
         total_venue_cost="10000",
         game_dates=[f"2026-08-{18 + i:02d}" for i in range(8)],
         member_names=["Alice", "Bob", "Carol", "Dave", "Eve"],
+        # A full season: capacity matches the roster, so the share is
+        # ceil(10000/8 games/5) = 250 and the arithmetic below reads.
+        capacity=5,
     )
     game_id = season["games"][0]["id"]
     client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
@@ -240,6 +244,7 @@ def test_balances_sums_every_member_in_one_call(client: TestClient) -> None:
         total_venue_cost="10000",
         game_dates=["2026-08-18", "2026-08-25"],
         member_names=["Alice", "Bob"],
+        capacity=2,
     )
     alice_id, bob_id = season["member_ids"]
     client.post(
