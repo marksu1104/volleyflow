@@ -58,10 +58,11 @@ def test_a_swap_puts_the_chosen_person_on_and_takes_the_named_one_off(
     body = response.json()
     assert body["player_id"] == dave["player_id"]
     assert body["replaced_player_id"] == carol["player_id"]
-    playing = client.get(f"/seasons/{season['id']}").json()["games"][0][
-        "confirmed_drop_ins"
-    ]
-    assert [p["player_name"] for p in playing] == ["Dave"]
+    game = client.get(f"/seasons/{season['id']}").json()["games"][0]
+    assert [p["player_name"] for p in game["confirmed_drop_ins"]] == ["Dave"]
+    # Carol didn't withdraw — the organizer chose somebody else — so she
+    # goes back to waiting rather than being deleted.
+    assert [w["player_name"] for w in game["waitlist_entries"]] == ["Carol"]
 
 
 def test_a_swap_moves_money_for_the_two_people_swapping_and_nobody_else(
