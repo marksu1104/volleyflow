@@ -68,7 +68,7 @@ def season_shares(season: Season) -> dict[int, Decimal]:
     shares = shares_by_game(
         season.total_venue_cost,
         [game.air_conditioned for game in season.games],
-        season.member_count,
+        season.capacity,
         season.ac_surcharge,
     )
     return {game.id: share for game, share in zip(season.games, shares, strict=True)}

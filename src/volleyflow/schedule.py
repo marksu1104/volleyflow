@@ -40,6 +40,17 @@ class Season:
     total_venue_cost: Decimal
     games: tuple[Game, ...]
     members: tuple[Player, ...]
+    capacity: int
+    """How many people play one game — and, since 2026-09-10, what the
+    venue cost is divided between.
+
+    Deliberately not defaulted and deliberately not `len(members)`: the
+    price is fixed when the season is booked and never moves again, so
+    a roster change costs only the person joining or leaving. Splitting
+    by the roster instead meant one member leaving pushed everyone else
+    from $205 a night to $218, even when a drop-in had taken the empty
+    slot and paid the same $205. See pricing.share_per_game.
+    """
     ac_surcharge: Decimal = Decimal("0")
     """What one game's air conditioning adds to the venue bill.
 

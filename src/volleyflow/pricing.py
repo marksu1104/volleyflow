@@ -10,9 +10,24 @@ from decimal import ROUND_CEILING, Decimal
 
 
 def share_per_game(
-    total_venue_cost: Decimal, total_games: int, member_count: int
+    total_venue_cost: Decimal, total_games: int, capacity: int
 ) -> Decimal:
-    """Each member's cost for one game, rounded up to a whole dollar.
+    """One person's cost for one game, rounded up to a whole dollar.
+
+    `capacity` is the season's cap on how many play a game — not how many
+    fixed members it currently has. That is the whole point: the price is
+    settled when the season is booked and never moves again, so adding or
+    dropping a member changes only that person's bill and nobody else's.
+    Splitting by the current roster instead meant one person leaving an
+    18-person season pushed everyone from $205 a night to $218, which is
+    both a surprise and, once a drop-in has filled the empty slot and
+    paid the same $205, an overcharge.
+
+    The club therefore collects the full venue cost only when every slot
+    is filled — by a member or by a drop-in, who pays this same figure.
+    An unfilled slot is money the organizer doesn't collect, which is why
+    capacity is theirs to set and worth setting honestly. Decided
+    2026-09-10; see docs/billing-rules.md "Who the cost is split between".
 
     Every other amount in the system (season fees, drop-in fees, absence
     refunds) is a multiple of this value. Rounding happens here and nowhere
@@ -20,10 +35,10 @@ def share_per_game(
     """
     if total_games <= 0:
         raise ValueError("total_games must be positive")
-    if member_count <= 0:
-        raise ValueError("member_count must be positive")
+    if capacity <= 0:
+        raise ValueError("capacity must be positive")
 
-    exact = total_venue_cost / (total_games * member_count)
+    exact = total_venue_cost / (total_games * capacity)
     return exact.to_integral_value(rounding=ROUND_CEILING)
 
 
@@ -40,10 +55,12 @@ def member_season_fee(share: Decimal, billable_games: int) -> Decimal:
 def shares_by_game(
     total_venue_cost: Decimal,
     air_conditioned: Sequence[bool],
-    member_count: int,
+    capacity: int,
     ac_surcharge: Decimal = Decimal("0"),
 ) -> list[Decimal]:
-    """Each game's per-member share, in the order the games were given.
+    """Each game's share per person, in the order the games were given.
+
+    `capacity`, not the roster size — see share_per_game for why.
 
     Games don't all cost the same once air conditioning is in the
     picture: a night with the AC on costs the club `ac_surcharge` more
@@ -59,7 +76,7 @@ def shares_by_game(
         ac_total   = ac_surcharge x (games with the AC on)
         base_each  = (total_venue_cost - ac_total) / total games
         share(g)   = ceil((base_each + ac_surcharge if g else base_each)
-                          / member_count)
+                          / capacity)
 
     With `ac_surcharge` at zero this is exactly `share_per_game` for
     every game, which is what makes the change invisible to every season
@@ -71,8 +88,8 @@ def shares_by_game(
     total_games = len(air_conditioned)
     if total_games <= 0:
         raise ValueError("total_games must be positive")
-    if member_count <= 0:
-        raise ValueError("member_count must be positive")
+    if capacity <= 0:
+        raise ValueError("capacity must be positive")
     if ac_surcharge < 0:
         raise ValueError("ac_surcharge cannot be negative")
 
@@ -87,7 +104,7 @@ def shares_by_game(
     base_each = base_total / total_games
     return [
         (
-            (base_each + (ac_surcharge if on else Decimal("0"))) / member_count
+            (base_each + (ac_surcharge if on else Decimal("0"))) / capacity
         ).to_integral_value(rounding=ROUND_CEILING)
         for on in air_conditioned
     ]

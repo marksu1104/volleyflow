@@ -14,6 +14,7 @@ def _season(games: tuple[Game, ...]) -> Season:
         total_venue_cost=Decimal("10000"),
         games=games,
         members=(ALICE, BOB),
+        capacity=2,
     )
 
 

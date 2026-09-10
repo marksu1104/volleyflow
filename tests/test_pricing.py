@@ -8,7 +8,7 @@ from volleyflow.pricing import member_season_fee, share_per_game, shares_by_game
 def test_share_per_game_divides_evenly_when_the_split_is_clean():
     total_venue_cost = Decimal("10000")
 
-    result = share_per_game(total_venue_cost, total_games=8, member_count=5)
+    result = share_per_game(total_venue_cost, total_games=8, capacity=5)
 
     assert result == Decimal("250")
 
@@ -16,25 +16,25 @@ def test_share_per_game_divides_evenly_when_the_split_is_clean():
 def test_share_per_game_rounds_up_when_the_split_does_not_divide_evenly():
     total_venue_cost = Decimal("10000")
 
-    result = share_per_game(total_venue_cost, total_games=7, member_count=5)
+    result = share_per_game(total_venue_cost, total_games=7, capacity=5)
 
     assert result == Decimal("286")
 
 
 def test_share_per_game_returns_a_decimal():
-    result = share_per_game(Decimal("10000"), total_games=7, member_count=5)
+    result = share_per_game(Decimal("10000"), total_games=7, capacity=5)
 
     assert isinstance(result, Decimal)
 
 
 def test_share_per_game_rejects_zero_games():
     with pytest.raises(ValueError):
-        share_per_game(Decimal("10000"), total_games=0, member_count=5)
+        share_per_game(Decimal("10000"), total_games=0, capacity=5)
 
 
-def test_share_per_game_rejects_zero_members():
+def test_share_per_game_rejects_zero_capacity():
     with pytest.raises(ValueError):
-        share_per_game(Decimal("10000"), total_games=8, member_count=0)
+        share_per_game(Decimal("10000"), total_games=8, capacity=0)
 
 
 def test_member_season_fee_multiplies_share_by_billable_games():
@@ -104,6 +104,6 @@ def test_shares_by_game_rejects_an_empty_season() -> None:
         shares_by_game(Decimal("1000"), [], 5)
 
 
-def test_shares_by_game_rejects_a_season_with_no_members() -> None:
-    with pytest.raises(ValueError, match="member_count must be positive"):
+def test_shares_by_game_rejects_zero_capacity() -> None:
+    with pytest.raises(ValueError, match="capacity must be positive"):
         shares_by_game(Decimal("1000"), [True], 0)

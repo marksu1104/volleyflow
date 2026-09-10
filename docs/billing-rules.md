@@ -4,7 +4,9 @@ Defines every rule the billing engine implements. The code translates this
 document, not the other way around. To change a rule, change this file first,
 then the code and tests.
 
-Status: milestone 1 core, milestone 6 charge-timing update. Last updated 2026-09-07.
+Status: milestone 1 core, milestone 6 charge-timing update. Last updated 2026-09-10
+(the cost is split by `capacity`, not by the current roster — see "Who the
+cost is split between").
 
 ## Terms
 
@@ -15,7 +17,7 @@ full project vocabulary; this table covers only the billing-specific ones.
 |---|---|
 | `total_venue_cost` | Total court rental for the season, entered once when the season is created |
 | `total_games` | Number of games generated when the season is created |
-| `member_count` | Number of fixed members, frozen for the season |
+| `capacity` | How many play one game — and what the cost is divided between, see below |
 | `share_per_game` | The atomic money unit, see below |
 | `billable_games` | Games that still have to be paid for, see Cancellation |
 | `surplus` | Money collected above the venue cost by rounding up, see Surplus |
@@ -25,7 +27,7 @@ full project vocabulary; this table covers only the billing-specific ones.
 ```
 ac_total   = ac_surcharge * (games with the air conditioning on)
 base_each  = (total_venue_cost - ac_total) / total_games
-share(g)   = ceil((base_each + (ac_surcharge if g is cooled else 0)) / member_count)
+share(g)   = ceil((base_each + (ac_surcharge if g is cooled else 0)) / capacity)
 ```
 
 Rounded up to whole dollars, once per game's share, and nowhere else.
@@ -42,8 +44,36 @@ bundles air conditioning into its rate charges — every game's share is
 identical and the whole thing collapses to the original single formula:
 
 ```
-share_per_game = ceil(total_venue_cost / total_games / member_count)
+share_per_game = ceil(total_venue_cost / total_games / capacity)
 ```
+
+### Who the cost is split between
+
+`capacity`, not the number of fixed members. **Decided 2026-09-10**,
+replacing a split by the current roster.
+
+A share is what one *slot* costs for one night, and every person filling
+a slot pays it — a fixed member through their season fee, a drop-in on
+the night. The consequences are the point:
+
+- **Adding or removing a member changes only that person's bill.**
+  Under the old rule, one person leaving an 18-person season re-priced
+  everybody: $205 a night became $218, retroactively, for seventeen
+  people who had done nothing. Every roster edit rewrote the whole
+  club's books.
+- **A drop-in filling an empty slot costs the members nothing**, because
+  they were never carrying that slot in the first place. Under the old
+  rule the club collected the gap twice — once from the members whose
+  share had gone up, and again from the drop-in standing in it.
+- **The price is knowable when the season is booked** and never moves
+  again unless the venue cost does.
+
+The trade the club accepts for that: a slot nobody fills is money nobody
+pays. Eighteen slots at $205 recover the venue cost exactly; sixteen
+members and no drop-ins recover sixteen-eighteenths of it, and the rest
+is the organizer's shortfall. Capacity is therefore a billing figure as
+much as a roster limit, and worth setting to the number the club
+actually expects on court.
 
 ### Air conditioning
 
@@ -62,7 +92,7 @@ price with a discounted total would misprice every game.
 `ac_surcharge` is **per game, not per person**. The venue charges the
 same for the air conditioning whether twelve people or eighteen turn up,
 so a roster change has to move what each of them pays for it — which it
-does, because the division by `member_count` happens after.
+does, because the division by `capacity` happens after.
 
 `total_venue_cost` stays authoritative: it is what the club actually
 transfers, discounts included, so the air-conditioning portion is taken
@@ -119,7 +149,7 @@ absorb it, which is what a season fee is for.
 
 Rounding the charge and the refund independently opens a gap, because the two
 roundings can point in different directions. Example with
-`total_venue_cost=10000`, `total_games=7`, `member_count=5`:
+`total_venue_cost=10000`, `total_games=7`, `capacity=5`:
 
 | Approach | Pays | Max refund | Result |
 |---|---|---|---|
@@ -211,7 +241,7 @@ surplus          = member_fees + drop_in_income - refunds - venue_cost_paid
 venue_cost_paid  = total_venue_cost - sum(venue refunds)
 ```
 
-With `total_venue_cost=10000`, `total_games=7`, `member_count=5`:
+With `total_venue_cost=10000`, `total_games=7`, `capacity=5`:
 
 ```
 share_per_game     = ceil(285.714...) = 286
@@ -281,9 +311,12 @@ the only open question left is who gets refunded for a covered absence.
 ### Keeping the charge in sync when the inputs change
 
 `share_per_game` depends on `total_venue_cost`, `total_games`, and
-`member_count` — any of which can change after members have already been
-charged: the organizer adds or removes a member, edits the venue cost, or
-cancels a game with a refund (which lowers `billable_games`). Each of these
+`capacity` — any of which can change after members have already been
+charged: the organizer edits the venue cost, raises or lowers the
+capacity, or cancels a game with a refund (which lowers
+`billable_games`). Adding or removing a **member** no longer belongs on
+that list, which is the point of splitting by capacity: it changes that
+person's own charge and nobody else's. Each of these
 recomputes every current member's correct `season_fee_charged` total and
 writes **one adjustment entry** per member for the difference between that
 target and what's already on their ledger for this season — never edits or

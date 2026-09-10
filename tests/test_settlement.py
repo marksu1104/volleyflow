@@ -31,6 +31,7 @@ def _season(games: tuple[Game, ...] = (GAME1, GAME2)) -> Season:
         total_venue_cost=Decimal("10000"),
         games=all_games,
         members=MEMBERS,
+        capacity=len(MEMBERS),
     )
 
 
@@ -105,6 +106,7 @@ def test_settle_member_ignores_absences_on_a_cancelled_refunded_game():
         total_venue_cost=season.total_venue_cost,
         games=(GAME1, refunded_game) + season.games[2:],
         members=season.members,
+        capacity=season.capacity,
     )
     absences = [Absence(ALICE, refunded_game, recorded_at=datetime(2026, 8, 1))]
     drop_ins = [DropIn(CAROL, refunded_game, signed_up_at=datetime(2026, 8, 2))]
@@ -240,6 +242,7 @@ def _cooled_season() -> Season:
             Game(id=2, date=date(2026, 8, 11)),
         ),
         members=MEMBERS,
+        capacity=len(MEMBERS),
         ac_surcharge=Decimal("1000"),
     )
 
@@ -319,6 +322,7 @@ def test_turning_the_air_conditioning_off_lowers_only_that_game():
             Game(id=2, date=date(2026, 8, 11)),
         ),
         members=MEMBERS,
+        capacity=len(MEMBERS),
         ac_surcharge=Decimal("1000"),
     )
 

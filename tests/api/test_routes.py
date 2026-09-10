@@ -270,12 +270,19 @@ def test_cancel_an_unknown_drop_in_returns_404(client: TestClient) -> None:
 
 
 def _clean_season(client: TestClient) -> dict[str, Any]:
-    """total_venue_cost=10000, 8 games, 5 members -> share_per_game = 250."""
+    """total_venue_cost=10000, 8 games, capacity 5 -> share_per_game = 250.
+
+    Capacity matches the roster here — a full season, which is the case
+    the arithmetic in these tests is written for. The price is divided
+    by capacity, not by how many are on the roster today; see
+    pricing.share_per_game.
+    """
     return _start_season(
         client,
         total_venue_cost="10000",
         game_dates=[f"2026-08-{18 + i:02d}" for i in range(8)],
         member_names=["Alice", "Bob", "Carol", "Dave", "Eve"],
+        capacity=5,
     )
 
 
@@ -436,7 +443,9 @@ def test_cancel_absence_for_unknown_id_returns_404(client: TestClient) -> None:
 
 
 def test_set_substitute_confirms_and_charges_the_fee(client: TestClient) -> None:
-    season = _start_season(client, total_venue_cost="10000", member_names=["Alice"])
+    season = _start_season(
+        client, total_venue_cost="10000", member_names=["Alice"], capacity=2
+    )
     game_id = season["games"][0]["id"]
     absence = client.post(
         "/absences", json={"player_name": "Alice", "game_id": game_id}
@@ -453,7 +462,7 @@ def test_set_substitute_confirms_and_charges_the_fee(client: TestClient) -> None
     ledger = client.get(
         f"/clubs/{season['club_id']}/players/{body['player_id']}/ledger"
     ).json()
-    assert ledger["balance"] == "-5000"  # 10000 / 2 games / 1 member, one game's worth
+    assert ledger["balance"] == "-2500"  # 10000 / 2 games / capacity 2, one game
 
 
 def test_set_substitute_covers_its_specific_absence_not_fifo(
@@ -488,7 +497,9 @@ def test_set_substitute_replaces_an_existing_one(client: TestClient) -> None:
     old substitute is refunded, the new one is charged instead of
     being rejected as "already covered".
     """
-    season = _start_season(client, total_venue_cost="10000", member_names=["Alice"])
+    season = _start_season(
+        client, total_venue_cost="10000", member_names=["Alice"], capacity=2
+    )
     game_id = season["games"][0]["id"]
     absence = client.post(
         "/absences", json={"player_name": "Alice", "game_id": game_id}
@@ -510,7 +521,7 @@ def test_set_substitute_replaces_an_existing_one(client: TestClient) -> None:
         f"/clubs/{season['club_id']}/players/{eve['player_id']}/ledger"
     ).json()
     assert dave_ledger["balance"] == "0"  # refunded once replaced
-    assert eve_ledger["balance"] == "-5000"  # now charged instead
+    assert eve_ledger["balance"] == "-2500"  # now charged instead
     body = client.get(f"/seasons/{season['id']}").json()
     game = next(g for g in body["games"] if g["id"] == game_id)
     assert game["absences"] == [
@@ -631,7 +642,9 @@ def test_cancelling_a_substitute_uncovers_the_absence_and_refunds_it(
     included — is how "取消代打" actually removes coverage, with no
     special-cased endpoint needed for it.
     """
-    season = _start_season(client, total_venue_cost="10000", member_names=["Alice"])
+    season = _start_season(
+        client, total_venue_cost="10000", member_names=["Alice"], capacity=2
+    )
     game_id = season["games"][0]["id"]
     absence = client.post(
         "/absences", json={"player_name": "Alice", "game_id": game_id}
@@ -3127,7 +3140,10 @@ def test_a_drop_in_on_a_cooled_night_pays_the_cooled_price(
             "ac_surcharge": "1000",
             "game_dates": ["2026-10-06", "2026-10-13"],
             "air_conditioned_dates": ["2026-10-06"],
-            "member_names": ["Alice", "Bob", "Carol", "Dave", "Eve"],
+            # Four members against a capacity of five, so the guest below
+            # has a slot to take. Prices divide by the five.
+            "member_names": ["Alice", "Bob", "Carol", "Dave"],
+            "capacity": 5,
         },
     ).json()
     cooled, plain = season["games"]

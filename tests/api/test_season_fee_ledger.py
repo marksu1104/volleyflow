@@ -19,35 +19,41 @@ def test_starting_a_season_charges_each_members_season_fee(
         total_venue_cost="10000",
         game_dates=["2026-08-18", "2026-08-25"],
         member_names=["Alice", "Bob"],
+        capacity=2,
     )
     alice_id = season["member_ids"][0]
 
     ledger = client.get(f"/clubs/{season['club_id']}/players/{alice_id}/ledger").json()
 
-    # share = ceil(10000 / 2 games / 2 members) = 2500; fee = 2500 * 2 = 5000
+    # share = ceil(10000 / 2 games / capacity 2) = 2500; fee = 2500 * 2 = 5000
     assert ledger["balance"] == "-5000"
     assert len(ledger["entries"]) == 1
     assert ledger["entries"][0]["entry_type"] == "season_fee_charged"
 
 
-def test_adding_a_member_charges_them_and_lowers_existing_shares(
+def test_adding_a_member_charges_them_and_leaves_everyone_else_alone(
     client: TestClient,
 ) -> None:
+    # The rule changed on 2026-09-10: the venue cost is divided by the
+    # season's capacity, not by however many are on the roster today. So
+    # a new member costs the club nothing to add and nobody else's bill
+    # moves. Before, one person joining or leaving silently re-priced
+    # every other member's whole season.
     season = start_season(
         client,
         total_venue_cost="10000",
         game_dates=["2026-08-18", "2026-08-25"],
         member_names=["Alice"],
+        capacity=2,
     )
     alice_id = season["member_ids"][0]
-    # before: share = ceil(10000/2/1) = 5000, fee = 10000
+    # share = ceil(10000/2 games/capacity 2) = 2500, so Alice owes 5000
 
     response = client.post(
         f"/seasons/{season['id']}/members", json={"player_name": "Bob"}
     )
     bob_id = response.json()["id"]
 
-    # after: 2 members, share = ceil(10000/2/2) = 2500, fee = 5000 each
     alice_ledger = client.get(
         f"/clubs/{season['club_id']}/players/{alice_id}/ledger"
     ).json()
@@ -56,12 +62,12 @@ def test_adding_a_member_charges_them_and_lowers_existing_shares(
     ).json()
 
     assert alice_ledger["balance"] == "-5000"
-    assert len(alice_ledger["entries"]) == 2  # initial charge + adjustment
+    assert len(alice_ledger["entries"]) == 1, "no adjustment: her price didn't move"
     assert bob_ledger["balance"] == "-5000"
     assert len(bob_ledger["entries"]) == 1
 
 
-def test_removing_a_member_reverses_their_charge_and_raises_remaining_shares(
+def test_removing_a_member_reverses_their_charge_and_leaves_everyone_else_alone(
     client: TestClient,
 ) -> None:
     season = start_season(
@@ -69,9 +75,9 @@ def test_removing_a_member_reverses_their_charge_and_raises_remaining_shares(
         total_venue_cost="10000",
         game_dates=["2026-08-18", "2026-08-25"],
         member_names=["Alice", "Bob"],
+        capacity=2,
     )
     alice_id, bob_id = season["member_ids"]
-    # before: share = 2500, fee = 5000 each
 
     client.delete(f"/seasons/{season['id']}/members/{bob_id}")
 
@@ -82,11 +88,39 @@ def test_removing_a_member_reverses_their_charge_and_raises_remaining_shares(
         f"/clubs/{season['club_id']}/players/{bob_id}/ledger"
     ).json()
 
-    # after: 1 member, share = ceil(10000/2/1) = 5000, fee = 10000
-    assert alice_ledger["balance"] == "-10000"
-    assert len(alice_ledger["entries"]) == 2
+    assert alice_ledger["balance"] == "-5000", "unchanged — she is not paying his share"
+    assert len(alice_ledger["entries"]) == 1
     assert bob_ledger["balance"] == "0"
     assert len(bob_ledger["entries"]) == 2  # original charge + full reversal
+
+
+def test_a_drop_in_filling_an_empty_slot_leaves_the_members_price_alone(
+    client: TestClient,
+) -> None:
+    # Reported from real use: a roster short of capacity had every
+    # member's night jump from $205 to $218 — while a drop-in stood in
+    # the empty slot and paid the same $205. The club was collecting the
+    # gap twice.
+    season = start_season(
+        client,
+        total_venue_cost="10000",
+        game_dates=["2026-08-18", "2026-08-25"],
+        member_names=["Alice"],
+        capacity=2,
+    )
+    alice_id = season["member_ids"][0]
+    before = client.get(f"/clubs/{season['club_id']}/players/{alice_id}/ledger").json()
+
+    client.post(
+        "/drop-ins", json={"player_name": "Carol", "game_id": season["games"][0]["id"]}
+    )
+
+    after = client.get(f"/clubs/{season['club_id']}/players/{alice_id}/ledger").json()
+    assert after == before, "somebody else turning up is not Alice's business"
+    carol = client.get(f"/seasons/{season['id']}").json()["games"][0][
+        "confirmed_drop_ins"
+    ][0]
+    assert carol["player_name"] == "Carol"
 
 
 def test_changing_venue_cost_adjusts_every_current_members_charge(
@@ -97,6 +131,7 @@ def test_changing_venue_cost_adjusts_every_current_members_charge(
         total_venue_cost="10000",
         game_dates=["2026-08-18", "2026-08-25"],
         member_names=["Alice"],
+        capacity=1,
     )
     alice_id = season["member_ids"][0]
 
@@ -129,6 +164,7 @@ def test_cancelling_a_game_with_refund_credits_every_member_one_share(
         total_venue_cost="10000",
         game_dates=["2026-08-18", "2026-08-25"],
         member_names=["Alice"],
+        capacity=1,
     )
     alice_id = season["member_ids"][0]
     game_id = season["games"][0]["id"]
@@ -150,6 +186,7 @@ def test_cancelling_a_game_without_refund_changes_nothing(client: TestClient) ->
         total_venue_cost="10000",
         game_dates=["2026-08-18", "2026-08-25"],
         member_names=["Alice"],
+        capacity=1,
     )
     alice_id = season["member_ids"][0]
     game_id = season["games"][0]["id"]
@@ -230,6 +267,7 @@ def test_adding_a_member_cancels_and_refunds_their_drop_ins(
         total_venue_cost="10000",
         game_dates=["2026-08-18", "2026-08-25"],
         member_names=["Alice"],
+        capacity=2,
     )
     signup = client.post(
         "/drop-ins", json={"player_name": "Bob", "game_id": season["games"][0]["id"]}
@@ -251,7 +289,7 @@ def test_adding_a_member_cancels_and_refunds_their_drop_ins(
         )
         == 0
     )
-    # Left owing exactly one season fee: 2 members, 2 games, ceil(10000/2/2)=2500
+    # Left owing exactly one season fee: 2 games, capacity 2, ceil(10000/2/2)=2500
     assert ledger["balance"] == "-5000"
 
 

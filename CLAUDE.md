@@ -63,7 +63,17 @@ the money, never the person.
 
 ### 2.4 Billing — the core of the project; get this wrong and the project has no point
 
-- A member's season fee is the total venue cost split evenly across members.
+- A member's season fee is the total venue cost split evenly across the
+  season's **capacity** — the number of slots on court, not the number
+  of names currently on the roster. A share is what one slot costs for
+  one night, and everyone filling one pays it, member or drop-in.
+  Changed 2026-09-10, replacing a split across the current member list:
+  that made one person leaving an 18-person season re-price the other
+  seventeen from $205 a night to $218, retroactively, while the drop-in
+  standing in the empty slot paid the $205 as well — the club collected
+  the same gap twice. The trade is that an unfilled slot is money
+  nobody pays, so capacity is a billing figure and not just a limit.
+  See `docs/billing-rules.md` "Who the cost is split between".
 - Games do not all cost the same. A `Season` carries an `ac_surcharge` —
   what one game's air conditioning adds to the venue bill — and each
   `Game` records whether it ran. A cooled game's share is higher, so a
