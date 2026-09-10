@@ -110,6 +110,63 @@ def test_taking_a_place_back_never_releases_somebody_elses_substitute(
     assert playing == ["Zoe"], "Bob's arrangement is untouched"
 
 
+def test_cancelling_an_arranged_substitute_returns_them_to_their_place_in_the_queue(
+    client: TestClient,
+) -> None:
+    # Reported from real use: picking the third person in the queue as
+    # your 代打 and then cancelling deleted them from the game. They had
+    # given up their queue place to take the slot and got nothing back.
+    season = start_season(client, member_names=["Alice"], capacity=1)
+    game_id = season["games"][0]["id"]
+    first = client.post(
+        "/drop-ins", json={"player_name": "第一位", "game_id": game_id}
+    ).json()
+    client.post("/drop-ins", json={"player_name": "第二位", "game_id": game_id})
+    third = client.post(
+        "/drop-ins", json={"player_name": "第三位", "game_id": game_id}
+    ).json()
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    # Alice picks the third in line rather than whoever the queue offers.
+    substitute = client.put(
+        f"/absences/{absence['id']}/substitute", json={"player_name": "第三位"}
+    ).json()
+    assert substitute["player_id"] == third["player_id"]
+
+    client.post(f"/drop-ins/{substitute['id']}/cancel")
+
+    game = _game(client, season)
+    playing = [d["player_name"] for d in game["confirmed_drop_ins"]]
+    waiting = [w["player_name"] for w in game["waitlist_entries"]]
+    assert playing == ["第一位"], "the freed slot goes to whoever is genuinely first"
+    assert waiting == ["第二位", "第三位"], "and the third keeps their own place"
+    assert first["status"] == "waitlisted"
+
+
+def test_a_drop_in_who_cancels_themselves_does_not_rejoin_the_queue(
+    client: TestClient,
+) -> None:
+    # The other half of the rule: leaving is a choice, and choosing to
+    # leave must not put you straight back in line.
+    season = start_season(client, member_names=["Alice"], capacity=18)
+    game_id = season["games"][0]["id"]
+    carol = _member(client, season, "Carol")
+    signup = client.post(
+        f"/games/{game_id}/drop-ins",
+        json={"people": [{"player_name": carol["name"], "player_id": carol["id"]}]},
+        headers=auth_headers(carol["token"]),
+    ).json()["results"][0]
+
+    client.post(
+        f"/drop-ins/{signup['id']}/cancel", headers=auth_headers(carol["token"])
+    )
+
+    game = _game(client, season)
+    assert game["confirmed_drop_ins"] == []
+    assert game["waitlist_entries"] == []
+
+
 def test_nobody_may_sign_up_on_an_account_that_is_not_theirs(
     client: TestClient,
 ) -> None:

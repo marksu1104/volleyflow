@@ -1010,6 +1010,44 @@
 
   function closeSignup() { document.getElementById("signup-backdrop").hidden = true; }
 
+  /** The friends this member has brought before, as taps.
+   *
+   * Typing a name again every week is how one real person becomes
+   * several rows in the database, each carrying its own money — a bare
+   * name always means a new person, deliberately, because two people
+   * really can be called 小明. Picking from here sends their id
+   * instead, so the regular stays one person with one ledger.
+   *
+   * Only shown on an empty row, and never for somebody already on this
+   * game's list — picking them would sign the same person up twice.
+   */
+  function quickPicks(person, index) {
+    if (person.self || person.name.trim() || person.playerId) return "";
+    const already = new Set(
+      currentSeason.members
+        .filter((m) => !suGame.absences.some((a) => a.player_name === m.name))
+        .map((m) => m.name)
+        .concat(suGame.confirmed_drop_ins.map((d) => d.player_name))
+        .concat(suGame.waitlist_entries.map((w) => w.player_name))
+        .concat(suPeople.map((p) => p.name.trim()))
+    );
+    const picks = myGuests.filter((g) => !already.has(g.name));
+    if (!picks.length) return "";
+    return `
+      <div class="su-recent">
+        <span class="su-recent-label">曾報名過</span>
+        ${picks
+          .map(
+            (g) => `
+          <button type="button" class="su-recent-pick" data-recent="${index}"
+            data-pid="${g.id}" data-name="${escapeHtml(g.name)}" data-gender="${g.gender || ""}">
+            ${escapeHtml(g.name)}<span class="su-recent-times">${g.times}</span>
+          </button>`
+          )
+          .join("")}
+      </div>`;
+  }
+
   function renderSignup() {
     const playing = expectedAttendance(currentSeason, suGame);
     const slots = Math.max(0, currentSeason.capacity - playing);
@@ -1054,6 +1092,7 @@
           </div>
           ${clash ? `<button type="button" class="su-same" data-same="${i}" data-pid="${clash.id}">↳ 就是球隊裡那個「${escapeHtml(clash.name)}」，不要新增一個</button>` : ""}
           ${p.playerId && !p.self ? `<button type="button" class="su-same" data-unsame="${i}">↳ 已選既有成員，改成新的人</button>` : ""}
+          ${quickPicks(p, i)}
         `;
       })
       .join("");
@@ -1091,6 +1130,18 @@
     const unsame = e.target.closest("[data-unsame]");
     if (unsame) {
       suPeople[Number(unsame.dataset.unsame)].playerId = null;
+      renderSignup();
+      return;
+    }
+    // Picking a friend brought before: their id goes with the signup, so
+    // they stay one person rather than becoming a new one with the same
+    // name. See quickPicks.
+    const recent = e.target.closest("[data-recent]");
+    if (recent) {
+      const person = suPeople[Number(recent.dataset.recent)];
+      person.name = recent.dataset.name;
+      person.playerId = Number(recent.dataset.pid);
+      person.gender = recent.dataset.gender || null;
       renderSignup();
     }
   });
