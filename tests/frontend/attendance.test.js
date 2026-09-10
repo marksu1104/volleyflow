@@ -346,22 +346,87 @@ test("only the organizer is offered 遞補 on a queued person", () => {
   assert.match(asOrganizer.innerHTML, /data-promote-waitlist="300"/);
 });
 
-test("a second tap is dropped while the first change is still in flight", () => {
-  // Reported from real use: pressing 請假 and 取消請假 quickly enough
-  // got "這場已請假" back for a game showing no absence. The taps
-  // outran the round trips, so each request carried an id the server
-  // had already moved past.
+// 代打 and 臨打 stopped being the same thing on 2026-09-10. A drop-in
+// who signed themselves up covers nobody in particular — the FIFO match
+// that refunds an absence is a money rule, not an arrangement between
+// two people, and showing it as one told members a stranger was "their"
+// substitute.
+test("somebody who signed themselves up is 臨打, not anybody's 代打", () => {
+  const { season, game } = fixture();
+  game.confirmed_drop_ins = [
+    { id: 200, player_id: 9, player_name: "Taco", gender: "male", covering: null, linked: false },
+  ];
+  game.absences = [{ id: 100, player_name: "楊于嫺", covered_by: null, refunded: true }];
+  const el = makeElement();
+
+  renderGameDetail(el, season, game, { viewerName: "蘇慬" });
+
+  assert.match(el.innerHTML, /臨打/);
+  assert.doesNotMatch(el.innerHTML, /代 楊于嫺/, "he agreed to no such thing");
+  assert.match(el.innerHTML, /已有人補上/, "her money still comes back");
+  assert.doesNotMatch(el.innerHTML, /Taco 代打/);
+});
+
+test("an absence nobody is filling is still a gap", () => {
+  const { season, game } = fixture();
+  game.confirmed_drop_ins = [];
+  game.absences = [{ id: 100, player_name: "楊于嫺", covered_by: null, refunded: false }];
+  const el = makeElement();
+
+  renderGameDetail(el, season, game, { viewerName: "蘇慬" });
+
+  assert.match(el.innerHTML, /缺額/);
+  assert.doesNotMatch(el.innerHTML, /已有人補上/);
+});
+
+test("a member is only offered the signups that are theirs to undo", () => {
+  // The member screen is not the place to take somebody else off the
+  // list. The server refuses it too — see tests/api/test_permissions.py.
+  const { season, game } = fixture();
+  game.confirmed_drop_ins = [
+    { id: 200, player_id: 9, player_name: "我的客人", covering: null, signed_up_by_me: true },
+    { id: 201, player_id: 8, player_name: "別人的客人", covering: null, signed_up_by_me: false },
+  ];
+  const el = makeElement();
+
+  renderGameDetail(el, season, game, {
+    viewerName: "蘇慬",
+    onRemoveDropIn() {},
+    canRemoveDropIn: (d) => d.signed_up_by_me === true,
+  });
+
+  assert.match(el.innerHTML, /data-remove-drop-in="200"/);
+  assert.doesNotMatch(el.innerHTML, /data-remove-drop-in="201"/);
+});
+
+test("the management screen is offered all of them", () => {
+  const { season, game } = fixture();
+  const el = makeElement();
+
+  renderGameDetail(el, season, game, {
+    viewerName: "蘇慬",
+    onRemoveDropIn() {},
+    canRemoveDropIn: () => true,
+  });
+
+  assert.match(el.innerHTML, /data-remove-drop-in="200"/);
+  assert.match(el.innerHTML, /data-remove-drop-in="201"/);
+});
+
+test("a tap is never swallowed while an earlier change is in flight", () => {
+  // The first attempt at fixing the interleaving locked the buttons
+  // until each change came back, and that is what "按了沒反應" was: the
+  // screen had already updated optimistically, so the next tap looked
+  // like it should work and silently did nothing. The person is never
+  // blocked; the requests queue instead.
   const { season, game } = fixture();
   const el = makeElement();
   const calls = [];
-  let release;
   renderGameDetail(el, season, game, {
     viewerName: "蘇慬",
     onRecordAbsence: (name) => {
       calls.push(name);
-      return new Promise((r) => {
-        release = r;
-      });
+      return new Promise(() => {}); // never settles: still in flight
     },
   });
   const tap = () =>
@@ -374,10 +439,8 @@ test("a second tap is dropped while the first change is still in flight", () => 
 
   tap();
   tap();
-  tap();
 
-  assert.deepEqual(calls, ["阿May"], "three taps, one change");
-  release();
+  assert.equal(calls.length, 2, "both taps reached the page");
 });
 
 test("a full game offers who to swap out as tappable names", () => {

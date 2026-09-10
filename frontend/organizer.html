@@ -362,6 +362,11 @@
       onRecordAbsence: (playerName, btn) => recordAbsenceFor(playerName, btn),
       onCancelAbsence: (absenceId, btn) => cancelAbsenceFor(absenceId, btn),
       onRemoveDropIn: (dropInId, btn) => cancelSubstitute(dropInId, btn),
+      // The management screen manages everybody's — that is what it is
+      // for, and the club role is checked server-side on the way in.
+      // The member screen deliberately does not do this; see
+      // member.html's canRemoveDropIn.
+      canRemoveDropIn: () => true,
       onAddDropIn: (name, gender, btn) => addDropIn(name, gender, btn),
       // No canAssignSubstitute restriction — the organizer can arrange
       // a substitute for anyone's absence, not just their own.
@@ -402,37 +407,111 @@
     }
   }
 
+  // Every change on this screen used to wait out a write and a reload
+  // before anything moved — two round trips of nothing happening, which
+  // is the 卡頓 reported from real use. The screen changes on the tap
+  // now; the request queues behind whatever is already going, and the
+  // refresh afterwards is not waited for. See optimisticRunner.
+  const optimistically = optimisticRunner({
+    getState: () => currentSeason,
+    setState: (s) => {
+      currentSeason = s;
+    },
+    repaint: () => {
+      renderHero(currentSeason);
+      renderCalendar();
+      renderSelectedGameDetail();
+    },
+  });
+
+  function refreshQuietly() {
+    if (currentSeason) loadDashboard(currentSeason.id);
+  }
+
+  /** Real absence ids, keyed by game and player — see member.html. The
+   * organizer marks other people absent, so the same "tapped 取消請假
+   * before 請假 came back" race applies here. */
+  const pendingAbsenceId = {};
+  const absenceKey = (gameId, name) => `${gameId}:${name}`;
+
   async function recordAbsenceFor(playerName, btn) {
-    try {
-      await withButtonFeedback(btn, "處理中...", async () => {
-        await postJson(API_BASE, "/absences", {
+    const gameId = selectedGameId;
+    const key = absenceKey(gameId, playerName);
+    let announceId;
+    pendingAbsenceId[key] = new Promise((resolve) => {
+      announceId = resolve;
+    });
+    const result = await optimistically(
+      (season) => {
+        const game = season.games.find((g) => g.id === gameId);
+        game.absences.push({ id: -1, player_name: playerName, covered_by: null });
+      },
+      async () => {
+        const created = await postJson(API_BASE, "/absences", {
           player_name: playerName,
-          game_id: selectedGameId,
+          game_id: gameId,
         });
-      });
-      await loadDashboard(currentSeason.id);
-    } catch (e) {
-      toast("代為請假失敗：" + e.message);
+        announceId(created.id);
+        return created;
+      },
+      "代為請假失敗：",
+      (created, season) => {
+        if (created.promoted_from_waitlist) return;
+        for (const game of season.games) {
+          for (const a of game.absences) if (a.id === -1) a.id = created.id;
+        }
+      }
+    );
+    if (!result) {
+      announceId(null);
+      delete pendingAbsenceId[key];
     }
+    refreshQuietly();
   }
 
   async function cancelAbsenceFor(absenceId, btn) {
-    try {
-      await withButtonFeedback(btn, "處理中...", async () => {
-        await postJson(API_BASE, `/absences/${absenceId}/cancel`, {});
-      });
-      await loadDashboard(currentSeason.id);
-    } catch (e) {
-      toast("取消請假失敗：" + e.message);
-    }
+    const gameId = selectedGameId;
+    const game = currentSeason.games.find((g) => g.id === gameId);
+    const row = (game.absences || []).find((a) => a.id === absenceId);
+    const playerName = row ? row.player_name : null;
+    await optimistically(
+      (season) => {
+        for (const g of season.games) {
+          g.absences = g.absences.filter((a) => a.id !== absenceId);
+        }
+      },
+      async () => {
+        let id = absenceId;
+        if (!(id > 0) && playerName) {
+          id = await pendingAbsenceId[absenceKey(gameId, playerName)];
+          delete pendingAbsenceId[absenceKey(gameId, playerName)];
+        }
+        if (!(id > 0)) throw new Error("這筆請假還沒建立成功");
+        return postJson(API_BASE, `/absences/${id}/cancel`, {});
+      },
+      "取消請假失敗："
+    );
+    refreshQuietly();
   }
 
   async function addDropIn(name, gender, btn) {
-    try {
-      await withButtonFeedback(btn, "新增中...", async () => {
+    const gameId = selectedGameId;
+    await optimistically(
+      (season) => {
+        const game = season.games.find((g) => g.id === gameId);
+        game.confirmed_drop_ins.push({
+          id: -1,
+          player_id: -1,
+          player_name: name,
+          gender: gender || null,
+          covering: null,
+          linked: false,
+        });
+      },
+      async () => {
         const created = await postJson(API_BASE, "/drop-ins", {
           player_name: name,
-          game_id: selectedGameId,
+          game_id: gameId,
         });
         // A drop-in is often someone with no account, so their gender —
         // which the roster's male/female count needs — has to be set for
@@ -441,25 +520,43 @@
           await postJson(API_BASE, `/players/${created.player_id}/gender`, { gender }, "PUT")
             .catch(() => {});
         }
-      });
-      await loadDashboard(currentSeason.id);
-    } catch (e) {
-      toast("新增臨打失敗：" + e.message);
-    }
+        return created;
+      },
+      "新增臨打失敗：",
+      (created, season) => {
+        // Waitlisted rather than confirmed: the optimistic row is in the
+        // wrong list entirely, so let the refresh redraw it.
+        if (created.status !== "confirmed") return;
+        for (const game of season.games) {
+          for (const d of game.confirmed_drop_ins) {
+            if (d.id === -1) {
+              d.id = created.id;
+              d.player_id = created.player_id;
+            }
+          }
+        }
+      }
+    );
+    const input = document.querySelector("[data-new-dropin]");
+    if (input) input.value = "";
+    refreshQuietly();
   }
 
   /** Removing someone from the queue. Its own endpoint because a queue
    * place is a different table from a confirmed signup and the two id
    * sequences overlap — see routes.leave_waitlist. */
   async function leaveWaitlistFor(entryId, btn) {
-    try {
-      await withButtonFeedback(btn, "移除中...", async () => {
-        await postJson(API_BASE, `/waitlist/${entryId}/cancel`, {});
-      });
-      await loadDashboard(currentSeason.id);
-    } catch (e) {
-      toast("移除候補失敗：" + e.message);
-    }
+    if (entryId < 0) return;
+    await optimistically(
+      (season) => {
+        for (const g of season.games) {
+          g.waitlist_entries = g.waitlist_entries.filter((w) => w.id !== entryId);
+        }
+      },
+      () => postJson(API_BASE, `/waitlist/${entryId}/cancel`, {}),
+      "移除候補失敗："
+    );
+    refreshQuietly();
   }
 
   /** Putting a queued person on the court, in the order you decide
@@ -511,14 +608,17 @@
   }
 
   async function cancelSubstitute(dropInId, btn) {
-    try {
-      await withButtonFeedback(btn, "取消中...", async () => {
-        await postJson(API_BASE, `/drop-ins/${dropInId}/cancel`, {});
-      });
-      await loadDashboard(currentSeason.id);
-    } catch (e) {
-      toast("取消代打失敗：" + e.message);
-    }
+    if (dropInId < 0) return; // still saving; the real id isn't known yet
+    await optimistically(
+      (season) => {
+        for (const g of season.games) {
+          g.confirmed_drop_ins = g.confirmed_drop_ins.filter((d) => d.id !== dropInId);
+        }
+      },
+      () => postJson(API_BASE, `/drop-ins/${dropInId}/cancel`, {}),
+      "移除失敗："
+    );
+    refreshQuietly();
   }
 
   function statusLabel(status) {

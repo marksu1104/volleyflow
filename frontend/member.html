@@ -786,7 +786,14 @@
       onAssignSubstitute: (absenceId, name, gender) => assignSubstitute(absenceId, name, gender),
       onLeaveWaitlist: (entryId, btn) => leaveWaitlist(entryId, btn),
       onCancelSubstitute: (dropInId, btn) => cancelDropIn(dropInId, btn),
+      onRemoveDropIn: (dropInId, btn) => cancelDropIn(dropInId, btn),
       canAssignSubstitute: (absence) => absence.player_name === playerName(),
+      // A member may undo their own signup and the guests they brought,
+      // and nobody else's. This is the member screen: it is not the
+      // place to take somebody else off the list, whatever role the
+      // viewer happens to hold elsewhere in the club. The server
+      // enforces the same rule — see _require_self_or_organizer.
+      canRemoveDropIn: (d) => d.signed_up_by_me === true,
     });
   }
 
@@ -828,16 +835,38 @@
   }
 
   async function cancelAbsence(absenceId, btn) {
-    if (absenceId < 0) return;  // still saving; the real id isn't known yet
+    const name = playerName();
+    const gameId = selectedGameId;
     await optimistically(
       (season) => {
         for (const game of season.games) {
-          game.absences = game.absences.filter((a) => a.id !== absenceId);
+          game.absences = game.absences.filter(
+            (a) => a.id !== absenceId && !(a.id === -1 && a.player_name === name)
+          );
         }
       },
-      () => postJson(API_BASE, `/absences/${absenceId}/cancel`, {}),
+      async () => {
+        // Resolved here, not at tap time. A tap that lands while 請假 is
+        // still in the air has no id yet — the old code gave up at that
+        // point and did nothing at all, which is what "按太快就跳錯誤，
+        // 而且不會變成取消請假" was. Waiting on the pending id costs
+        // nothing on screen, which has already shown the cancellation.
+        let id = absenceId;
+        if (!(id > 0)) id = await pendingAbsenceId[absenceKey(gameId, name)];
+        if (!(id > 0)) throw new Error("這筆請假還沒建立成功");
+        delete pendingAbsenceId[absenceKey(gameId, name)];
+        return postJson(API_BASE, `/absences/${id}/cancel`, {});
+      },
       "取消請假失敗："
     );
+    refreshSeasonQuietly();
+  }
+
+  /** Re-reads the season without blocking whatever the person does next.
+   * The screen is already right; this only catches what the optimistic
+   * update couldn't know — a waitlist promotion, somebody else's change. */
+  function refreshSeasonQuietly() {
+    loadSeason(currentSeasonId);
   }
 
   /** What this viewer can do about this game, as a status line and a row
@@ -1259,57 +1288,66 @@
     renderSelectedGameDetail();
   }
 
-  async function optimistically(mutateLocally, request, failureMessage, reconcile) {
-    const snapshot = JSON.parse(JSON.stringify(currentSeason));
-    mutateLocally(currentSeason);
-    repaintGame();
-    try {
-      const result = await request();
-      // Fold the server's own ids into what's already on screen. Without
-      // this the refresh below always found a difference — the
-      // placeholder id — and redrew the hero, the calendar and the
-      // roster a second after the tap had already visibly worked, which
-      // is the stutter that made a working action feel broken.
-      if (reconcile) {
-        reconcile(result, currentSeason);
-        // The screen was painted from the placeholder, so it still holds
-        // the id -1 in its onclick handlers even though the data no
-        // longer does — and the refresh below now finds nothing to
-        // change and skips the redraw. That combination left 取消請假
-        // silently doing nothing, because -1 is the "still saving" guard
-        // value. Repaint here, then the refresh really is a no-op.
-        repaintGame();
-      }
-      await loadSeason(currentSeasonId);
-    } catch (e) {
-      currentSeason = snapshot;
-      repaintGame();
-      toast(failureMessage + e.message);
-    }
+  // Shared with the organizer's screen — see optimisticRunner. The
+  // refresh afterwards is deliberately not awaited here: the screen is
+  // already correct, and holding the action open across a second round
+  // trip is what made a finished tap feel unfinished.
+  const optimistically = optimisticRunner({
+    getState: () => currentSeason,
+    setState: (s) => {
+      currentSeason = s;
+    },
+    repaint: () => repaintGame(),
+  });
+
+  /** The real absence id, once the server has issued one, keyed by game
+   * and player. Tapping 取消請假 before 請假 has come back used to
+   * silently do nothing (`if (absenceId < 0) return`), which is exactly
+   * the "按太快就沒反應" report. Now the cancel waits on this instead. */
+  const pendingAbsenceId = {};
+
+  function absenceKey(gameId, name) {
+    return `${gameId}:${name}`;
   }
 
   async function recordAbsence(gameId, btn) {
     const name = playerName();
-    await optimistically(
+    const key = absenceKey(gameId, name);
+    let announceId;
+    pendingAbsenceId[key] = new Promise((resolve) => {
+      announceId = resolve;
+    });
+    const result = await optimistically(
       (season) => {
         const game = season.games.find((g) => g.id === gameId);
         // A placeholder id: the row it draws is replaced by the real one
-        // as soon as loadSeason comes back, and any control keyed off it
-        // is disabled in the meantime.
+        // as soon as the refresh comes back.
         game.absences.push({ id: -1, player_name: name, covered_by: null });
       },
-      () => postJson(API_BASE, "/absences", { player_name: name, game_id: gameId }),
+      async () => {
+        const created = await postJson(API_BASE, "/absences", {
+          player_name: name,
+          game_id: gameId,
+        });
+        announceId(created.id);
+        return created;
+      },
       "請假失敗：",
-      (result, season) => {
+      (created, season) => {
         // A promotion off the waitlist changes people we can't invent
         // here, so leave the placeholder in place and let the refresh
         // find the difference and redraw.
-        if (result.promoted_from_waitlist) return;
+        if (created.promoted_from_waitlist) return;
         for (const game of season.games) {
-          for (const a of game.absences) if (a.id === -1) a.id = result.id;
+          for (const a of game.absences) if (a.id === -1) a.id = created.id;
         }
       }
     );
+    if (!result) {
+      announceId(null); // it failed; unblock anything waiting on the id
+      delete pendingAbsenceId[key];
+    }
+    refreshSeasonQuietly();
   }
 
 

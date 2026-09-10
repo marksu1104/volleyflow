@@ -647,6 +647,35 @@ def _make_room_for_substitute(
     return int(displaced.player_id)
 
 
+def _require_may_cancel_drop_in(
+    db: Session, drop_in: DropInRow, season: SeasonRow, current_player: PlayerRow
+) -> None:
+    """Who may take a confirmed signup back off the list.
+
+    Three people besides the organizer, and a check on the player alone
+    missed two of them:
+
+    * the player themselves;
+    * whoever brought them — a guest has no account and never will, so
+      the member who signed them up is the only one who can undo it;
+    * the member whose absence they were arranged to cover — the screen
+      offers that member 取消代打, and refusing it here made the button
+      fail with a 403 for everyone except the organizer.
+
+    Anybody else gets 403, including a member acting on a stranger's
+    signup and a member acting on a substitute somebody else arranged.
+    """
+    if drop_in.player_id == current_player.id:
+        return
+    if drop_in.brought_by_player_id == current_player.id:
+        return
+    if drop_in.covers_absence_id is not None:
+        absence = db.get(AbsenceRow, drop_in.covers_absence_id)
+        if absence is not None and absence.player_id == current_player.id:
+            return
+    _require_organizer(db, season.club_id, current_player)
+
+
 def _promote_entry(db: Session, entry: WaitlistEntryRow) -> DropInRow:
     """Turn one queued person into a confirmed drop-in, charged exactly
     as a direct signup would be.
@@ -1873,8 +1902,9 @@ def get_season(
     ):
         absences_by_game[absence.game_id].append((absence.id, player.name))
 
+    # (drop_in_id, player_id, name, gender, covers_absence_id, brought_by)
     drop_ins_by_game: dict[
-        int, list[tuple[int, int, str, Gender | None, int | None]]
+        int, list[tuple[int, int, str, Gender | None, int | None, int | None]]
     ] = defaultdict(list)
     for drop_in, player in (
         db.query(DropInRow, PlayerRow)
@@ -1890,6 +1920,7 @@ def get_season(
                 player.name,
                 _gender(player.gender),
                 drop_in.covers_absence_id,
+                drop_in.brought_by_player_id,
             )
         )
 
@@ -1919,36 +1950,45 @@ def get_season(
         # (drop_in_id, player_id, name, gender, covers_absence_id) tuples
         drop_ins = drop_ins_by_game[game.id]
 
-        # Explicit substitutes claim their absence first; the remaining
-        # (unclaimed) absences pair FIFO with the remaining drop-ins —
-        # same two-pass rule as settlement.covered_absences, just
-        # producing a name-to-name display instead of a refund count.
+        # Two different questions, deliberately answered separately.
+        #
+        # "Who did this member arrange to stand in for them?" has an
+        # answer only when they actually arranged somebody
+        # (covers_absence_id). "Does this absence get its money back?" is
+        # answered by anybody filling the slot, matched FIFO — the rule in
+        # settlement.covered_absences.
+        #
+        # These used to be one map, so a person who signed themselves up
+        # off the waitlist was shown as a named member's 代打, and that
+        # member was shown as having arranged them. Neither had agreed to
+        # anything. Reported from real use on 2026-09-10.
         absence_name_by_id = dict(absences_list)
-        covered_by_name: dict[str, str] = {}
-        covering_name: dict[int, str] = {}
+        arranged_for_absence: dict[str, str] = {}
+        arranged_by_drop_in: dict[int, str] = {}
         claimed_absence_ids: set[int] = set()
         for entry in drop_ins:
-            drop_in_id, _player_id, name, _drop_in_gender, covers_absence_id = entry
+            drop_in_id, _player_id, name, _drop_in_gender, covers_absence_id, _by = (
+                entry
+            )
             if covers_absence_id in absence_name_by_id:
                 absence_name = absence_name_by_id[covers_absence_id]
-                covered_by_name[absence_name] = name
-                covering_name[drop_in_id] = absence_name
+                arranged_for_absence[absence_name] = name
+                arranged_by_drop_in[drop_in_id] = absence_name
                 claimed_absence_ids.add(covers_absence_id)
 
         fifo_absences = [
             (aid, name) for aid, name in absences_list if aid not in claimed_absence_ids
         ]
         fifo_drop_ins = [
-            (drop_in_id, name)
-            for drop_in_id, _player_id, name, _gender, covers in drop_ins
+            drop_in_id
+            for drop_in_id, _player_id, _name, _gender, covers, _by in drop_ins
             if covers is None
         ]
-        for i, (_aid, absence_name) in enumerate(fifo_absences):
+        # Refunded, but not "covered by" anybody in particular.
+        refunded_absence_ids = set(claimed_absence_ids)
+        for i, (aid, _absence_name) in enumerate(fifo_absences):
             if i < len(fifo_drop_ins):
-                covered_by_name[absence_name] = fifo_drop_ins[i][1]
-        for i, (drop_in_id, _name) in enumerate(fifo_drop_ins):
-            if i < len(fifo_absences):
-                covering_name[drop_in_id] = fifo_absences[i][1]
+                refunded_absence_ids.add(aid)
 
         games.append(
             GameDetailOut(
@@ -1962,7 +2002,10 @@ def get_season(
                 ),
                 absences=[
                     AbsenceDetailOut(
-                        id=aid, player_name=name, covered_by=covered_by_name.get(name)
+                        id=aid,
+                        player_name=name,
+                        covered_by=arranged_for_absence.get(name),
+                        refunded=aid in refunded_absence_ids,
                     )
                     for aid, name in absences_list
                 ],
@@ -1972,9 +2015,23 @@ def get_season(
                         player_id=player_id,
                         player_name=name,
                         gender=gender,
-                        covering=covering_name.get(drop_in_id),
+                        covering=arranged_by_drop_in.get(drop_in_id),
+                        # Themselves, or a guest they brought. The screen
+                        # uses this to decide whose signup it may offer to
+                        # cancel; the server checks it again on the way in.
+                        signed_up_by_me=(
+                            player_id == current_player.id
+                            or brought_by == current_player.id
+                        ),
                     )
-                    for drop_in_id, player_id, name, gender, _covers in drop_ins
+                    for (
+                        drop_in_id,
+                        player_id,
+                        name,
+                        gender,
+                        _covers,
+                        brought_by,
+                    ) in drop_ins
                 ],
                 waitlist_entries=waitlist_by_game[game.id],
             )
@@ -2218,8 +2275,20 @@ def sign_up(
 
     _reject_if_already_playing(db, game, season, player)
 
+    # Who put them on the list, when it wasn't themselves — recorded the
+    # same way the batch signup does. Without it this endpoint left the
+    # column null, so the money screen couldn't say who to collect from
+    # and nothing could tell whose signup it was safe to offer a cancel
+    # for.
+    brought_by = None if player.id == current_player.id else current_player.id
+
     if _has_open_slot(db, game, season):
-        drop_in = DropInRow(player_id=player.id, game_id=game.id, signed_up_at=_now())
+        drop_in = DropInRow(
+            player_id=player.id,
+            game_id=game.id,
+            signed_up_at=_now(),
+            brought_by_player_id=brought_by,
+        )
         db.add(drop_in)
         _record_drop_in_charge(db, drop_in, season, reverse=False)
         db.commit()
@@ -2484,7 +2553,7 @@ def cancel_drop_in(
     game = _get_game_or_404(db, drop_in.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
-    _require_self_or_organizer(db, season.club_id, current_player, drop_in.player_id)
+    _require_may_cancel_drop_in(db, drop_in, season, current_player)
     _require_within_change_deadline(db, game, season, current_player)
 
     drop_in.cancelled_at = _now()
