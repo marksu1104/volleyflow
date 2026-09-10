@@ -144,6 +144,67 @@ def test_cancelling_an_arranged_substitute_returns_them_to_their_place_in_the_qu
     assert first["status"] == "waitlisted"
 
 
+def test_replacing_a_substitute_returns_the_replaced_one_to_the_queue(
+    client: TestClient,
+) -> None:
+    # Reported as "換來換去候補會不見". Cancelling a substitute gave the
+    # queue place back; replacing one with somebody else did not, and
+    # the person replaced was deleted from the game.
+    season = start_season(client, member_names=["Alice"], capacity=1)
+    game_id = season["games"][0]["id"]
+    first = client.post(
+        "/drop-ins", json={"player_name": "第一位", "game_id": game_id}
+    ).json()
+    second = client.post(
+        "/drop-ins", json={"player_name": "第二位", "game_id": game_id}
+    ).json()
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    client.put(f"/absences/{absence['id']}/substitute", json={"player_name": "第一位"})
+
+    client.put(f"/absences/{absence['id']}/substitute", json={"player_name": "第二位"})
+
+    game = _game(client, season)
+    assert [d["player_name"] for d in game["confirmed_drop_ins"]] == ["第二位"]
+    assert [w["player_name"] for w in game["waitlist_entries"]] == ["第一位"], (
+        "the one replaced goes back to waiting, not away"
+    )
+    assert first["status"] == "waitlisted" and second["status"] == "waitlisted"
+
+
+def test_swapping_substitutes_repeatedly_keeps_everyone_accounted_for(
+    client: TestClient,
+) -> None:
+    # The exact thing that was being done by hand: cycle the substitute
+    # through every queued person in turn. Nobody may fall out along the
+    # way, and the money must come back to zero for everyone not playing.
+    season = start_season(client, member_names=["Alice"], capacity=1)
+    game_id = season["games"][0]["id"]
+    names = ["甲", "乙", "丙"]
+    queued = {
+        n: client.post("/drop-ins", json={"player_name": n, "game_id": game_id}).json()
+        for n in names
+    }
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+
+    for n in names + ["甲", "丙"]:
+        client.put(f"/absences/{absence['id']}/substitute", json={"player_name": n})
+
+    game = _game(client, season)
+    playing = [d["player_name"] for d in game["confirmed_drop_ins"]]
+    waiting = [w["player_name"] for w in game["waitlist_entries"]]
+    assert playing == ["丙"]
+    assert set(waiting) == {"甲", "乙"}, "everybody is still somewhere"
+    for n in ["甲", "乙"]:
+        ledger = client.get(
+            f"/clubs/{season['club_id']}/players/{queued[n]['player_id']}/ledger"
+        ).json()
+        assert ledger["balance"] == "0", f"{n} is not playing and owes nothing"
+
+
 def test_a_drop_in_who_cancels_themselves_does_not_rejoin_the_queue(
     client: TestClient,
 ) -> None:

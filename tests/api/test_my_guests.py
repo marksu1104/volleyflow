@@ -82,8 +82,13 @@ def test_typing_the_same_name_twice_makes_two_different_people(
         f"/clubs/{season['club_id']}/my-guests", headers=auth_headers(host["token"])
     ).json()
 
-    assert len(guests) == 2, "two rows, one name — this is why picking matters"
-    assert {g["name"] for g in guests} == {"阿哲"}
+    # Two people exist — that is what typing a name does — but the
+    # picker shows one row, carrying the most recent of them. Picking it
+    # pulls the next week onto that one, so the duplicates stop
+    # multiplying instead of filling the list with identical entries.
+    assert len(guests) == 1
+    assert guests[0]["name"] == "阿哲"
+    assert guests[0]["times"] == 2
 
 
 def test_picking_the_same_person_again_keeps_them_one_person(

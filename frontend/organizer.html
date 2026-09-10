@@ -356,7 +356,8 @@
       clubMembers,
       myGuests,
       viewerName: myName,
-      onAssignSubstitute: (absenceId, name, gender) => assignSubstitute(absenceId, name, gender),
+      onAssignSubstitute: (absenceId, name, gender, target) =>
+        assignSubstitute(absenceId, name, gender, target),
       onLeaveWaitlist: (entryId, btn) => leaveWaitlistFor(entryId, btn),
       // All three arguments: the third says who steps out to make room,
       // and an arrow that forwarded only two silently dropped it — the
@@ -396,7 +397,8 @@
   });
   document.querySelector(".gsheet-close").addEventListener("click", closeGameSheet);
 
-  async function assignSubstitute(absenceId, name, gender) {
+  async function assignSubstitute(absenceId, name, gender, target) {
+    return whileBusy(target, async () => {
     try {
       // See member.html: the id has to be turned into a name before the
       // reload takes that person off the roster.
@@ -414,6 +416,7 @@
     } catch (e) {
       toast("設定代打失敗：" + e.message);
     }
+    });
   }
 
   // Every change on this screen used to wait out a write and a reload
@@ -600,11 +603,7 @@
         replacing_drop_in_id: replacing ? replacing.id : null,
       });
     try {
-      if (target && target.tagName === "BUTTON") {
-        await withButtonFeedback(target, "遞補中...", send);
-      } else {
-        await send();
-      }
+      await whileBusy(target, send);
       toast(
         replacing
           ? `${entry.player_name} 上場，${replacing.player_name} 回到候補`

@@ -203,6 +203,31 @@ def main() -> int:
     )
     print(f"{visitor} joined the club and signed up with a guest")
 
+    # The organizer has brought the same friend a few times, so the
+    # quick-pick list on the signup and substitute sheets has something
+    # in it — otherwise that whole feature is invisible locally until
+    # somebody has played several weeks.
+    #
+    # A member takes leave first on each of those nights, because the
+    # roster fills the court exactly: without a gap the friend lands on
+    # the waitlist, and a queue place carries no "who brought them", so
+    # the quick-pick list stayed empty. Which is also how it happens for
+    # real — somebody can't make it, somebody else brings a friend.
+    for game, absentee in zip(games[3:6], ["Danny", "Steven", "Taco"], strict=True):
+        call(
+            "POST",
+            "/absences",
+            ORGANIZER,
+            {"player_name": absentee, "game_id": game["id"]},
+        )
+        call(
+            "POST",
+            f"/games/{game['id']}/drop-ins",
+            ORGANIZER,
+            {"people": [{"player_name": "老王", "gender": "male"}]},
+        )
+    print(f"{ORGANIZER} has brought 老王 three times — quick-pick has entries")
+
     # The forecast was wrong for one night: turn it off and watch every
     # member's charge get corrected by an adjustment entry.
     call(

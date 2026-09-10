@@ -307,12 +307,23 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   z-index: 50; animation: fadeIn .15s ease both;
 }
 .gsheet-backdrop[hidden] { display: none; }
+/* A sheet is as tall as it needs to be, and no taller — but a short
+   one still starts where a tall one starts, rather than hugging the
+   bottom edge of the phone. A game with three names used to sit in the
+   last inch of the screen with everything above it empty, which reads
+   as the content having fallen down there. min-height gives it a
+   floor; the flex column keeps its own content at the top of that. */
 .gsheet {
   background: var(--surface); width: 100%; max-width: 560px;
-  max-height: 86vh; overflow-y: auto; border-radius: 16px 16px 0 0;
+  min-height: 46vh; max-height: 86vh; overflow-y: auto;
+  border-radius: 16px 16px 0 0;
   padding: 18px 16px 24px; position: relative;
+  display: flex; flex-direction: column; align-items: stretch;
   animation: slideUp .2s ease both;
 }
+/* Nothing inside stretches to fill the leftover space: the content sits
+   at the top and the empty room is below it, where it belongs. */
+.gsheet > * { flex: none; }
 .gsheet h3 { margin: 0 0 12px; font-size: .95rem; }
 .gsheet-close {
   position: absolute; top: 10px; right: 12px; width: 30px; height: 30px;
@@ -954,10 +965,15 @@ textarea {
 /* Toasts — see shared.js toast(). Fixed to the bottom because that is
    the half of a phone a thumb already covers, and above everything so a
    failure raised from inside a sheet is still readable. */
+/* Messages arrive at the top, not over the bottom of the screen.
+   Bottom is where every sheet puts its list and its confirm button, so
+   a toast landed squarely on the names being read and on the control
+   about to be pressed — reported as 擋住名單，很礙眼. Above everything
+   (z-index over the sheets) so it is never itself hidden. */
 .toasts {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  position: fixed; left: 0; right: 0; top: 0; z-index: 80;
   display: flex; flex-direction: column; align-items: center; gap: 8px;
-  padding: 0 16px 22px; pointer-events: none;
+  padding: 12px 16px 0; pointer-events: none;
 }
 .toast {
   max-width: 460px; width: 100%; padding: 12px 15px; border-radius: 12px;
@@ -965,8 +981,8 @@ textarea {
   box-shadow: 0 6px 24px rgba(0, 0, 0, .28); animation: toastIn .18s ease-out;
 }
 .toast.good { background: var(--good); color: var(--surface); }
-.toast.out { opacity: 0; transform: translateY(6px); transition: opacity .2s, transform .2s; }
-@keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.toast.out { opacity: 0; transform: translateY(-6px); transition: opacity .2s, transform .2s; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 .meta-pill.ac { background: var(--warn-soft); color: var(--warn); font-weight: 700; }
 
 /* ---- a game's air conditioning ----
@@ -1036,18 +1052,37 @@ textarea {
 }
 .picker-manual select { flex: 0 0 92px; }
 
-/* Friends brought before, as chips under an empty signup row. Picking
-   one sends their id, which is what keeps a regular one person instead
-   of a new row every week — see quickPicks. */
-.su-recent { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px 26px; }
-.su-recent-label { font-size: .7rem; color: var(--ink-faint); }
-.su-recent-pick {
-  border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
-  border-radius: 999px; padding: 7px 11px; font-size: .8rem; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 5px; min-height: 32px;
-  font-family: var(--font-cjk);
+/* The signup list: one row per person, add through the shared picker. */
+.su-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.su-add {
+  width: 100%; margin-top: 8px; padding: 11px; border: 1px dashed var(--rule-strong);
+  border-radius: 10px; background: var(--surface); color: var(--accent);
+  font-size: .88rem; font-weight: 700; cursor: pointer; font-family: var(--font-cjk);
 }
-.su-recent-times {
-  font-size: .68rem; color: var(--ink-faint); background: var(--surface-2);
-  border-radius: 999px; padding: 1px 6px; font-variant-numeric: tabular-nums;
+.su-drop {
+  border: none; background: none; color: var(--ink-faint); cursor: pointer;
+  /* 32px so a thumb can hit it; the glyph stays small. */
+  width: 32px; height: 32px; border-radius: 50%; font-size: .9rem; flex: none;
+}
+.su-drop:hover { background: var(--bad-soft); color: var(--bad); }
+
+/* A control waiting on the network. The label stays — it is what tells
+   you which button you pressed — and dims, with a spinner beside it.
+   Swapping the words out for 處理中… removed that information at the
+   moment it was most wanted. */
+.is-busy { position: relative; pointer-events: none; }
+.is-busy > * { opacity: .35; }
+.is-busy::after {
+  content: ""; position: absolute; top: 50%; left: 50%;
+  width: 16px; height: 16px; margin: -8px 0 0 -8px;
+  border: 2px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: spin .6s linear infinite; opacity: .9;
+}
+/* A button's text is a bare text node, not an element, so the rule
+   above cannot dim it — fade the whole control and let the spinner sit
+   over it instead. */
+button.is-busy { color: transparent; }
+button.is-busy::after { color: var(--ink-soft); border-color: currentColor; border-right-color: transparent; }
+@media (prefers-reduced-motion: reduce) {
+  .is-busy::after { animation-duration: 1.6s; }
 }

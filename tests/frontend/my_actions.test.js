@@ -167,17 +167,27 @@ test("a substitute's name is escaped — it was typed by a person", () => {
   assert.doesNotMatch(buildMyActionHtml(season, game), /<img src=x/);
 });
 
-test("the button says who the signup is for", () => {
-  // A fixed member is already on the sheet, so the panel is for the
-  // people they're bringing — calling that 報名 reads as signing
-  // themselves up a second time.
+test("the signup button says whether there is still room", () => {
+  // One label whether you are on the roster or not — the sheet is where
+  // you say who it is for, and "代人報名候補" said the same thing twice
+  // while naming neither half plainly. What the button does have to
+  // carry is whether this signs somebody up or queues them.
   const onRoster = fixture();
   as("蘇慬");
-  assert.match(buildMyActionHtml(onRoster.season, onRoster.game), /代人報名/);
+  assert.match(buildMyActionHtml(onRoster.season, onRoster.game), /＋ 報名/);
+  assert.doesNotMatch(buildMyActionHtml(onRoster.season, onRoster.game), /代人/);
 
   const guest = fixture();
   as("Ricky"); // not on the roster
   assert.match(buildMyActionHtml(guest.season, guest.game), /＋ 報名/);
+});
+
+test("a full game offers the queue, not a place", () => {
+  const { season, game } = fixture();
+  season.capacity = 2; // members-minus-absences-plus-drop-ins already exceeds it
+  as("蘇慬");
+
+  assert.match(buildMyActionHtml(season, game), /報名候補/);
 });
 
 test("every control in the row is the same kind of button", () => {
