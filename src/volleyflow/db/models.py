@@ -266,6 +266,21 @@ class DropInRow(Base):
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     signed_up_at: Mapped[datetime]
     cancelled_at: Mapped[datetime | None] = mapped_column(default=None)
+    from_waitlist_at: Mapped[datetime | None] = mapped_column(default=None)
+    """When this person joined the queue, for a signup that came out of
+    it — by automatic promotion, or by being named as somebody's 代打
+    while waiting.
+
+    They gave up a place in the queue to take this slot, so if the slot
+    is taken back off them they are owed that place back, at the time
+    they originally joined. Without it, picking the third person in the
+    queue as your substitute and then changing your mind deleted them
+    from the game entirely.
+
+    Null for somebody who was never in the queue — typed in by name, or
+    signed up straight into an open slot. Cancelling their signup must
+    not put them in a queue they never joined.
+    """
     absorbed_at: Mapped[datetime | None] = mapped_column(default=None)
     """Set when this drop-in was cancelled *by the system* because the
     player became a fixed member of the season, not by the player

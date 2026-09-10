@@ -756,7 +756,12 @@ def _promote_entry(db: Session, entry: WaitlistEntryRow) -> DropInRow:
     # they were — stamping "now" instead sent somebody who had waited
     # longest to the back of the line.
     drop_in = DropInRow(
-        player_id=entry.player_id, game_id=game_id, signed_up_at=entry.queued_at
+        player_id=entry.player_id,
+        game_id=game_id,
+        signed_up_at=entry.queued_at,
+        # Where they were in the queue, kept so the place can be given
+        # back if this slot is taken off them again.
+        from_waitlist_at=entry.queued_at,
     )
     db.add(drop_in)
     db.delete(entry)
@@ -2379,12 +2384,21 @@ def set_substitute(
 
     # A queued person named as the substitute leaves the queue: they are
     # on the court now. Without this they appeared in both lists at once,
-    # counted once and waiting once — reported from real use.
-    db.query(WaitlistEntryRow).filter(
-        WaitlistEntryRow.player_id == player.id,
-        WaitlistEntryRow.game_id == game.id,
-    ).delete(synchronize_session=False)
-    db.flush()
+    # counted once and waiting once — reported from real use. The place
+    # they gave up is remembered on the signup, so cancelling the
+    # arrangement can hand it back rather than deleting them.
+    queued = (
+        db.query(WaitlistEntryRow)
+        .filter(
+            WaitlistEntryRow.player_id == player.id,
+            WaitlistEntryRow.game_id == game.id,
+        )
+        .first()
+    )
+    came_from_queue_at = queued.queued_at if queued is not None else None
+    if queued is not None:
+        db.delete(queued)
+        db.flush()
 
     displaced_player_id = _make_room_for_substitute(db, game, season)
 
@@ -2393,6 +2407,7 @@ def set_substitute(
         game_id=game.id,
         signed_up_at=_now(),
         covers_absence_id=absence_id,
+        from_waitlist_at=came_from_queue_at,
         # The member whose slot this is, not whoever tapped the button.
         # A 代打 is usually a friend with no account who will never open
         # the app or pay through it — the member who arranged them hands
@@ -2716,6 +2731,37 @@ def cancel_drop_in(
 
     drop_in.cancelled_at = _now()
     _record_drop_in_charge(db, drop_in, season, reverse=True)
+
+    # A place in the queue is given up, not lost. Somebody taken off the
+    # court by another person — a member cancelling the 代打 they
+    # arranged, the organizer clearing a row — never said they couldn't
+    # come, so if they had a place in the queue they get it back, at the
+    # position they held. Naming the third person in the queue as your
+    # substitute and then changing your mind used to delete them from
+    # the game entirely.
+    #
+    # Only somebody who actually held one: a substitute typed in by name
+    # was never waiting, and putting them into a queue they never joined
+    # would resurrect them into the next open slot. That is what
+    # from_waitlist_at records, because it cannot be inferred.
+    #
+    # Cancelling your own signup is a withdrawal and never re-queues you.
+    #
+    # Re-queued *before* the promotion below, not after, so the freed
+    # slot still goes to whoever is genuinely first. If that turns out
+    # to be this same person, they simply keep playing — as an ordinary
+    # 臨打 rather than somebody's arranged substitute, which is exactly
+    # what they now are.
+    if current_player.id != drop_in.player_id and drop_in.from_waitlist_at is not None:
+        db.add(
+            WaitlistEntryRow(
+                player_id=drop_in.player_id,
+                game_id=drop_in.game_id,
+                queued_at=drop_in.from_waitlist_at,
+            )
+        )
+        db.flush()
+
     promoted = _promote_from_waitlist(db, drop_in.game_id)
 
     db.commit()

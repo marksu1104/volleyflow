@@ -1022,7 +1022,12 @@ textarea {
 }
 .picker .sub-pick { display: flex; flex-direction: column; gap: 4px; }
 .picker-manual { display: flex; gap: 8px; margin: 4px 0 2px; }
-.picker-manual input { flex: 1; }
+/* min-width:0 is the whole fix. A text input carries a default
+   intrinsic width (roughly 20 characters), and a flex item will not
+   shrink below its own min-content size — so `flex: 1` held the input
+   at that width and pushed the 性別 select off the right edge of the
+   sheet. Seen on a phone; the visual check now measures for it. */
+.picker-manual input { flex: 1 1 auto; min-width: 0; }
 /* 16px, or iOS zooms the page the moment one is focused. */
 .picker-manual input, .picker-manual select {
   font-size: 1rem; padding: 10px 12px; border: 1px solid var(--rule);
@@ -1030,3 +1035,19 @@ textarea {
   font-family: var(--font-cjk);
 }
 .picker-manual select { flex: 0 0 92px; }
+
+/* Friends brought before, as chips under an empty signup row. Picking
+   one sends their id, which is what keeps a regular one person instead
+   of a new row every week — see quickPicks. */
+.su-recent { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px 26px; }
+.su-recent-label { font-size: .7rem; color: var(--ink-faint); }
+.su-recent-pick {
+  border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+  border-radius: 999px; padding: 7px 11px; font-size: .8rem; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; min-height: 32px;
+  font-family: var(--font-cjk);
+}
+.su-recent-times {
+  font-size: .68rem; color: var(--ink-faint); background: var(--surface-2);
+  border-radius: 999px; padding: 1px 6px; font-variant-numeric: tabular-nums;
+}
