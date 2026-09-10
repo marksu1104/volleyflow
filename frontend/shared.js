@@ -442,32 +442,71 @@ function emptyPanel(text) {
   return `<div class="empty gd-empty">${text}</div>`;
 }
 
-let _actionInFlight = false;
+let _requestQueue = Promise.resolve();
 
-/** Whether a change is still on its way to the server.
+/** Sends one change at a time, in the order the taps happened — without
+ * making the screen wait for any of it.
  *
- * Taps arrive faster than a round trip, and every change here ends in a
- * reload that redraws the buttons — so a second tap lands on a freshly
- * drawn control describing state the server has already moved past.
- * Pressing 請假 and 取消請假 quickly enough got "這場已請假" back for a
- * game that showed no absence, with the two requests interleaved and
- * each one's id stale by the time it arrived.
+ * The first attempt at this locked the buttons until each change and its
+ * reload came back. That fixed the interleaving and made the app feel
+ * broken: the screen had already updated optimistically, so tapping 請假
+ * and then 取消請假 looked like it should work and simply did nothing.
  *
- * One change at a time. The extra taps are dropped rather than queued:
- * somebody double-tapping 請假 means it once, and replaying the queue
- * would undo what they just did.
+ * Blocking the person was the wrong half to block. What must not
+ * interleave is the requests, so they queue here and the screen stays
+ * immediate. A change that needs an id the previous request is still
+ * fetching resolves it inside its own turn of the queue, by which time
+ * the answer has arrived — see recordAbsence/cancelAbsence.
+ *
+ * A failure doesn't stall the queue: the next change still goes, and the
+ * one that failed rolls its own optimistic update back.
  */
-function actionInFlight() {
-  return _actionInFlight;
+function enqueueRequest(work) {
+  const run = () => work();
+  const next = _requestQueue.then(run, run);
+  _requestQueue = next.then(
+    () => {},
+    () => {}
+  );
+  return next;
 }
 
-/** Marks the app busy until this change and its reload have finished. */
-function runExclusive(result) {
-  if (!result || typeof result.then !== "function") return result;
-  _actionInFlight = true;
-  return result.finally(() => {
-    _actionInFlight = false;
-  });
+/** Runs a change against the screen first and the server second.
+ *
+ * `mutateLocally` edits the page's own copy so the tap is visible in the
+ * same frame; `request` is queued behind any change already in flight;
+ * `reconcile` folds the server's ids into what is already drawn, so the
+ * refresh afterwards finds nothing to redraw. On failure the snapshot
+ * goes back and the reason is shown.
+ *
+ * Shared, because the organizer's screen had none of this: every action
+ * there sat through a write and a reload before anything moved, which is
+ * the lag reported as 卡頓.
+ */
+function optimisticRunner({ getState, setState, repaint }) {
+  return async function optimistically(mutateLocally, request, failureMessage, reconcile) {
+    const snapshot = JSON.parse(JSON.stringify(getState()));
+    mutateLocally(getState());
+    repaint();
+    try {
+      const result = await enqueueRequest(request);
+      if (reconcile) {
+        reconcile(result, getState());
+        // The screen was painted from the placeholder id, so its
+        // handlers still hold it even though the data no longer does.
+        // Without this repaint the refresh below finds nothing changed
+        // and skips redrawing, leaving controls wired to an id that
+        // means "still saving".
+        repaint();
+      }
+      return result;
+    } catch (e) {
+      setState(snapshot);
+      repaint();
+      toast(failureMessage + e.message);
+      return null;
+    }
+  };
 }
 
 /** Shows one of a game sheet's three groups. Used by the tab strip and
@@ -602,8 +641,11 @@ function renderGameDetail(container, season, game, options) {
     });
   }
   for (const d of game.confirmed_drop_ins) {
-    // A substitute is playing *in someone's place*, which is the thing
-    // you want to see next to their name — not filed away elsewhere.
+    // 代打 and 臨打 are different things and no longer share a label.
+    // 代打 is somebody a member personally arranged to stand in for
+    // them; 臨打 signed themselves up and stands in for nobody, even
+    // when their fee is what refunds an absence. Showing the second as
+    // the first told members that a stranger was "their" substitute.
     attendingRows.push({
       person: d,
       name: d.player_name,
@@ -611,9 +653,14 @@ function renderGameDetail(container, season, game, options) {
       note: d.covering
         ? `<span class="att-note sub">代 ${escapeHtml(d.covering)}</span>`
         : '<span class="att-note">臨打</span>',
-      controls: opts.onRemoveDropIn
-        ? `<button type="button" class="mini-action danger" data-remove-drop-in="${d.id}">移除</button>`
-        : "",
+      // Only offered for signups this caller is entitled to undo — their
+      // own, or a guest they brought — unless this is the organizer's
+      // screen, which manages everybody's. `canRemoveDropIn` is how the
+      // two pages differ; the server checks the same thing again.
+      controls:
+        opts.onRemoveDropIn && (opts.canRemoveDropIn || (() => true))(d)
+          ? `<button type="button" class="mini-action danger" data-remove-drop-in="${d.id}">移除</button>`
+          : "",
     });
   }
   const attendingHtml = attendingRows
@@ -651,9 +698,16 @@ function renderGameDetail(container, season, game, options) {
         // moot on the list of people who are already absent, and it was
         // the content that pushed this row past the width of a phone.
         guest: false,
+        // Three different states, and they used to be two. A member who
+        // arranged somebody sees that person's name; one whose slot
+        // happens to be filled by a 臨打 is told the money comes back
+        // without being told a stranger is "their" 代打; an empty slot
+        // is a gap.
         note: absence.covered_by
           ? `<span class="att-note sub">${escapeHtml(absence.covered_by)} 代打</span>`
-          : '<span class="att-note gap">缺額</span>',
+          : absence.refunded
+            ? '<span class="att-note">已有人補上</span>'
+            : '<span class="att-note gap">缺額</span>',
         controls,
       }) + (offerAssign ? substituteForm(absence) : "")
     );
@@ -820,12 +874,6 @@ function renderGameDetail(container, season, game, options) {
       showGameDetailTab(container, tab.dataset.gdTab);
       return;
     }
-    // Everything below this line changes something on the server. While
-    // one of those is still in flight the buttons on screen describe
-    // state that has already moved, so a second tap acts on a stale id —
-    // see actionInFlight. Opening a picker above is local and safe.
-    if (actionInFlight()) return;
-
     const toggleSub = e.target.closest("[data-toggle-sub]");
     if (toggleSub) {
       const form = container.querySelector(`[data-sub-form="${toggleSub.dataset.toggleSub}"]`);
@@ -854,29 +902,27 @@ function renderGameDetail(container, season, game, options) {
         toast("請先選一個人，或直接輸入名字");
         return;
       }
-      runExclusive(
-        onAssignSubstitute(Number(id), name, (genderSelect && genderSelect.value) || null)
-      );
+      onAssignSubstitute(Number(id), name, (genderSelect && genderSelect.value) || null);
       return;
     }
     const cancelSub = e.target.closest("[data-cancel-sub]");
     if (cancelSub && onCancelSubstitute) {
-      runExclusive(onCancelSubstitute(Number(cancelSub.dataset.cancelSub), cancelSub));
+      onCancelSubstitute(Number(cancelSub.dataset.cancelSub), cancelSub);
       return;
     }
     const markAbsent = e.target.closest("[data-mark-absent]");
     if (markAbsent && opts.onRecordAbsence) {
-      runExclusive(opts.onRecordAbsence(markAbsent.dataset.markAbsent, markAbsent));
+      opts.onRecordAbsence(markAbsent.dataset.markAbsent, markAbsent);
       return;
     }
     const undoAbsence = e.target.closest("[data-undo-absence]");
     if (undoAbsence && opts.onCancelAbsence) {
-      runExclusive(opts.onCancelAbsence(Number(undoAbsence.dataset.undoAbsence), undoAbsence));
+      opts.onCancelAbsence(Number(undoAbsence.dataset.undoAbsence), undoAbsence);
       return;
     }
     const removeDropIn = e.target.closest("[data-remove-drop-in]");
     if (removeDropIn && opts.onRemoveDropIn) {
-      runExclusive(opts.onRemoveDropIn(Number(removeDropIn.dataset.removeDropIn), removeDropIn));
+      opts.onRemoveDropIn(Number(removeDropIn.dataset.removeDropIn), removeDropIn);
       return;
     }
     // Separate hook, not a shared one: a queue place lives in its own
@@ -886,12 +932,10 @@ function renderGameDetail(container, season, game, options) {
     // a name, rather than reading a numbered list out of a dialog box.
     const swapOut = e.target.closest("[data-swap-out]");
     if (swapOut && opts.onPromoteFromWaitlist) {
-      runExclusive(
-        opts.onPromoteFromWaitlist(
-          Number(swapOut.dataset.swapIn),
-          swapOut,
-          Number(swapOut.dataset.swapOut)
-        )
+      opts.onPromoteFromWaitlist(
+        Number(swapOut.dataset.swapIn),
+        swapOut,
+        Number(swapOut.dataset.swapOut)
       );
       return;
     }
@@ -905,14 +949,12 @@ function renderGameDetail(container, season, game, options) {
         picker.hidden = !picker.hidden;
         return;
       }
-      runExclusive(opts.onPromoteFromWaitlist(id, promoteWaitlist, null));
+      opts.onPromoteFromWaitlist(id, promoteWaitlist, null);
       return;
     }
     const removeWaitlist = e.target.closest("[data-remove-waitlist]");
     if (removeWaitlist && opts.onLeaveWaitlist) {
-      runExclusive(
-        opts.onLeaveWaitlist(Number(removeWaitlist.dataset.removeWaitlist), removeWaitlist)
-      );
+      opts.onLeaveWaitlist(Number(removeWaitlist.dataset.removeWaitlist), removeWaitlist);
       return;
     }
     const addDropIn = e.target.closest("[data-add-dropin]");
@@ -928,7 +970,7 @@ function renderGameDetail(container, season, game, options) {
         if (nameInput && nameInput.focus) nameInput.focus();
         return;
       }
-      runExclusive(opts.onAddDropIn(name, (genderSelect && genderSelect.value) || null, addDropIn));
+      opts.onAddDropIn(name, (genderSelect && genderSelect.value) || null, addDropIn);
     }
   };
 }

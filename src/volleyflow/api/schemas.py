@@ -377,8 +377,15 @@ class AbsenceDetailOut(BaseModel):
     """Pass this to /absences/{id}/cancel or /absences/{id}/substitute."""
     player_name: str
     covered_by: str | None
-    """The drop-in player_name filling this slot, if any — FIFO by
-    signup order, same rule as the refund calculation in settlement.py."""
+    """The 代打 this member personally arranged, by name — set only when
+    somebody used /absences/{id}/substitute. Never filled in by the FIFO
+    match: that is a billing fact, not a person's arrangement, and
+    presenting it as one told a member that a stranger who happened to
+    sign up was "their" substitute. See `refunded`."""
+    refunded: bool = False
+    """Whether this absence gets its share back — true when anybody is
+    filling the slot, whether personally arranged or matched FIFO by
+    signup order. The money rule, unchanged; see settlement.py."""
 
 
 class DropInDetailOut(BaseModel):
@@ -387,8 +394,15 @@ class DropInDetailOut(BaseModel):
     player_name: str
     gender: Gender | None = None
     covering: str | None
-    """The absent member's name this drop-in is filling in for, or None
-    if they're just filling an already-open slot."""
+    """The absent member this drop-in was personally named to stand in
+    for — only for an explicit 代打. Somebody who signed themselves up is
+    a 臨打 and covers nobody in particular, even when their fee is what
+    refunds an absence."""
+    signed_up_by_me: bool = False
+    """Whether the caller is the one who put this person on the list —
+    themselves, or a guest they brought. What the screen uses to decide
+    whether to offer them a cancel button; the server checks the same
+    thing again before allowing it."""
 
 
 class GameDetailOut(BaseModel):

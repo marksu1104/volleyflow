@@ -354,8 +354,16 @@ def test_get_season_reflects_absences_signups_and_waitlist(
     response = client.get(f"/seasons/{season['id']}")
 
     game = next(g for g in response.json()["games"] if g["id"] == game_id)
+    # Bob signed himself up; he is not Alice's 代打 and never agreed to
+    # be. Her absence is refunded all the same, because somebody is in
+    # the slot — that is the money rule, reported separately.
     assert game["absences"] == [
-        {"id": alice_absence["id"], "player_name": "Alice", "covered_by": "Bob"}
+        {
+            "id": alice_absence["id"],
+            "player_name": "Alice",
+            "covered_by": None,
+            "refunded": True,
+        }
     ]
     assert game["confirmed_drop_ins"] == [
         {
@@ -363,7 +371,10 @@ def test_get_season_reflects_absences_signups_and_waitlist(
             "player_id": bob_signup.json()["player_id"],
             "player_name": "Bob",
             "gender": None,
-            "covering": "Alice",
+            # He is a 臨打, not anybody's 代打 — see the absence above.
+            "covering": None,
+            # The organizer signed him up in this test.
+            "signed_up_by_me": True,
         }
     ]
     assert game["waitlist_entries"] == [
@@ -525,7 +536,12 @@ def test_set_substitute_replaces_an_existing_one(client: TestClient) -> None:
     body = client.get(f"/seasons/{season['id']}").json()
     game = next(g for g in body["games"] if g["id"] == game_id)
     assert game["absences"] == [
-        {"id": absence["id"], "player_name": "Alice", "covered_by": "Eve"}
+        {
+            "id": absence["id"],
+            "player_name": "Alice",
+            "covered_by": "Eve",
+            "refunded": True,
+        }
     ]
 
 
@@ -659,7 +675,12 @@ def test_cancelling_a_substitute_uncovers_the_absence_and_refunds_it(
     body = client.get(f"/seasons/{season['id']}").json()
     game = next(g for g in body["games"] if g["id"] == game_id)
     assert game["absences"] == [
-        {"id": absence["id"], "player_name": "Alice", "covered_by": None}
+        {
+            "id": absence["id"],
+            "player_name": "Alice",
+            "covered_by": None,
+            "refunded": False,
+        }
     ]
     dave_ledger = client.get(
         f"/clubs/{season['club_id']}/players/{dave['player_id']}/ledger"
