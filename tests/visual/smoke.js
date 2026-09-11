@@ -151,10 +151,15 @@ async function auditPage(browser, path) {
   // organizer, and 移除 twice on the same row. Those are worth reading
   // but they are not failures, so they are listed without failing the
   // run. A 5xx or a JS exception always is.
-  page.on("response", (r) => {
+  page.on("response", async (r) => {
     if (!r.url().includes(":8000") || r.status() < 400) return;
     const line = `${r.status()} ${r.request().method()} ${r.url().replace(/^https?:\/\/[^/]+/, "")}`;
-    (r.status() >= 500 ? errors : notes).push(line);
+    if (r.status() >= 500) {
+      const body = await r.text().catch(() => "?");
+      errors.push(line + " -- " + body.slice(0, 300));
+    } else {
+      notes.push(line);
+    }
   });
   const dialogs = { count: 0, requests: 0 };
   page.on("dialog", (d) => {

@@ -118,6 +118,19 @@ h2 { font-size: .9rem; margin: 28px 0 10px; color: var(--ink-soft); font-weight:
   text-transform: uppercase; letter-spacing: .04em;
 }
 .section-label:first-child { margin-top: 0; }
+/* A section-label that also opens and closes what's under it — the
+   roster page's "其他球隊成員", collapsed by default because 本季固定成員
+   is what the organizer actually came here to read, and a long tail of
+   people not on this season used to sit above it. Same look as a plain
+   section-label; only the pointer and the chevron say it does anything. */
+.collapse-toggle {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: none; padding: 0; cursor: pointer;
+  font: inherit; text-align: left; font-family: var(--font-cjk);
+}
+.collapse-toggle .chev { transition: transform .15s ease; font-size: .7em; }
+.collapse-toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.collapse-count { color: var(--ink-faint); font-weight: 500; text-transform: none; letter-spacing: 0; }
 .hint { font-size: .76rem; color: var(--ink-faint); margin-top: 6px; line-height: 1.5; }
 
 /* buttons — instant-feeling press state everywhere */
@@ -375,28 +388,16 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .gdetail-mystatus.waitlisted { background: var(--warn-soft); color: var(--warn); }
 .gdetail-locked { font-size: .78rem; color: var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 6px 10px; margin-top: 8px; }
 
-/* The organizer's quick-add, kept as an inline row rather than moved
-   into the signup sheet: on the day they add people one at a time as
-   they walk in, and a modal per person is slower than a field that
-   stays put. Restyled to the same vocabulary as everything else — it
-   used to carry a lone green button that matched nothing on the page. */
-.add-dropin {
-  display: flex; gap: 6px; margin: 0 0 12px; padding: 10px; border-radius: 11px;
-  background: var(--surface-2); flex-wrap: wrap;
-}
-.add-dropin input {
-  flex: 1 1 130px; min-width: 0; padding: 9px 10px; border: 1px solid var(--rule);
-  border-radius: 9px; background: var(--surface); color: var(--ink); font-family: var(--font-cjk);
-}
-.add-dropin select {
-  flex: 0 0 auto; padding: 9px; border: 1px solid var(--rule); border-radius: 9px;
-  background: var(--surface); color: var(--ink); font-family: var(--font-cjk);
-}
-.add-dropin button {
-  flex: 0 0 auto; border: none; background: var(--accent); color: var(--surface);
-  font-size: .84rem; font-weight: 700; padding: 9px 14px; border-radius: 9px;
-  cursor: pointer; white-space: nowrap; font-family: var(--font-cjk);
-}
+/* The organizer's 新增臨打: a trigger button opening the same shared
+   picker (renderPersonPicker/choosePerson) everything else on this sheet
+   uses, rather than its own bare name field and gender select — the
+   trigger itself borrows .su-add, the signup sheet's own "＋" button.
+   Used to be an inline row kept on the theory that a modal per person is
+   slower on the night than a field that stays put; in practice it was a
+   third, differently-shaped way to type a name on a sheet that already
+   has two proper pickers, and 訪客's own note field costs one tap more
+   than the row it replaced. */
+.add-dropin-picker:empty { display: none; }
 
 /* The attendance list: one numbered line per person who'll be on court,
    so "how many, and who" is answered by looking rather than counting.

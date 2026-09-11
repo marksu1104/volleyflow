@@ -25,3 +25,6 @@ Thumbs.db
 desktop.ini
 tests/visual/shots/
 tests/visual/node_modules/
+
+# scripts/backup_db.py's output — real names and money, never committed.
+backups/

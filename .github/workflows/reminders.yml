@@ -23,9 +23,13 @@ jobs:
         run: uv sync --locked
 
       - name: Send reminders
+        # PRODUCTION_DATABASE_URL, not DATABASE_URL — that secret is the
+        # Neon dev branch (see ci.yml's Postgres-tests step). Pointed at
+        # dev since this workflow was created, so every run "succeeded"
+        # against seed data and no reminder had ever reached a real game.
         run: uv run python -m volleyflow.notify.reminders
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_ORGANIZER_USER_ID: ${{ secrets.LINE_ORGANIZER_USER_ID }}
           LINE_GROUP_ID: ${{ secrets.LINE_GROUP_ID }}

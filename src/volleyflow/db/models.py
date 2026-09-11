@@ -315,6 +315,21 @@ class DropInRow(Base):
 
     Null when somebody signed themselves up, and for every drop-in
     recorded before this column existed."""
+    charged_amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 0), default=None)
+    """What this drop-in was actually charged, so cancelling refunds
+    exactly that — not a share recomputed at cancellation time, which can
+    have moved if the game's air conditioning or the season's capacity
+    changed in between. Before this column, cancelling left a residual
+    balance on somebody no longer connected to the game at all: charged
+    $667 for a cooled night, refunded $572 after the organizer corrected
+    the air conditioning setting, an $95 gap that never balances out.
+    Found by a random sweep (tests/api/test_fuzz.py) rather than by
+    anyone noticing the discrepancy on a real invoice.
+
+    Null for every drop-in recorded before this column existed; those
+    fall back to the old behaviour of recomputing the current share, on
+    the same reasoning as `brought_by_player_id` above.
+    """
 
 
 class WaitlistEntryRow(Base):
