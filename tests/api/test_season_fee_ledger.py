@@ -294,10 +294,20 @@ def test_adding_a_member_cancels_and_refunds_their_drop_ins(
 
 
 def test_adding_a_member_drops_them_off_the_waitlist(client: TestClient) -> None:
-    season = start_season(client, member_names=["Alice"], capacity=1)
+    # Getting here takes a full game and then a slot opening without the
+    # queue being offered it, because a member being added needs room for
+    # them at every game (add_member refuses otherwise — capacity is a
+    # hard limit, CLAUDE.md 2.3). Removing somebody from the roster frees
+    # a slot and deliberately doesn't promote anyone, so that is the gap
+    # this walks through.
+    season = start_season(client, member_names=["Alice", "Carol"], capacity=2)
     game_id = season["games"][0]["id"]
     client.post("/drop-ins", json={"player_name": "Bob", "game_id": game_id})
+    detail = client.get(f"/seasons/{season['id']}").json()
+    assert [w["player_name"] for w in detail["games"][0]["waitlist_entries"]] == ["Bob"]
+    carol = next(m["id"] for m in detail["members"] if m["name"] == "Carol")
 
+    client.delete(f"/seasons/{season['id']}/members/{carol}")
     client.post(f"/seasons/{season['id']}/members", json={"player_name": "Bob"})
 
     game = next(

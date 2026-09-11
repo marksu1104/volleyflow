@@ -19,7 +19,7 @@ from fastapi import (
     Response,
     status,
 )
-from sqlalchemy import case, func
+from sqlalchemy import and_, case, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
@@ -445,8 +445,30 @@ def _has_open_slot(db: Session, game: GameRow, season: SeasonRow) -> bool:
     # is expected again. Counting their cancelled absence made `expected`
     # too low and the game look emptier than it is, so capacity admitted
     # one drop-in too many for every absence that had ever been undone.
+    #
+    # The join is the same mistake in its other form. Taking somebody off
+    # the roster deliberately leaves their absences behind (see
+    # remove_member — settlement only ever walks the current member list,
+    # so they are harmless there), but this sum is not settlement: an
+    # absence with nobody on the roster behind it was subtracting a head
+    # that `member_count` had already stopped counting, so every removal
+    # made the game look one seat emptier forever. A random sweep put
+    # seven people on a court for six that way.
+    #
+    # remove_member now closes those absences at the source, so new ones
+    # can't appear — but rows written before it did are still in the
+    # database, and this is what keeps them from mispricing a live
+    # season. It is also just the right question to ask: how many
+    # *members* are away.
     absences = (
         db.query(AbsenceRow)
+        .join(
+            SeasonMemberRow,
+            and_(
+                SeasonMemberRow.player_id == AbsenceRow.player_id,
+                SeasonMemberRow.season_id == season.id,
+            ),
+        )
         .filter(AbsenceRow.game_id == game.id, AbsenceRow.cancelled_at.is_(None))
         .count()
     )
@@ -457,6 +479,39 @@ def _has_open_slot(db: Session, game: GameRow, season: SeasonRow) -> bool:
     )
     expected = (member_count - absences) + active_drop_ins
     return expected < season.capacity
+
+
+def _is_signed_up(db: Session, game: GameRow, player_id: int) -> bool:
+    """Whether this player already holds a confirmed slot at this game."""
+    return (
+        db.query(DropInRow)
+        .filter(
+            DropInRow.game_id == game.id,
+            DropInRow.player_id == player_id,
+            DropInRow.cancelled_at.is_(None),
+        )
+        .first()
+    ) is not None
+
+
+def _games_with_no_room(db: Session, season: SeasonRow) -> list[GameRow]:
+    """The games where one more expected body wouldn't fit.
+
+    Adding a fixed member adds them to *every* game in the season, so the
+    question "is there room" has to be asked of all of them at once. A
+    random sweep (tests/api/test_fuzz.py) put seven people on a court for
+    six that way: the organizer added a member while a game was already
+    full of drop-ins, and nothing checked. CLAUDE.md 2.3 makes capacity a
+    hard limit that the organizer does not get to exceed either, so this
+    is a refusal rather than a warning.
+    """
+    games = (
+        db.query(GameRow)
+        .filter(GameRow.season_id == season.id, GameRow.status == GameStatus.SCHEDULED)
+        .order_by(GameRow.date)
+        .all()
+    )
+    return [game for game in games if not _has_open_slot(db, game, season)]
 
 
 def _gender(value: str | None) -> Gender | None:
@@ -961,7 +1016,56 @@ def _absorb_drop_ins_into_membership(
     db.flush()
 
 
-def _restore_absorbed_drop_ins(db: Session, season: SeasonRow, player_id: int) -> None:
+def _close_absences_of_former_member(
+    db: Session, season: SeasonRow, player_id: int
+) -> set[int]:
+    """Retires the leave records of somebody taken off the roster.
+
+    Whoever was standing in for them keeps the slot, and deliberately so:
+    removing an absent member drops both a name from the roster and an
+    absence from the count, which leaves expected attendance exactly
+    where it was. Releasing the substitute as well would open a slot that
+    nothing has freed.
+
+    The arrangement is dropped though — `covers_absence_id` is cleared —
+    so they become an ordinary drop-in. They stay on the list, but they
+    are no longer "X's 代打" for an X who has left the season, which is
+    both untrue and the sort of thing the game sheet would print.
+
+    Returns the games they were away from, because the absorbed signups
+    restored next must not put them back into one of those.
+    """
+    game_ids = [
+        row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id)
+    ]
+    if not game_ids:
+        return set()
+
+    absences = (
+        db.query(AbsenceRow)
+        .filter(
+            AbsenceRow.player_id == player_id,
+            AbsenceRow.game_id.in_(game_ids),
+            AbsenceRow.cancelled_at.is_(None),
+        )
+        .all()
+    )
+    if not absences:
+        return set()
+
+    now = _now()
+    for absence in absences:
+        absence.cancelled_at = now
+        db.query(DropInRow).filter(DropInRow.covers_absence_id == absence.id).update(
+            {DropInRow.covers_absence_id: None}, synchronize_session=False
+        )
+    db.flush()
+    return {int(absence.game_id) for absence in absences}
+
+
+def _restore_absorbed_drop_ins(
+    db: Session, season: SeasonRow, player_id: int, away_from: set[int] | None = None
+) -> None:
     """The mirror of _absorb_drop_ins_into_membership: put back the
     signups that were cancelled only because this player joined the
     fixed roster, now that they have left it again.
@@ -971,6 +1075,15 @@ def _restore_absorbed_drop_ins(db: Session, season: SeasonRow, player_id: int) -
     `cancelled_at`, and resurrecting one would put somebody on a roster
     they had deliberately left.
 
+    `away_from` names the games they had taken leave from as a member,
+    and those signups stay cancelled too. The absence is the later and
+    more specific statement: somebody who signed up as a guest, was put
+    on the roster, and then said they can't make that night is not coming
+    to it, whatever happens to their membership afterwards. Restoring it
+    anyway put a seventh person on a six-person court — found by a random
+    sweep, since it needs a signup, a promotion to the roster, an absence
+    and a removal, in that order, to show up at all.
+
     Charged at the current per-game share rather than at whatever was
     refunded: that is what a drop-in for this game costs now, and with
     the roster back to its previous size it is normally the same figure
@@ -978,7 +1091,9 @@ def _restore_absorbed_drop_ins(db: Session, season: SeasonRow, player_id: int) -
     already happened, not admitting somebody new.
     """
     game_ids = [
-        row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id).all()
+        row.id
+        for row in db.query(GameRow).filter(GameRow.season_id == season.id).all()
+        if row.id not in (away_from or set())
     ]
     if not game_ids:
         return
@@ -1384,12 +1499,24 @@ def link_player(
     target.avatar_url = source.avatar_url
     db.flush()
 
+    # Guests they brought come with them. This is the one reference to a
+    # player that the refusal above doesn't cover, and it can't: signing a
+    # friend up is an ordinary thing to have done before the organizer
+    # gets round to linking your account, so refusing over it would block
+    # the normal case. Re-pointed rather than cleared, because the whole
+    # meaning of this endpoint is that the two rows are one person — and
+    # left alone it was a foreign key violation, a 500, and a browser
+    # reporting it as a CORS error because a crash carries no headers.
+    db.query(DropInRow).filter(DropInRow.brought_by_player_id == source.id).update(
+        {DropInRow.brought_by_player_id: target.id}, synchronize_session=False
+    )
     db.query(WaitlistEntryRow).filter(WaitlistEntryRow.player_id == source.id).delete(
         synchronize_session=False
     )
     db.query(ClubMemberRow).filter(ClubMemberRow.player_id == source.id).delete(
         synchronize_session=False
     )
+    db.flush()
     db.delete(source)
     db.commit()
     db.refresh(target)
@@ -1907,6 +2034,48 @@ def add_member(
             status.HTTP_400_BAD_REQUEST, "Already a member of this season"
         )
 
+    # A fixed member holds a slot for the whole season, so the roster can
+    # never be larger than the number of slots — a nineteenth member of an
+    # eighteen-slot season is somebody with nowhere to stand, and under
+    # the capacity-based split (CLAUDE.md 2.4) the season fee assumes
+    # exactly one payer per slot.
+    #
+    # Checked separately from the per-game count below, and it has to be:
+    # an absence is temporary, so a game whose members are mostly away
+    # looks like it has room when it does not. A random sweep walked
+    # straight through that — add a member while four people were away,
+    # then have all four cancel, and seven people were on a court for six.
+    roster_size = (
+        db.query(SeasonMemberRow).filter(SeasonMemberRow.season_id == season.id).count()
+    )
+    if roster_size >= season.capacity:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"This season already has {roster_size} fixed members for "
+            f"{season.capacity} slots. Raise the capacity or take somebody "
+            "off the roster first.",
+        )
+
+    # And every game needs a free slot right now as well, since a drop-in
+    # may be standing in one that the new member would claim. Drop-ins
+    # absorbed into their own membership below don't count — those are
+    # this same player's signups, about to become the membership rather
+    # than sit beside it.
+    full = [
+        game
+        for game in _games_with_no_room(db, season)
+        if not _is_signed_up(db, game, player.id)
+    ]
+    if full:
+        dates = ", ".join(str(game.date) for game in full[:3])
+        more = f" (and {len(full) - 3} more)" if len(full) > 3 else ""
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"No room for another member: {dates}{more} "
+            f"already {season.capacity} on court. Cancel a signup on "
+            "those games, or raise the capacity first.",
+        )
+
     db.add(SeasonMemberRow(season_id=season_id, player_id=player.id))
     db.flush()
     _absorb_drop_ins_into_membership(db, season, player.id)
@@ -1933,9 +2102,21 @@ def remove_member(
     charge is reversed to zero and every remaining member's charge is
     corrected for the new, higher share — see _sync_season_fee_ledger.
 
-    Absences are left alone: they stop counting toward anyone's
-    settlement once removed, since that only ever iterates the current
-    member list. Drop-ins are not left alone, which is the fix for a bug
+    Their outstanding absences are closed. Leaving them open was fine for
+    settlement, which only ever walks the current member list, and wrong
+    everywhere else: "not coming to this game" says nothing about
+    somebody who is not expected at it in the first place. Left live they
+    were counted as a free seat by the capacity check, matched against
+    drop-ins by the refund rule, and listed on the game sheet as away —
+    a ghost of somebody no longer in the season. A random sweep
+    (tests/api/test_fuzz.py) found two of those three.
+
+    Not restored if the person is added back, unlike drop-ins below: a
+    drop-in is a night somebody really played and really owes for, while
+    an absence is a statement about a roster they had left. Re-recording
+    one is two taps for the organizer who just re-added them.
+
+    Drop-ins are not left alone either, which is the fix for a bug
     reported on 2026-09-10 — adding somebody to the roster cancels the
     signups they had already made so the same night isn't billed twice,
     and without putting those back an add-then-remove erased a night
@@ -1956,9 +2137,10 @@ def remove_member(
 
     db.delete(membership)
     db.flush()
+    away_from = _close_absences_of_former_member(db, season, player_id)
     # Before the fee sync, so the restored drop-in charges are already
     # in the ledger when it works out what everyone owes.
-    _restore_absorbed_drop_ins(db, season, player_id)
+    _restore_absorbed_drop_ins(db, season, player_id, away_from)
     _sync_season_fee_ledger(db, season)
     db.commit()
 
@@ -2065,6 +2247,18 @@ def get_season(
     for absence, player in (
         db.query(AbsenceRow, PlayerRow)
         .join(PlayerRow, AbsenceRow.player_id == PlayerRow.id)
+        # Members only. "Away" is a statement about somebody expected
+        # here, so a leave record left behind by a player since taken off
+        # the roster is not one — and printing it listed a name under
+        # 請假 that is not on the roster above it. remove_member closes
+        # these now; this covers the ones written before it did.
+        .join(
+            SeasonMemberRow,
+            and_(
+                SeasonMemberRow.player_id == AbsenceRow.player_id,
+                SeasonMemberRow.season_id == season_row.id,
+            ),
+        )
         .filter(AbsenceRow.game_id.in_(game_ids), AbsenceRow.cancelled_at.is_(None))
         .order_by(AbsenceRow.recorded_at)
         .all()
@@ -2222,11 +2416,17 @@ def get_season(
         # The headline figure a season is described by: what one game
         # costs one person before any air conditioning. Each game carries
         # its own share above, because a cooled night costs more.
+        #
+        # Divided by capacity, not by the roster. This call site was
+        # missed when the rule changed on 2026-09-10 (CLAUDE.md 2.4), so
+        # the screens quoted a price the ledger never charged whenever the
+        # roster wasn't exactly full — and an empty roster divided by zero
+        # and returned a 500, which is how tests/api/test_fuzz.py found it.
         share_per_game=share_per_game(
             season_row.total_venue_cost
             - season_row.ac_surcharge * sum(1 for g in game_rows if g.air_conditioned),
             len(game_rows),
-            len(member_rows),
+            season_row.capacity,
         ),
         ac_surcharge=season_row.ac_surcharge,
         settled_at=season_row.settled_at,
@@ -2413,6 +2613,22 @@ def set_substitute(
     _require_may_sign_up(db, season.club_id, current_player, player)
     if player.gender is None and payload.gender is not None:
         player.gender = payload.gender
+
+    # A fixed member is expected at this game already (CLAUDE.md 2.3), so
+    # they cannot also stand in for somebody — they would be on the court
+    # twice and pay for the night twice, once inside their season fee and
+    # once as a drop-in. The ordinary signup route refuses this
+    # (_reject_if_already_playing) and this one did not, which is how a
+    # random sweep in tests/api/test_fuzz.py landed the same name in the
+    # attending list twice. Being away themselves makes no difference: a
+    # member who wants to play cancels their own absence, which fills
+    # their own slot and leaves this one still open.
+    if db.get(SeasonMemberRow, {"season_id": season.id, "player_id": player.id}):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"{player.name} is a fixed member of this season and is already "
+            "expected — they can't stand in for somebody else",
+        )
 
     # Any active drop-in still on file for this player+game at this point
     # can't be the one that covered this absence — that one was just

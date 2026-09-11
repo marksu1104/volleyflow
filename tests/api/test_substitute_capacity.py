@@ -144,19 +144,23 @@ def test_somebody_elses_named_substitute_is_never_bumped(client: TestClient) -> 
 def test_a_full_game_of_named_substitutes_refuses_rather_than_overfilling(
     client: TestClient,
 ) -> None:
-    season = start_season(client, member_names=["Alice"], capacity=1)
+    # Both members are on the roster from the start rather than one being
+    # added later: add_member now refuses to put another expected body
+    # into a game that is already full, which is the rule this very test
+    # is about. A season created with more members than slots is the one
+    # remaining way to build the state — see docs/backlog.md, "roster
+    # changes", for the gap that leaves open.
+    season = start_season(client, member_names=["Alice", "Bob"], capacity=1)
     game_id = season["games"][0]["id"]
     absence = client.post(
         "/absences", json={"player_name": "Alice", "game_id": game_id}
     ).json()
-    client.put(f"/absences/{absence['id']}/substitute", json={"player_name": "Zoe"})
-    # Zoe now holds the only slot, as Alice's own pick. A second member's
-    # absence has nowhere to put a substitute.
-    client.post(f"/seasons/{season['id']}/members", json={"player_name": "Bob"})
-    client.patch(f"/seasons/{season['id']}", json={"capacity": 1})
     bobs_absence = client.post(
         "/absences", json={"player_name": "Bob", "game_id": game_id}
     ).json()
+    # Zoe now holds the only slot, as Alice's own pick. Bob's absence has
+    # nowhere to put a substitute.
+    client.put(f"/absences/{absence['id']}/substitute", json={"player_name": "Zoe"})
 
     response = client.put(
         f"/absences/{bobs_absence['id']}/substitute", json={"player_name": "Dave"}

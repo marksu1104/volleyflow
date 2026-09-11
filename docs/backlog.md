@@ -13,6 +13,16 @@ Anything not on this list is either done or deliberately out of scope
 The last piece that is about **data correctness** rather than looks, so
 it goes first.
 
+Part of this landed on 2026-09-12, because a random sweep
+(`tests/api/test_fuzz.py`) proved it was a live bug rather than a missing
+nicety: adding a member now refuses when the roster is already the size
+of the capacity, or when any game has no free slot. What is still missing
+is everything around that refusal — the confirmations below, and the
+"raise the capacity" route out of it that the message tells people to
+take. Creating a season with more members than slots is also still
+allowed, which is now the only way left to build an over-capacity
+roster.
+
 The rules, as specified on 2026-09-10:
 
 | When | Adding | Removing |
@@ -79,8 +89,19 @@ what is worth interrupting people for is. Two earlier candidates —
   quiet moment rather than a busy one.
 - **The invite link carries a guessable club id** (`?club=12`). A token
   would be better.
+- **The API's error messages are English, and the UI shows them raw.**
+  Every `raise HTTPException` detail goes straight into a Chinese toast:
+  「加入失敗：Already a member of this season」. CLAUDE.md asks for the
+  user-facing text to be Traditional Chinese and centralized in one
+  module, so this wants a message catalogue keyed by code rather than
+  translating strings where they are raised. Most visible on the roster
+  screen, where the new capacity refusals live.
 - **No error monitoring.** A 500 in production is invisible unless
-  somebody reports it.
+  somebody reports it. One existed for the whole life of the project and
+  was only found on 2026-09-12: linking a LINE account to a roster entry
+  crashed on a foreign key whenever that account had ever signed a guest
+  up, and the browser reported it as a CORS error, because a crash
+  carries no headers.
 - **No restore drill.** Neon keeps backups; nobody has ever tried
   restoring one.
 - **The README's full write-up** — architecture and the reasoning behind

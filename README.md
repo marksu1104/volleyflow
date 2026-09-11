@@ -121,26 +121,28 @@ a real person's ledger. See `tests/test_auth.py`.
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
-uv run pytest -q               # 370 tests
+uv run pytest -q               # 380 tests, including a randomised sweep
 uv run lint-imports            # billing logic must not import the database
 node --test tests/frontend/*.test.js   # 151 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
 node tests/visual/smoke.js     # presses every button and reports the dead ones
 node tests/visual/feedback.js  # and how long each one takes to react
 node tests/visual/chaos.js     # two people hammering one game at once
+node tests/visual/adverse.js   # the same, on a slow network and against refusals
 ```
 
-The first five run in CI on every push. The last four need a browser and
+The first five run in CI on every push. The last five need a browser and
 are run by hand — `check.js` when layout changes, `smoke.js` and
 `feedback.js` after anything that touches a click handler or a write,
-`chaos.js` after anything that changes who may be on a roster.
+`chaos.js` and `adverse.js` after anything that changes who may be on a
+roster.
 
 They earn their keep. `smoke.js` caught a bug every static check passed:
 a handler matched a data attribute its own container carried, so every
 control in the game sheet was silently swallowed. `check.js` caught a
 select pushed off the edge of a panel, and rows that measured 17px
 against Apple's 44pt guidance. `chaos.js` catches a change that saves,
-flips back, and flips forward again. All four want the local servers up,
+flips back, and flips forward again. All five want the local servers up,
 and all but `check.js` press destructive controls, so re-run
 `seed_dev.py` afterwards. See
 [`tests/visual/README.md`](tests/visual/README.md).
@@ -167,6 +169,14 @@ src/volleyflow/
 ├── db/              SQLAlchemy models and the engine
 └── notify/          LINE Messaging API client and the reminder job
 ```
+
+`tests/api/test_fuzz.py` is worth knowing about: rather than asserting an
+outcome, it fires a few hundred randomly chosen operations at a season
+and checks after every one that the rules still hold — nobody on the
+court twice, never over capacity, nobody owing for a night they did not
+play. It found six real bugs in code that 370 hand-written tests already
+covered, four of them about money. `tests/api/invariants.py` holds the
+rules it checks.
 
 The first six files are pure Python: no database, no web framework, no
 I/O. That is deliberate and enforced — `lint-imports` fails the build if

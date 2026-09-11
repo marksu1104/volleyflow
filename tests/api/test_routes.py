@@ -2395,6 +2395,45 @@ def test_after_linking_that_person_can_act_as_themselves(client: TestClient) -> 
     assert response.status_code == 200
 
 
+def test_link_carries_over_the_guests_that_account_signed_up(
+    client: TestClient,
+) -> None:
+    """Somebody brings a friend, and only afterwards does the organizer
+    say which roster entry that account is.
+
+    The guest's signup records who brought them, and that pointed at the
+    row this endpoint deletes — so the delete hit a foreign key, returned
+    a 500, and reached the browser as a CORS error, because a crash
+    carries no headers. The guest is theirs either way: linking says the
+    two rows are the same person.
+    """
+    season = _start_season(client, member_names=["吳亞彤"])
+    typed_in_id = season["member_ids"][0]
+    with_line = identify(client, "吳亞彤")
+    client.post(
+        f"/clubs/{season['club_id']}/join", headers=auth_headers(with_line["token"])
+    )
+    client.post(
+        f"/games/{season['games'][0]['id']}/drop-ins",
+        json={"people": [{"player_name": "朋友", "gender": "female"}]},
+        headers=auth_headers(with_line["token"]),
+    )
+
+    response = client.post(
+        f"/clubs/{season['club_id']}/players/{typed_in_id}/link",
+        json={"line_player_id": with_line["id"]},
+    )
+
+    assert response.status_code == 200, response.text
+    balances = client.get(
+        f"/clubs/{season['club_id']}/balances?season_id={season['id']}"
+    ).json()
+    brought = [row for row in balances if row["brought_by"] is not None]
+    assert [row["brought_by"] for row in brought] == ["吳亞彤"], (
+        "the guest is still collected from them"
+    )
+
+
 def test_link_refuses_when_the_line_account_has_its_own_history(
     client: TestClient,
 ) -> None:

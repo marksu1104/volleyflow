@@ -44,7 +44,7 @@ const SKIP = [/刪除/, /結算/, /登出/, /移出球隊/];
 
 // Controls whose job is to put the page into a state it may already be
 // in, so "nothing happened" is the correct outcome and not a finding.
-const IDEMPOTENT = [/^出席/, /^請假 \d/, /^候補/, /^開$/, /^關$/];
+const IDEMPOTENT = [/^出席/, /^請假 \d/, /^候補/, /^開$/, /^關$/, /^男$/, /^女$/];
 
 /** Everything about the page that a working button could change. The
  * hash covers the whole document: comparing a prefix missed a tab panel

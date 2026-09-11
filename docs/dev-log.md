@@ -1429,3 +1429,85 @@ organizer does in the app — sign in, join, link — for the two names it
 advertises.
 
 370 tests, 151 frontend tests, four browser checks.
+
+## 2026-09-12 — letting something else pick the test cases
+
+「確定都檢查完所有奇怪的操作也不會錯誤了嗎」. No — and the honest shape of
+that no was worth writing down. There were eight multi-step sequences in
+the suite, five in `test_chaos.py` and three in `chaos.js`, and every one
+of them was a sequence somebody had thought of. A rule holds against the
+cases you imagined until something else starts picking them.
+
+So `tests/api/test_fuzz.py` picks them. It builds a season with six slots
+and five members — deliberately tight, because the interesting bugs live
+in a game that is full with a queue behind it — then fires a few hundred
+operations chosen from whatever state the season is actually in, and
+checks every invariant after each one. Seeds are fixed, and the log of
+accepted and refused operations prints with the failure, so a bug arrives
+with its recipe. A refusal is never a failure: half of what it does is
+illegal and the server is supposed to say no. A 500 always is.
+
+It found six real bugs, four of them about money or capacity, in a part
+of the app that had 370 passing tests over it.
+
+**A fixed member could be named as somebody else's 代打.** The ordinary
+signup route refuses that (`_reject_if_already_playing`) because the
+season fee already covers that night; the substitute route never checked.
+They went on the court twice and paid for the night twice.
+
+**Adding a member overfilled games.** Two separate holes, and the second
+only showed up once the first was closed. A member is expected at every
+game, so every game needs a free slot — but an absence is temporary, so a
+game whose members are mostly away *looks* like it has room. Add a member
+while four people are away, have all four cancel, and seven people are on
+a court for six. The rule that was missing is the blunt one already
+written in `docs/backlog.md`: the roster itself can never be larger than
+the capacity.
+
+**Absences outlived the member.** `remove_member` left them behind on
+purpose — settlement only ever walks the current member list, so they are
+harmless *there*. Everywhere else they were live: the capacity check
+counted each one as a free seat, so every removal made a game look one
+seat emptier forever; the refund rule matched drop-ins against them; and
+the game sheet listed a name under 請假 that was not on the roster above
+it. Closed at the source now, with the two readers also asking for
+members only, because rows written before today are still in the
+database.
+
+**A restored signup could put somebody back into a game they had taken
+leave from.** Sign up as a guest, be promoted to the roster (which
+absorbs the signup), take leave for one night, then be removed from the
+roster — and the absorbed signup came back for the night they had said
+they could not make. It takes four operations in one order, which is
+exactly the kind of thing nobody writes a test for by hand.
+
+**`get_season` still divided by the roster, not the capacity.** The rule
+changed on 2026-09-10 and this call site was missed, so every screen
+quoted a headline price the ledger never charged whenever the roster was
+not exactly full — and an empty roster divided by zero and returned a
+500.
+
+**Linking a LINE account crashed if that account had ever brought a
+guest.** Found by `smoke.js` rather than the fuzz, and only visible as a
+console error: the guest's signup records who brought them, pointing at
+the row the link deletes, so the delete hit a foreign key. The browser
+called it a CORS error, because a crash carries no headers — which is
+worth remembering, since it is the second time a missing response header
+has read as something it was not. The guests come with the person now.
+
+200 seeds and roughly 18,000 operations pass. Eight of those seeds and one
+long 300-step run are committed; the rest was a one-off sweep, because CI
+time is not free and the value is in having run it, not in running it
+every push.
+
+**The two other things that had never been tested.** `feedback.js` and
+`chaos.js` both run on a fast local connection, where a write lands in
+well under a second — and a phone on mobile data does not. `adverse.js`
+widens that gap on purpose with Chromium's own request interception and
+acts inside it: two taps inside one 2.5-second round trip, a write the
+server refuses, and a spell of hammering under a 1.5-second delay. It
+checks the screen never flips back, that the server agrees with the
+screen once everything lands, that a refusal rolls the change back *and*
+says why, and that nothing is left spinning or disabled afterwards.
+
+380 tests, 151 frontend tests, five browser checks.
