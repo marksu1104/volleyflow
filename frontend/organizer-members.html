@@ -206,6 +206,9 @@
 
   async function loadMembers(seasonId) {
     const ticket = membersLoad.take();
+    // See localRevision in shared.js: a read that set off before the
+    // organizer's latest tap describes a roster older than the screen.
+    const askedAt = localRevision();
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
     // Only on the first load. Every action on this page ends by calling
@@ -226,9 +229,13 @@
         errorEl.textContent = "找不到這一季";
         return;
       }
-      currentSeason = await res.json();
-      currentPool = pool.ok ? await pool.json() : [];
+      const season = await res.json();
       if (!membersLoad.current(ticket)) return;
+      // Somebody changed something after this read set off, so painting
+      // it would undo their tap. The change queues its own reload.
+      if (currentSeason && currentSeason.id === season.id && localRevision() !== askedAt) return;
+      currentSeason = season;
+      currentPool = pool.ok ? await pool.json() : [];
       renderMembers(currentSeason);
       renderJoinPool();
       document.getElementById("no-season").innerHTML = "";
@@ -331,13 +338,21 @@
   async function setGender(playerId, gender) {
     const member = (currentSeason.members || []).find((m) => m.id === playerId);
     const previous = member ? member.gender : null;
+    // Already set that way: the button is showing the state it sets, so
+    // there is nothing to draw and nothing to send. It used to send
+    // anyway, which meant tapping 男 on somebody already marked 男 sat
+    // silent for half a second and then changed nothing — the one control
+    // in the app that tests/visual/feedback.js still caught doing that.
+    if (previous === gender) return;
     if (member) member.gender = gender;
+    bumpLocalRevision();
     renderMembers(currentSeason);
     try {
       await postJson(API_BASE, `/players/${playerId}/gender`, { gender }, "PUT");
       await loadMembers(currentSeason.id);
     } catch (e) {
       if (member) member.gender = previous;
+      bumpLocalRevision();
       renderMembers(currentSeason);
       toast("設定性別失敗：" + e.message);
     }

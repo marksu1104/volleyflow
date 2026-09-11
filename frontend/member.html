@@ -640,6 +640,10 @@
     // an absence recorded in between could be painted away by the older
     // one landing last. See staleGuard.
     const ticket = seasonLoad.take();
+    // What the screen knew when this read set off. If it has moved on by
+    // the time the answer lands, the answer is older than the screen and
+    // painting it would undo a tap — see localRevision in shared.js.
+    const askedAt = localRevision();
     currentSeasonId = seasonId;
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
@@ -656,6 +660,14 @@
 
     function render(season) {
       if (!seasonLoad.current(ticket)) return;
+      // Somebody has changed something since this read went out, so it
+      // describes a season older than the one on screen. Dropping it is
+      // safe: every change queues a refresh of its own behind itself, so
+      // a newer answer is already on its way. Restricted to the season
+      // being shown, so switching season still paints on the first read.
+      if (currentSeason && currentSeason.id === season.id && localRevision() !== askedAt) {
+        return;
+      }
       // Nothing has changed since the last paint — which is the normal
       // case right after an optimistic update that the server agreed
       // with. Redrawing identical data is invisible work that isn't
@@ -879,10 +891,12 @@
 
   /** Re-reads the season without blocking whatever the person does next.
    * The screen is already right; this only catches what the optimistic
-   * update couldn't know — a waitlist promotion, somebody else's change. */
-  function refreshSeasonQuietly() {
-    loadSeason(currentSeasonId);
-  }
+   * update couldn't know — a waitlist promotion, somebody else's change.
+   *
+   * Queued behind every pending write and collapsed to one, or it
+   * overtakes a tap that hasn't been sent yet and paints it away. See
+   * coalescedRefresh. */
+  const refreshSeasonQuietly = coalescedRefresh(() => loadSeason(currentSeasonId));
 
   /** What this viewer can do about this game, as a status line and a row
    * of equal-weight buttons.

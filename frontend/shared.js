@@ -487,6 +487,9 @@ function optimisticRunner({ getState, setState, repaint }) {
   return async function optimistically(mutateLocally, request, failureMessage, reconcile) {
     const snapshot = JSON.parse(JSON.stringify(getState()));
     mutateLocally(getState());
+    // The screen now knows something the server hasn't been told yet, so
+    // any read already in the air is out of date — see localRevision.
+    bumpLocalRevision();
     repaint();
     try {
       const result = await enqueueRequest(request);
@@ -502,10 +505,52 @@ function optimisticRunner({ getState, setState, repaint }) {
       return result;
     } catch (e) {
       setState(snapshot);
+      bumpLocalRevision();
       repaint();
       toast(failureMessage + e.message);
       return null;
     }
+  };
+}
+
+/** Wraps a "re-read everything" function so it can never undo a change.
+ *
+ * Two rules, both paid for:
+ *
+ *  - it goes through the same queue as the writes, so a refresh can never
+ *    ask the server a question that a tap still waiting its turn hasn't
+ *    been allowed to answer. Firing it straight away is what made the
+ *    screen flip back;
+ *  - only one is ever waiting. Asking again while one is already queued
+ *    does nothing, because the queued one has not started yet and will
+ *    see everything by the time it does. Three quick taps used to mean
+ *    three full season reads of about 600ms each, all but the last of
+ *    them pointless.
+ */
+function coalescedRefresh(load) {
+  let busy = false;
+  return function refresh() {
+    // Queued or still reading, and either way it covers this request.
+    // Queued is obvious — it hasn't started, so it will see everything.
+    // Still reading takes the queue being strictly serial: a refresh only
+    // begins once the queue has drained, so any change asking for one
+    // while it runs had already finished before it started, and its read
+    // went out afterwards. Clearing this at the *start* of the read
+    // instead let a request arriving in the same microtask slip past and
+    // fetch the whole season a second time for nothing.
+    if (busy) return;
+    busy = true;
+    enqueueRequest(async () => {
+      try {
+        await load();
+      } catch (e) {
+        // The screen is already showing the right thing; a background
+        // read that fails changes nothing the person can see.
+        console.warn("Background refresh failed:", e);
+      } finally {
+        busy = false;
+      }
+    });
   };
 }
 
@@ -1220,6 +1265,65 @@ function markBusy(el) {
   };
 }
 
+/** Says "still saving" once, for the page, for changes that are already
+ * on screen.
+ *
+ * An optimistic action cannot use markBusy and never could: the repaint
+ * that makes the tap feel instant replaces the button in the same frame,
+ * so by the time the spinner is due, 140ms later, it is being put on a
+ * node that has been off the page for 138ms. That is why the busy state
+ * was invisible on exactly the two controls it was being judged by,
+ * 請假 and 取消請假.
+ *
+ * Marking the *replacement* button instead would be worse: it would grey
+ * out 取消請假 for half a second immediately after 請假 succeeded, which
+ * says the opposite of what happened. The honest signal is that the
+ * change is made and the server is still being told, so that is what
+ * this shows — small, out of the way, and only once however many
+ * requests are outstanding.
+ */
+let _pendingWrites = 0;
+let _pendingTimer = null;
+
+/** Long enough that the common case — a change that saves in under half
+ * a second — never mentions itself at all. */
+const PENDING_AFTER_MS = 450;
+
+function pendingIndicator() {
+  let el = document.getElementById("vf-pending");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "vf-pending";
+    el.className = "pending-chip";
+    el.setAttribute("role", "status");
+    el.textContent = "儲存中…";
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function beginPendingWrite() {
+  if (typeof document === "undefined" || !document.body) return () => {};
+  _pendingWrites += 1;
+  if (_pendingWrites === 1 && !_pendingTimer) {
+    _pendingTimer = setTimeout(() => {
+      _pendingTimer = null;
+      if (_pendingWrites > 0) pendingIndicator().classList.add("shown");
+    }, PENDING_AFTER_MS);
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    _pendingWrites = Math.max(0, _pendingWrites - 1);
+    if (_pendingWrites > 0) return;
+    clearTimeout(_pendingTimer);
+    _pendingTimer = null;
+    const el = document.getElementById("vf-pending");
+    if (el) el.classList.remove("shown");
+  };
+}
+
 /** Runs something with a named control showing the wait — for the few
  * places that know better than the click does which element to mark. */
 async function whileBusy(el, action) {
@@ -1437,8 +1541,11 @@ async function initLiffIdentity(apiBase, liffId) {
 async function postJson(apiBase, path, body, method) {
   // Whichever control was pressed shows the wait, and stops taking
   // taps, for as long as this takes — see markBusy. Claimed here rather
-  // than at the call sites so no write can forget to do it.
+  // than at the call sites so no write can forget to do it. The page-level
+  // marker beside it covers the optimistic actions, whose button is gone
+  // before markBusy can reach it — see beginPendingWrite.
   const done = markBusy(_pressed);
+  const settled = beginPendingWrite();
   let res;
   let data;
   try {
@@ -1450,6 +1557,7 @@ async function postJson(apiBase, path, body, method) {
     data = await res.json().catch(() => ({}));
   } finally {
     done();
+    settled();
   }
   if (!res.ok) {
     const error = new Error(data.detail || res.statusText);
@@ -1463,8 +1571,28 @@ async function postJson(apiBase, path, body, method) {
   // changes the season detail, adding a member changes the season list,
   // creating a club changes the club list. Dropping the lot is cheap
   // (a handful of small keys) and can't get the invalidation wrong.
-  clearResponseCache();
+  clearResponseCache({ keepPeople: keepsPeople(path) });
   return data;
+}
+
+/** Whether a write can leave the in-memory roster and guest lists alone.
+ *
+ * Those two lists only change when somebody is introduced, renamed or
+ * removed, and they were being thrown away after *every* write — so each
+ * 請假 cost two extra round trips re-reading lists that could not have
+ * changed. Recording an absence, undoing one, and giving up a queue place
+ * are the three most-used actions in the app and none of them touch a
+ * person, so they are named here and everything else keeps the old
+ * behaviour. The list is deliberately short: being wrong in this
+ * direction shows a stale picker, being wrong the other way costs one
+ * request, so anything not obviously safe stays off it.
+ */
+function keepsPeople(path) {
+  return (
+    /^\/absences$/.test(path) ||
+    /^\/absences\/\d+\/cancel$/.test(path) ||
+    /^\/waitlist\/\d+\/cancel$/.test(path)
+  );
 }
 
 /**
@@ -1608,13 +1736,16 @@ async function fetchMyGuests(apiBase, clubId) {
 
 /** Drops every cached response. Called after anything that writes, so
  * the next page doesn't paint from a copy we just invalidated. */
-function clearResponseCache() {
+function clearResponseCache(options) {
   // The in-memory club roster goes with them, or adding a guest would
   // leave the substitute picker offering the list from before. Same for
   // the "people I've brought" list, which grows the moment somebody
-  // brings a new one.
-  for (const key of Object.keys(_clubMemberCache)) delete _clubMemberCache[key];
-  for (const key of Object.keys(_myGuestCache)) delete _myGuestCache[key];
+  // brings a new one. A write that provably introduces nobody keeps them
+  // — see keepsPeople.
+  if (!(options && options.keepPeople)) {
+    for (const key of Object.keys(_clubMemberCache)) delete _clubMemberCache[key];
+    for (const key of Object.keys(_myGuestCache)) delete _myGuestCache[key];
+  }
   try {
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith(CACHE_PREFIX)) localStorage.removeItem(key);
@@ -1717,6 +1848,7 @@ function signInFailureHtml(identified) {
  * next read doesn't paint from a copy of something just deleted. */
 async function deleteJson(apiBase, path) {
   const done = markBusy(_pressed);
+  const settled = beginPendingWrite();
   let res;
   try {
     res = await fetch(`${apiBase}${path}`, {
@@ -1725,6 +1857,7 @@ async function deleteJson(apiBase, path) {
     });
   } finally {
     done();
+    settled();
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -1779,6 +1912,33 @@ function staleGuard() {
     take: () => ++latest,
     current: (ticket) => ticket === latest,
   };
+}
+
+/** How many times this page's own copy of the data has been changed
+ * locally, without waiting for the server.
+ *
+ * This is the answer to 「按了成功結果又切回去又切回來」. Refreshing after
+ * a change used to fire a GET that overtook the *next* change still
+ * sitting in the write queue: the read went out at 676ms and the write it
+ * was meant to report on at 677ms. The answer therefore described the
+ * roster as it was before that tap, and render() trusted it and painted
+ * the tap away — then the next refresh put it back, half a second later.
+ *
+ * staleGuard orders responses against each other. This orders them
+ * against what the person has already done, which is the thing nothing
+ * was checking: a read that set off before the latest local change is
+ * answering a question about a world that no longer exists, and must be
+ * dropped rather than painted.
+ */
+let _localRevision = 0;
+
+function bumpLocalRevision() {
+  _localRevision += 1;
+  return _localRevision;
+}
+
+function localRevision() {
+  return _localRevision;
 }
 
 /** A short message that doesn't take the screen away from you.
