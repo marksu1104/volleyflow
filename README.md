@@ -4,12 +4,202 @@ Signup, waitlist, and billing for a weekly volleyball game, run through
 LINE. Members take leave or bring a friend from a LIFF page; the
 organizer works the roster and the money from the same app.
 
-The full write-up — architecture and the reasoning behind each design
-decision — is still to be written. Until then,
-[`CLAUDE.md`](CLAUDE.md) holds the scope and the working rules,
-[`docs/billing-rules.md`](docs/billing-rules.md) is the authority on
-anything involving money, and [`docs/dev-log.md`](docs/dev-log.md)
-records how each stage actually got built.
+## Why this exists
+
+A real volleyball group in Taiwan runs its signups and payments over a
+LINE group chat: who's coming this week, who's bringing a friend, who
+still owes for last month. That works until it doesn't — a fixed member
+who skips a night and the drop-in who covered their spot need to settle
+up differently, air conditioning changes what one game costs partway
+through a season, and "ask around in the chat" doesn't scale past about
+fifteen people. VolleyFlow is that bookkeeping, done by a program instead
+of by memory.
+
+It's also a portfolio project: a way to build and defend, in an
+interview, a small system with real money logic, a real multi-tenant
+data model, and a real deployment pipeline — not a tutorial CRUD app.
+[`CLAUDE.md`](CLAUDE.md) is the working agreement it was built under;
+this file is the retrospective.
+
+## What it does
+
+**A member** opens a LIFF page inside LINE, already signed in. From
+there: see the season's games and what each one costs, take leave (and
+optionally name who's covering for them), bring a guest, join the
+waitlist when a game is full, and see their own running balance.
+
+**An organizer** manages the roster, marks payments received, corrects a
+game's air conditioning setting after the fact, and settles a season.
+The group chat gets the same roster reminder before every game; the
+organizer alone gets a second, private message when that roster is
+short-handed.
+
+**Anyone** can create a club and become its organizer. A club is a full
+tenant: its own roster, seasons, games, and books, invisible to every
+other club sharing the same deployment.
+
+## Architecture
+
+```
+  LINE app (phone)  --LIFF-->  Frontend            --HTTPS/JSON-->  API
+                                plain HTML+JS                        FastAPI, Render
+                                GitHub Pages                            |
+                                                                         v
+                                                                    Postgres (Neon)
+                                                                         ^
+                                                                         |
+  LINE group + organizer  <--push--  LINE Messaging API  <--reads-------+
+    (reminders, crash alerts)
+
+  GitHub Actions, on its own schedule:
+    CI            test -> migrate production -> trigger the Render deploy
+    reminders     daily, reads Postgres, pushes through the LINE client above
+    keep-warm     pings /health every 10 min so the free instance doesn't sleep
+```
+
+Two static frontends (member + organizer share the same pages, gated by
+role) talk to one FastAPI service over plain HTTPS + JSON. The service
+is stateless — all state is in Postgres — so Render's free tier can let
+it sleep between visits without losing anything; a `keep-warm` schedule
+just makes that sleep less noticeable, and doesn't touch the database (a
+`/health` route that never queries it).
+
+## Design decisions
+
+**Billing splits by capacity, not by headcount.** A member's season fee
+is `total_venue_cost / (games × capacity)` — capacity, the number of
+slots on court, not however many names happen to be on the roster this
+week. The first version divided by the roster instead, and one person
+leaving an 18-person season re-priced the other seventeen retroactively
+— from $205 a night to $218 — while the drop-in standing in the empty
+slot still paid $205, so the club collected the same gap twice. The
+trade-off: an unfilled slot is money nobody pays. See
+[`docs/billing-rules.md`](docs/billing-rules.md) for the full rule set,
+including what a game's air conditioning does to that formula.
+
+**The ledger is append-only.** Nothing is ever edited after the fact —
+a corrected venue cost, a flipped air-conditioning setting, a member
+added mid-season all write a new adjustment entry, never touch the old
+one. That's what makes "why does this person's balance say $470" always
+answerable by reading history forward, and it's the property a billing
+system has to have before anything else about it matters.
+
+**Billing logic can't import the database.** `pricing.py`, `settlement.py`,
+and `ledger.py` are pure Python — no SQLAlchemy, no I/O — and
+`import-linter` fails the build if that ever stops being true. Money math
+gets tested without a database standing up, and an API-layer change can
+never quietly change what somebody is charged, because the two are
+structurally unable to reach into each other.
+
+**A `Player` is one person for life, everywhere.** The same real human
+joining two clubs is one `Player` row with one LINE identity, related to
+each club through a separate `ClubMembership`. A drop-in this season who
+becomes a fixed member next season carries their ledger history with
+them, because it was always attached to the person, never to a role.
+
+**Multi-tenancy came from watching a first version get in its own way.**
+The original scope was one club, no tenant boundary — reversed once it
+became clear the actual product shape ("someone signs in, starts a club,
+becomes its organizer, then gathers members") is native to a
+multi-tenant model. `Club` is the tenant boundary; everything else
+(`Game`, `Absence`, `DropIn`, season membership) derives its club through
+an existing foreign key rather than carrying a denormalized `club_id` of
+its own.
+
+**A join link carries a token, not a database id.** `/clubs/{id}/join`
+still accepts a plain club id from an already-authenticated caller — a
+deliberate, narrower scope than closing that off entirely would have
+been (see `docs/backlog.md`) — but the *shared link* a visitor actually
+clicks now carries an HMAC token instead of a sequential integer, so
+finding a club by guessing small numbers no longer works from the one
+surface a stranger would try it on.
+
+**Two tests earn back more time than they cost.** `tests/api/test_fuzz.py`
+fires a few hundred randomly chosen operations at a season and checks
+every invariant after each one — nobody on court twice, capacity never
+exceeded, nobody owing for a night they didn't play — rather than
+asserting one hand-written outcome. Run against a codebase already
+covered by 370-odd specific tests, it found eight real bugs across two
+sessions, most of them about money: a fixed member could be named as
+someone else's substitute and billed twice; a roster could grow past its
+own season's capacity, or start over capacity in the first place;
+lowering capacity could re-price a season without correcting anyone's
+ledger; a member's leave record outlived their removal from the roster
+and kept mispricing games years later; cancelling a signup refunded
+whatever the game costs *today* instead of what was actually charged,
+leaving a residual balance whenever the air conditioning setting changed
+in between. The general lesson: a rule only holds against the sequences
+somebody thought to write down, until something else is doing the
+choosing.
+
+The second is `tests/visual/*.js` — Playwright driving a real browser.
+Three bugs reached a phone that every static check here passed: `[hidden]`
+losing to a class's own `display`, a tab handler that matched a data
+attribute its own container carried (swallowing every other tap in the
+game sheet), and a screen that flipped a saved change back for half a
+second before flipping it forward again. That last one turned out to be
+an ordering bug — a background refresh could overtake the write it was
+meant to confirm — findable only by instrumenting a real page and
+watching the timestamps, not by reading the code.
+
+**CI migrates production before it deploys, and provably fails shut if
+it can't.** Deploying code before its migration took production down
+once. Now `alembic upgrade head` runs against production as its own CI
+step, gated on a secret being present at all, before the Render deploy
+hook fires — and it's a no-op on any push that changes no schema, so it
+costs nothing on the pushes that don't need it.
+
+**A crash reports itself without losing its own error page.** An
+unhandled exception is caught by middleware, not a plain
+`@app.exception_handler(Exception)` — a documented Starlette trap: it
+attaches outside `CORSMiddleware`, so the response it builds never gets
+an `Access-Control-Allow-Origin` header, and the browser reports a
+same-origin violation instead of the real 500. That is exactly how a
+crash in `link_player` first surfaced. The middleware logs every
+unhandled exception, and — rate-limited to once per (exception type,
+route) per half hour, so a client retrying a broken request can't spend
+a month's LINE quota reporting the same bug — sends the organizer a LINE
+message naming what broke and where.
+
+## Checks
+
+```
+uv run ruff check .            # style
+uv run ruff format .           # formatting
+uv run mypy src scripts        # types
+uv run pytest -q               # 410 tests, including a randomised sweep
+uv run lint-imports             # billing logic must not import the database
+node --test tests/frontend/*.test.js   # 163 frontend tests
+node tests/visual/check.js     # renders in a real browser and measures it
+node tests/visual/smoke.js     # presses every button and reports the dead ones
+node tests/visual/feedback.js  # and how long each one takes to react
+node tests/visual/chaos.js     # two people hammering one game at once
+node tests/visual/adverse.js   # the same, on a slow network and against refusals
+```
+
+The first five run in CI on every push. The last five need a browser and
+are run by hand — `check.js` when layout changes, `smoke.js` and
+`feedback.js` after anything that touches a click handler or a write,
+`chaos.js` and `adverse.js` after anything that changes who may be on a
+roster. `chaos.js` catches a change that saves, flips back, and flips
+forward again. All five want the local servers up, and all but `check.js`
+press destructive controls, so re-run `seed_dev.py` afterwards. See
+[`tests/visual/README.md`](tests/visual/README.md).
+
+`tests/api/test_fuzz.py` is worth knowing about on its own: rather than
+asserting an outcome, it fires a few hundred randomly chosen operations
+at a season and checks after every one that the rules still hold. It
+found eight real bugs in code that 370 hand-written tests already
+covered — see "Design decisions" above. `tests/api/invariants.py` holds
+the rules it checks, reusable by any future test that wants the same
+answers.
+
+A handful of tests are marked `postgres` and hit the real Neon dev
+branch instead of in-memory SQLite — excluded by default
+(`uv run pytest -q`), run explicitly with `uv run pytest -m postgres`.
+`scripts/backup_db.py` / `restore_db.py` are two of them: a plain-JSON
+dump and restore, independent of Neon's own point-in-time recovery
+(6 hours on the free plan) for a mistake found later than that.
 
 ## Running it locally
 
@@ -115,38 +305,6 @@ These identities are stored with a `dev:` prefix on `line_user_id`, so
 they can never collide with a real LINE account or attach themselves to
 a real person's ledger. See `tests/test_auth.py`.
 
-## Checks
-
-```
-uv run ruff check .            # style
-uv run ruff format .           # formatting
-uv run mypy src scripts        # types
-uv run pytest -q               # 380 tests, including a randomised sweep
-uv run lint-imports            # billing logic must not import the database
-node --test tests/frontend/*.test.js   # 151 frontend tests
-node tests/visual/check.js     # renders in a real browser and measures it
-node tests/visual/smoke.js     # presses every button and reports the dead ones
-node tests/visual/feedback.js  # and how long each one takes to react
-node tests/visual/chaos.js     # two people hammering one game at once
-node tests/visual/adverse.js   # the same, on a slow network and against refusals
-```
-
-The first five run in CI on every push. The last five need a browser and
-are run by hand — `check.js` when layout changes, `smoke.js` and
-`feedback.js` after anything that touches a click handler or a write,
-`chaos.js` and `adverse.js` after anything that changes who may be on a
-roster.
-
-They earn their keep. `smoke.js` caught a bug every static check passed:
-a handler matched a data attribute its own container carried, so every
-control in the game sheet was silently swallowed. `check.js` caught a
-select pushed off the edge of a panel, and rows that measured 17px
-against Apple's 44pt guidance. `chaos.js` catches a change that saves,
-flips back, and flips forward again. All five want the local servers up,
-and all but `check.js` press destructive controls, so re-run
-`seed_dev.py` afterwards. See
-[`tests/visual/README.md`](tests/visual/README.md).
-
 ## Deploying
 
 Push to `main`. CI runs the checks, applies any database migrations to
@@ -165,21 +323,22 @@ src/volleyflow/
 ├── schedule.py      Season and Game
 ├── players.py       Player and Membership
 ├── attendance.py    Absence, DropIn, WaitlistEntry
-├── api/             FastAPI routes, request/response schemas, LINE auth
+├── api/             FastAPI routes, request/response schemas, LINE auth,
+│                    the invite-token module, crash reporting
 ├── db/              SQLAlchemy models and the engine
 └── notify/          LINE Messaging API client and the reminder job
 ```
-
-`tests/api/test_fuzz.py` is worth knowing about: rather than asserting an
-outcome, it fires a few hundred randomly chosen operations at a season
-and checks after every one that the rules still hold — nobody on the
-court twice, never over capacity, nobody owing for a night they did not
-play. It found six real bugs in code that 370 hand-written tests already
-covered, four of them about money. `tests/api/invariants.py` holds the
-rules it checks.
 
 The first six files are pure Python: no database, no web framework, no
 I/O. That is deliberate and enforced — `lint-imports` fails the build if
 anything in there imports `volleyflow.db`. It is why money can be tested
 without a database standing up, and why a change to the API can't
 quietly change what someone is charged.
+
+## What's left
+
+[`docs/backlog.md`](docs/backlog.md) is the running list — notification
+message types beyond the two already built, `routes.py`'s eventual split
+into per-resource files, and the loose ends around invite-link scope and
+error-message coverage that were deliberately kept narrow rather than
+chased to 100%.

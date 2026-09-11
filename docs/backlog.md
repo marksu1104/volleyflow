@@ -1,113 +1,74 @@
 # What is left
 
-Written 2026-09-11, after a week of using the app for real turned up
-far more than the milestone plan anticipated. `CLAUDE.md` still holds
-the scope and the rules; this is only the running list of what has not
-been built yet, in the order it should be built.
+Written 2026-09-11, most of it closed out on 2026-09-12. `CLAUDE.md`
+still holds the scope and the rules; this is the running list of what
+has not been built yet, in the order it should be built.
 
 Anything not on this list is either done or deliberately out of scope
 (see CLAUDE.md §4, "Explicitly out of scope").
 
-## 1. Roster changes, before and after a season starts
+## 1. Notifications need `LINE_GROUP_ID`
 
-The last piece that is about **data correctness** rather than looks, so
-it goes first.
+`reminders.yml` pointed at the Neon **dev** branch since the day it was
+written — the same secret `ci.yml`'s Postgres tests use — so its daily
+09:00 run "succeeded" against seed data and no reminder had ever reached
+a real game. Fixed on 2026-09-12: it now reads `PRODUCTION_DATABASE_URL`.
 
-Part of this landed on 2026-09-12, because a random sweep
-(`tests/api/test_fuzz.py`) proved it was a live bug rather than a missing
-nicety: adding a member now refuses when the roster is already the size
-of the capacity, or when any game has no free slot. What is still missing
-is everything around that refusal — the confirmations below, and the
-"raise the capacity" route out of it that the message tells people to
-take. Creating a season with more members than slots is also still
-allowed, which is now the only way left to build an over-capacity
-roster.
+What's still missing is the one thing only the organizer can supply:
+**`LINE_GROUP_ID` has never been set as a secret**, so the group message
+stays silent — the short-roster alert to the organizer alone
+(`LINE_ORGANIZER_USER_ID`, already set) will start firing for real on
+the next short-handed game, but nobody in the group chat sees anything
+until that secret is added.
 
-The rules, as specified on 2026-09-10:
+Beyond that, the five message types described in a previous draft of
+this file (new joiners, unpaid-fee chase, settlement, waitlist
+promotion, and the two already built) are still just a wishlist —
+`notify/reminders.py` sends exactly the pre-game reminder and the
+short-roster alert, matching milestone 4's original scope. Building the
+rest is real, separate work, not a bug fix.
 
-| When | Adding | Removing |
-|---|---|---|
-| Before the first game | free, no confirmation — but never past `capacity` | free, no confirmation |
-| After the season has started, roster full | refused, with the reason and a way to raise the capacity | allowed, with a confirmation |
-| After the season has started, roster short | allowed, with a confirmation | allowed, with a confirmation |
+## 2. `routes.py` split
 
-"Started" means the first game's date has passed. The confirmations
-exist because a mid-season roster change moves money — the person
-joining or leaving is charged or refunded for the whole season, and
-under the capacity-based split (see `docs/billing-rules.md`) it is only
-ever *their* bill that moves, which is worth saying on the screen.
+3,600-odd lines and over 40 routes now — larger than a week ago, since
+this stage's fixes (capacity limits, the invite token, the crash-
+reporting middleware) all landed in it. The seams are clear enough
+(clubs, seasons, attendance, money), but splitting it is a large diff
+with no behaviour change, and doing it in the same wave as several real
+behaviour changes to the same file is exactly the "busy moment" this
+note has always warned against. Wants its own quiet stage.
 
-Not built at all yet: today the roster is editable without limit and
-without prompts.
+## 3. Loose ends, deliberately left open
 
-## 2. The management screens
-
-Three things reported as looking wrong, none of them yet addressed.
-
-**The 新增臨打 block on the overview.** Called out as ugly and
-inconsistent with the member page's signup sheet, which has since been
-rebuilt around a shared picker (`renderPersonPicker`). This block should
-use the same picker rather than a bare name field and a select.
-
-**The roster page order.** `organizer-members.html` currently reads:
-join link, people not on this season, add a guest, then the actual
-roster last. It should lead with **本季固定成員**, then a section of its
-own for people **waiting to be approved** (`wants_fixed_membership ===
-true`, currently only a tag inside another list), then everyone else,
-collapsed.
-
-**The 帳務 screen** has not been looked at since the wording pass. Worth
-a read-through with the same eye once the two above are done.
-
-## 3. Notifications
-
-Nothing is built beyond `notify/reminders.py`, and `LINE_GROUP_ID` has
-never been set, so **not one message has ever been sent**.
-
-The five types wanted, and the quota they cost (200 push messages a
-month, free tier — reply messages are unlimited but only answer
-somebody):
-
-| Message | Roughly |
-|---|---|
-| Two days before a game | 4/month |
-| The day before, with the price and whether the air conditioning is on | 4/month |
-| New joiners, batched — at most one a day | ≤5/month |
-| Unpaid-fee chase, at most four a season | 4/season |
-| Season settlement | 1/season |
-| Somebody promoted off the waitlist, to that person | a handful |
-
-About 21 a month against 200, so quota is not the constraint; deciding
-what is worth interrupting people for is. Two earlier candidates —
-「被指定為代打」and「場次取消」— were dropped for that reason.
-
-## 4. Loose ends
-
-- **`routes.py` is 2,900 lines and 40 routes.** It has not been split.
-  The seams are clear enough (clubs, seasons, attendance, money), but
-  splitting it is a large diff with no behaviour change, so it wants a
-  quiet moment rather than a busy one.
-- **The invite link carries a guessable club id** (`?club=12`). A token
-  would be better.
-- **The API's error messages are English, and the UI shows them raw.**
-  Every `raise HTTPException` detail goes straight into a Chinese toast:
-  「加入失敗：Already a member of this season」. CLAUDE.md asks for the
-  user-facing text to be Traditional Chinese and centralized in one
-  module, so this wants a message catalogue keyed by code rather than
-  translating strings where they are raised. Most visible on the roster
-  screen, where the new capacity refusals live.
-- **No error monitoring.** A 500 in production is invisible unless
-  somebody reports it. One existed for the whole life of the project and
-  was only found on 2026-09-12: linking a LINE account to a roster entry
-  crashed on a foreign key whenever that account had ever signed a guest
-  up, and the browser reported it as a CORS error, because a crash
-  carries no headers.
-- **No restore drill.** Neon keeps backups; nobody has ever tried
-  restoring one.
-- **The README's full write-up** — architecture and the reasoning behind
-  each decision — is still the placeholder paragraph. It is the
-  resume-facing artifact, and milestone 5 says it gets written once, at
-  the end.
+- **Joining a club without the invite link.** `?invite=<token>` (an HMAC
+  of the club id, `src/volleyflow/api/invites.py`) closed the
+  reconnaissance half of "the invite link carries a guessable id" — a
+  stranger can no longer find a club's name by trying small integers in
+  the shared link. `POST /clubs/{id}/join` itself still accepts a plain
+  id from any already-identified caller, so a determined stranger who
+  calls it directly, bypassing the link, still can. Closing that fully
+  means making the token *required* on join, which touches roughly sixty
+  existing test call sites that use the endpoint as ordinary setup — a
+  large, low-value diff for a personal club with no history of abuse.
+  Left open on purpose, not missed.
+- **The error-message catalogue covers what an ordinary tap reaches, not
+  every route.** `translateApiError` in `shared.js` (2026-09-12) is a
+  curated table of fixed phrases, not a code every one of forty routes
+  sends — the same "sixty call sites" trade-off as above, applied to a
+  different endpoint. An error nobody has actually hit yet still shows
+  its English reason, wrapped in a Chinese sentence rather than replacing
+  it.
+- **No restore drill against production.** The drill itself now exists
+  and has been run for real — `scripts/backup_db.py` / `restore_db.py`,
+  exercised against the dev branch on 2026-09-12, including the actual
+  disaster-then-restore sequence, not just a read of the code. What
+  remains is doing it once against production, which needs the
+  organizer's own access — this project's rule is that production
+  credentials are never handled from here. Neon's own point-in-time
+  restore is the faster first line of defence regardless, but only
+  reaches 6 hours back on the free plan (1GB of changes) — not long
+  enough for a mistake noticed the next day, which is what the script is
+  for.
 
 ## Not doing
 

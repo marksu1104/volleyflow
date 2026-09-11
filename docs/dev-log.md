@@ -1511,3 +1511,135 @@ screen once everything lands, that a refusal rolls the change back *and*
 says why, and that nothing is left spinning or disabled afterwards.
 
 380 tests, 151 frontend tests, five browser checks.
+
+## 2026-09-12 (continued) — the five things left on the backlog
+
+Asked for directly: all five items in `docs/backlog.md`'s numbered list,
+in one pass. Written up here as one stage because that is how it was
+worked, even though each piece stands alone.
+
+**Capacity closed the rest of the way.** The fuzz sweep above closed two
+gaps in the same afternoon it opened two more, both found by extending
+the same suite rather than by hand: raising or lowering a season's
+capacity moved `share_per_game` without ever calling
+`_sync_season_fee_ledger`, so a capacity change re-priced the season on
+screen without writing the adjustment that makes it real — the ledger
+and the headline number disagreed until the next unrelated write touched
+the sync path by accident. And a season could still be *created* with
+more members than its own capacity, the one path adding a member
+mid-season didn't already cover. Both closed: `start_season` refuses the
+first, `update_season` refuses lowering capacity below the roster or any
+game's current attendance, and a capacity edit now syncs the ledger the
+same way a venue-cost edit always has.
+
+**Roster changes are free before a season starts, and ask first after.**
+Per the table in `docs/backlog.md`: adding or removing a fixed member is
+silent before the first game and asks for confirmation after, because a
+mid-season change moves money on that person's ledger immediately.
+`seasonHasStarted` — the first game's date already past — is the one
+new question the frontend needed to answer; the backend's capacity
+refusal from above holds regardless of when it happens, since capacity
+was never a "sometimes" rule. The refusal message tells the organizer to
+raise the capacity; `offerToRaiseCapacity` now does that in place —
+prompt for a new number, `PATCH` the season, retry the add that just
+failed — instead of sending them to 設定 and back for what is, from the
+error's own text, a single number.
+
+**The management screens.** 新增臨打 was a bare name field and a gender
+select, the one control on the game sheet not using the shared picker
+the signup and substitute flows already share — now it opens the same
+modal, built from the club roster and the viewer's own guest list, same
+as the others. Fixing this also surfaced a real ordering bug: the
+picker's own markup sat *before* its trigger button, so once opened once
+it stayed in the DOM and pushed every later button's index in
+`tests/visual/smoke.js`'s click sweep — caught as a false "no reaction,"
+fixed by putting the trigger first, which is also the correct tab order
+for a keyboard user, independent of the test. The roster page now leads
+with 本季固定成員 — what the organizer opens the page to read — followed
+by 等待加入本季 (`wants_fixed_membership === true`) as its own section,
+with everyone else on the collapsed 其他球隊成員 list a tap away rather
+than sitting above the roster it used to.
+
+**A message catalogue, not forty error codes.** The backend's error
+details stay English, per CLAUDE.md's language policy; `translateApiError`
+in `shared.js` is now the one place — not forty raise sites — that turns
+the ones an ordinary tap can actually reach into Chinese, matched by
+fixed phrases rather than a stable code the backend doesn't send. Giving
+every route a code was the more thorough answer and the wrong-sized one:
+it would have touched dozens of tests that legitimately call these routes
+as internal setup, for a project this size. Unmatched text still reaches
+the reader wrapped in a Chinese sentence with the reason attached, rather
+than replacing it outright.
+
+**The join link carries a token now, not a database id.** `?club=12`
+meant a stranger with any LINE account who tried small integers could
+read a club's name and join it; `?invite=<token>` (an HMAC of the club id,
+`src/volleyflow/api/invites.py`) closes the reconnaissance half of that.
+Deliberately not the whole thing: making the token *required* to join
+would mean changing `POST /clubs/{id}/join`'s contract, which around
+sixty existing test call sites use as ordinary setup — a large,
+low-value diff for a personal club with no history of abuse. Written
+down rather than silently left: a determined, already-identified stranger
+who calls the join endpoint directly, bypassing the link entirely, still
+can.
+
+**A crash reports itself.** Linking a LINE account had been crashing on
+a foreign key for the project's whole life (see the fuzz entry above) and
+nobody had noticed — the actual "no error monitoring" gap, not a
+hypothetical one. Standing up a third-party service was the obvious
+answer and the wrong one to commit to sight unseen: Sentry's card
+requirement at signup reads differently across sources depending on who
+you ask, and CLAUDE.md's one hard budget rule is nothing that needs a
+card. What this already had the pieces for was better — the LINE push
+client built for reminders now also carries a crash report to the
+organizer, rate-limited to once per (exception type, route) per half
+hour so a client stuck retrying a broken request can't spend a month's
+quota reporting the same bug. The one real trap: a handler registered the
+ordinary way, `@app.exception_handler(Exception)`, attaches to
+Starlette's `ServerErrorMiddleware`, which sits *outside* `CORSMiddleware`
+— so its response never gets an `Access-Control-Allow-Origin` header, and
+the browser reports a same-origin violation instead of the real 500.
+Exactly how the crash above first read in the browser. `ErrorReportingMiddleware`
+is ordinary middleware, added before CORS in `main.py`, for precisely
+this reason — proven by a test that asserts the header survives a
+deliberate crash, not just by reasoning about it.
+
+**The restore drill.** Actually run, against the dev branch, not just
+documented: `scripts/backup_db.py` dumps every table to plain JSON;
+`scripts/restore_db.py` deletes everything and restores it, children
+before parents on the way out and parents before children on the way
+back in. Building it found two bugs a dry run on paper would not have:
+`problem_reports.id` is an unguessable text token, not a sequence, so
+resyncing "the next identity value" after restoring has to ask Postgres
+whether a sequence exists at all rather than assuming every `id` column
+has one; and a game's `status` is stored by its enum *name*
+("SCHEDULED") while the JSON dump — matching the rest of the app's own
+convention — holds its *value* ("scheduled"), so restoring the raw string
+back verbatim reached Postgres as a label the enum type doesn't have.
+Both found by actually deleting `ledger_entries` on the dev branch and
+restoring it back, not by inspection. This is the second line of defence,
+not the first: Neon's own point-in-time restore needs no script and is
+still the fast path, but the free plan only reaches 6 hours back (and
+1GB of changes) — not long enough for a mistake found the next day, which
+is what a plain dump sitting outside that window is for.
+
+**Two accuracy fixes that don't belong to any one item.** `reminders.yml`
+had read `secrets.DATABASE_URL` — the Neon *dev* branch, the same secret
+`ci.yml`'s Postgres tests use — since the day it was written, so the
+09:00 cron job "succeeded" daily against seed data and no reminder had
+ever reached a real game. Now points at `PRODUCTION_DATABASE_URL`; the
+group message stays silent until `LINE_GROUP_ID` is set, which nobody has
+done yet, so this is wired but not yet live. And the README got the
+rewrite CLAUDE.md's milestone 5 asks for — the architecture, and the
+reasoning behind each of the decisions above, in the resume-facing file
+rather than only in this one.
+
+**Left for a quieter moment, on purpose.** `routes.py` is larger than it
+was this morning, not smaller — the fuzz fixes and the token and the
+error middleware all landed in it. Splitting it into per-resource files
+is still a large, zero-behaviour-change diff, and doing it in the same
+wave as several real behaviour changes to the same file is exactly the
+"busy moment" the backlog note about it warns against. Kept as the one
+remaining item, deliberately, rather than folded in here.
+
+410 tests, 163 frontend tests, six browser checks.

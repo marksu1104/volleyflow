@@ -33,6 +33,7 @@ from volleyflow.api.conversion import (
     season_from_rows,
 )
 from volleyflow.api.dependencies import get_db
+from volleyflow.api.invites import club_id_from_invite_token, invite_token
 from volleyflow.api.schemas import (
     AbsenceCancelOut,
     AbsenceCreate,
@@ -56,6 +57,7 @@ from volleyflow.api.schemas import (
     Gender,
     GenderUpdate,
     GuestOut,
+    InviteOut,
     LedgerEntryOut,
     MemberAdd,
     MemberOut,
@@ -431,12 +433,15 @@ def _require_season_member(db: Session, season_id: int, player_id: int) -> None:
         )
 
 
-def _has_open_slot(db: Session, game: GameRow, season: SeasonRow) -> bool:
-    """Expected attendance for this game vs. the season's capacity.
+def _expected_on_court(db: Session, game: GameRow, season: SeasonRow) -> int:
+    """How many people this game expects: fixed members minus this game's
+    absences, plus active drop-ins. Members who haven't taken leave count
+    as attending by default — see CLAUDE.md 2.3, "members are expected by
+    default."
 
-    expected = (fixed members minus this game's absences) + active drop-ins.
-    Members who haven't taken leave count as attending by default — see
-    CLAUDE.md 2.3, "members are expected by default."
+    Independent of `season.capacity` on purpose: `update_season` needs
+    this number to check a *proposed* capacity before committing to it,
+    not the one already on the row.
     """
     member_count = (
         db.query(SeasonMemberRow).filter(SeasonMemberRow.season_id == season.id).count()
@@ -477,8 +482,11 @@ def _has_open_slot(db: Session, game: GameRow, season: SeasonRow) -> bool:
         .filter(DropInRow.game_id == game.id, DropInRow.cancelled_at.is_(None))
         .count()
     )
-    expected = (member_count - absences) + active_drop_ins
-    return expected < season.capacity
+    return (member_count - absences) + active_drop_ins
+
+
+def _has_open_slot(db: Session, game: GameRow, season: SeasonRow) -> bool:
+    return _expected_on_court(db, game, season) < season.capacity
 
 
 def _is_signed_up(db: Session, game: GameRow, player_id: int) -> bool:
@@ -634,8 +642,26 @@ def _record_drop_in_charge(
     the moment they're confirmed (signup or waitlist promotion), reversed
     the moment they cancel. See CLAUDE.md 2.4: "A DropIn pays the per-game
     share, collected by the organizer."
+
+    A cancellation refunds `drop_in.charged_amount` — what this specific
+    signup actually paid — rather than recomputing the game's share as of
+    right now. Those can differ: the organizer can flip a game's air
+    conditioning or edit the season's capacity between signup and
+    cancellation, and either one moves `share_per_game`. Refunding the
+    recomputed share left a residual balance on somebody no longer
+    connected to the game at all — charged $667 for a cooled night,
+    refunded $572 once the setting was corrected — found by a random
+    sweep rather than a real invoice not adding up. `charged_amount` is
+    null on a drop-in recorded before this existed, so that one case
+    still falls back to the old behaviour.
     """
-    share = _drop_in_share(db, season_row, drop_in.game_id)
+    if reverse:
+        share = drop_in.charged_amount
+        if share is None:
+            share = _drop_in_share(db, season_row, drop_in.game_id)
+    else:
+        share = _drop_in_share(db, season_row, drop_in.game_id)
+        drop_in.charged_amount = share
     db.add(
         LedgerEntryRow(
             player_id=drop_in.player_id,
@@ -1256,6 +1282,39 @@ def get_club(
     return ClubOut(id=club.id, name=club.name)
 
 
+@router.get("/clubs/{club_id}/invite", response_model=InviteOut)
+def get_club_invite(
+    club_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> InviteOut:
+    """The token for this club's join link — organizer-only, since only
+    the join-link screen in organizer-members.html asks for it. See
+    api/invites.py for why a token replaced the raw club id.
+    """
+    club = _get_club_or_404(db, club_id)
+    _require_organizer(db, club_id, current_player)
+    return InviteOut(club_id=club.id, club_name=club.name, token=invite_token(club.id))
+
+
+@router.get("/invites/{token}", response_model=InviteOut)
+def resolve_invite(token: str, db: Session = Depends(get_db)) -> InviteOut:
+    """What a shared join link points at — the "加入「啪排郎」？" prompt
+    needs a name before anyone has joined or even signed in, which is
+    also why this needs no caller identity: the token itself, not an
+    account, is what makes a club findable here. Forging one is a
+    64-bit HMAC guess, which is a stronger gate than the LINE login this
+    replaced (see api/invites.py).
+    """
+    club_id = club_id_from_invite_token(token)
+    if club_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invite link not recognised")
+    club = db.get(ClubRow, club_id)
+    if club is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "This club no longer exists")
+    return InviteOut(club_id=club.id, club_name=club.name)
+
+
 @router.get("/players/{player_id}/clubs", response_model=list[MyClubOut])
 def list_player_clubs(
     player_id: int,
@@ -1788,6 +1847,19 @@ def start_season(
     _get_club_or_404(db, club_id)
     _require_organizer(db, club_id, current_player)
 
+    # A fixed member holds a slot for the whole season (CLAUDE.md 2.3), so
+    # the roster this season starts with can never be larger than its own
+    # capacity — the same rule add_member enforces for a roster change
+    # mid-season. This was the one way left to build an over-capacity
+    # season, found by tests/api/test_fuzz.py once the mid-season path was
+    # closed.
+    if len(payload.member_names) > payload.capacity:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"{len(payload.member_names)} fixed members is more than the "
+            f"capacity of {payload.capacity}",
+        )
+
     season = SeasonRow(
         club_id=club_id,
         total_venue_cost=payload.total_venue_cost,
@@ -1888,20 +1960,42 @@ def update_season(
     _require_organizer(db, season.club_id, current_player)
 
     updates = payload.model_dump(exclude_unset=True)
-    # Both, not just the venue cost: a game's price is one subtracted
-    # from the other, so moving either after settling would re-price a
-    # season whose ledger is already closed.
-    priced = {"total_venue_cost", "ac_surcharge"} & updates.keys()
+    # All three, not just the venue cost: capacity is the other half of
+    # share_per_game's denominator (CLAUDE.md 2.4), so moving any of them
+    # would re-price a season whose ledger is already closed.
+    priced = {"total_venue_cost", "ac_surcharge", "capacity"} & updates.keys()
     if priced and season.settled_at is not None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Season is already settled — venue cost can't change now",
         )
 
+    # Lowering capacity below what's already on court would be the same
+    # overfill add_member refuses, just reached from the other side — a
+    # fixed member is expected at every game already, so the roster size
+    # and every game's expected attendance are both floors on how far
+    # capacity can drop.
+    if "capacity" in updates and updates["capacity"] < season.capacity:
+        new_capacity = updates["capacity"]
+        roster_size = (
+            db.query(SeasonMemberRow)
+            .filter(SeasonMemberRow.season_id == season.id)
+            .count()
+        )
+        games = db.query(GameRow).filter(GameRow.season_id == season.id).all()
+        busiest = max((_expected_on_court(db, g, season) for g in games), default=0)
+        floor = max(roster_size, busiest)
+        if new_capacity < floor:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Can't lower capacity to {new_capacity} — {floor} people "
+                "are already on the roster or on a game's court",
+            )
+
     for field, value in updates.items():
         setattr(season, field, value)
 
-    if "total_venue_cost" in updates:
+    if priced:
         db.flush()
         _sync_season_fee_ledger(db, season)
 

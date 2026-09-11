@@ -112,7 +112,7 @@ test("the waitlist keeps its order and marks the viewer", () => {
 test("editing controls appear only for a caller that can edit", () => {
   const readOnly = render();
   assert.doesNotMatch(readOnly, /data-mark-absent/);
-  assert.doesNotMatch(readOnly, /data-add-dropin/);
+  assert.doesNotMatch(readOnly, /data-open-add-dropin/);
 
   const editable = render({
     onRecordAbsence() {},
@@ -121,7 +121,7 @@ test("editing controls appear only for a caller that can edit", () => {
     onAddDropIn() {},
   });
   assert.match(editable, /data-mark-absent/);
-  assert.match(editable, /data-add-dropin/);
+  assert.match(editable, /data-open-add-dropin/);
   assert.match(editable, /data-remove-drop-in/);
 });
 
@@ -166,7 +166,7 @@ test("controls come before the lists, never after them", () => {
 
   const html = el.innerHTML;
   const action = html.indexOf("my-action");
-  const addDropIn = html.indexOf("data-add-dropin");
+  const addDropIn = html.indexOf("data-open-add-dropin");
   const lists = html.indexOf('class="gd-tabs"');
 
   assert.ok(action >= 0 && addDropIn >= 0 && lists >= 0, "all three rendered");
@@ -263,11 +263,12 @@ test("only the chosen group is shown", () => {
   assert.match(el.innerHTML, /data-gd-panel="queued"[^>]*hidden/);
 });
 
-test("新增臨打 with no name signs nobody up", () => {
-  // The other half — that it says why rather than ignoring the tap —
-  // can't be seen from here: toast() resolves inside the loaded scope,
-  // so a stub on globalThis never reaches it. tests/visual/smoke.js
-  // presses this in a real browser and fails if nothing happens at all.
+test("新增臨打 opens the shared picker rather than signing anyone up directly", () => {
+  // onAddDropIn only ever fires once the picker resolves with somebody
+  // actually chosen — never straight off the trigger tap. The picker
+  // itself builds its markup as an HTML string, so exercising the full
+  // pick-and-confirm flow needs a real DOM; tests/visual/smoke.js presses
+  // this for real and tests/visual/feedback.js times its response.
   const { season, game } = fixture();
   const el = makeElement();
   const added = [];
@@ -275,11 +276,12 @@ test("新增臨打 with no name signs nobody up", () => {
     viewerName: "蘇慬",
     onAddDropIn: (name) => added.push(name),
   });
-  el.querySelector = () => ({ value: "   ", focus() {} });
 
-  el.onclick({ target: { closest: (s) => (s === "[data-add-dropin]" ? {} : null) } });
+  el.onclick({
+    target: { closest: (s) => (s === "[data-open-add-dropin]" ? {} : null) },
+  });
 
-  assert.deepEqual(added, [], "a blank name must never become a person");
+  assert.deepEqual(added, [], "nobody is added before a name is actually chosen");
 });
 
 test("a tap on a roster button is not swallowed by the tab strip", () => {
@@ -586,4 +588,42 @@ test("the absent list drops the 訪客 tag, which means nothing there", () => {
   const absent = el.innerHTML.split('<div class="att-row absent')[1].split("</div>")[0];
   assert.doesNotMatch(absent, /guest-tag/);
   assert.match(el.innerHTML, /guest-tag/, "but it still appears on the attendance list");
+});
+
+// seasonHasStarted draws the line docs/backlog.md "Roster changes" is
+// built on: free and silent before the first game, a confirmation after
+// — see organizer-members.html's promoteFromPool, addGuest, removeMember.
+const { seasonHasStarted } = load();
+
+// describeDate compares against local midnight, not UTC, so these build
+// "today ± n days" the same way rather than through toISOString (UTC) —
+// which is exactly the mismatch that made this flaky in the first place.
+function localDateOffsetBy(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+test("a season with no games hasn't started", () => {
+  assert.equal(seasonHasStarted({ games: [] }), false);
+});
+
+test("a season whose first game is in the future hasn't started", () => {
+  assert.equal(seasonHasStarted({ games: [{ date: localDateOffsetBy(7) }] }), false);
+});
+
+test("a season whose first game already happened has started", () => {
+  assert.equal(seasonHasStarted({ games: [{ date: localDateOffsetBy(-7) }] }), true);
+});
+
+test("today's game does not count as started yet", () => {
+  assert.equal(seasonHasStarted({ games: [{ date: localDateOffsetBy(0) }] }), false);
+});
+
+test("only the first game in the list decides it, whatever comes later", () => {
+  const past = localDateOffsetBy(-7);
+  const future = localDateOffsetBy(7);
+  assert.equal(seasonHasStarted({ games: [{ date: past }, { date: future }] }), true);
+  assert.equal(seasonHasStarted({ games: [{ date: future }, { date: past }] }), false);
 });

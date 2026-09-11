@@ -133,32 +133,64 @@
   // People this viewer has brought before — the quick picks in the
   // substitute and signup sheets. See fetchMyGuests.
   let myGuests = [];
-  // Set when ?club= names a club this player hasn't joined. Holds the
-  // page on the invite instead of letting the picker pick a club they
-  // *are* in — see renderInviteScreen.
+  // Set once an ?invite= token has been looked at, whether or not it
+  // resolved to a real club — either way the page owes the visitor an
+  // answer before the ordinary pickers run. See renderInviteScreen.
+  let pendingInviteToken = null;
+  // Only set when the token above actually resolved. Holds the page on
+  // the invite instead of letting the picker pick a club they *are* in.
   let pendingInviteClubId = null;
+  let pendingInviteClubName = null;
   // False until we know whether there's a season and who's on it. Guards
   // renderIntentAsk; see the comment there.
   let seasonSettled = false;
 
-  // A club's "用連結加入球隊" link carries ?club=<id> — LIFF forwards
+  // A club's "用連結加入球隊" link carries ?invite=<token> — LIFF forwards
   // query params from the liff.line.me URL through to this page, so
   // opening a shared link picks the right club without the visitor
-  // having to find it in a list themselves. Applied synchronously,
-  // before initClubAndSeasonPickers reads localStorage below — LIFF
-  // identity resolution is slow enough (a round trip to LINE) that
-  // doing this inside initIdentity instead would race the pickers and
-  // sometimes lose. Stripped from the URL right away so a later reload
-  // or club switch (which also reloads) doesn't keep snapping back here.
-  // Said before any request goes out, so the very first paint is "載入中"
-  // rather than a bare page that looks like it failed.
+  // having to find it in a list themselves.
+  //
+  // The token stands in for the club's numeric id (see
+  // src/volleyflow/api/invites.py): trying small integers in that
+  // position used to be enough to read any club's name and join it, so
+  // the id in a shared link is no longer guessable. Resolving it needs a
+  // round trip, unlike the plain id this replaced — done here, before
+  // initLiffIdentity, so it doesn't race initClubAndSeasonPickers reading
+  // localStorage below the way putting it inside identity resolution
+  // would. GET /invites/{token} needs no caller identity for exactly
+  // this reason: a visitor with no LIFF session yet still needs to see
+  // whose invite this is.
+  //
+  // Stripped from the URL right away so a later reload or club switch
+  // doesn't keep snapping back here. Said before any request goes out,
+  // so the very first paint is "載入中" rather than a bare page that
+  // looks like it failed.
   showPageLoading(document.getElementById("hero-wrap"));
 
-  const requestedClubId = new URLSearchParams(location.search).get("club");
-  if (requestedClubId) {
-    localStorage.setItem(CLUB_STORAGE_KEY, requestedClubId);
-    history.replaceState(null, "", location.pathname);
-  }
+  const inviteResolved = (async () => {
+    const params = new URLSearchParams(location.search);
+    const token = params.get("invite");
+    if (!token) return;
+    // Only this param — not the whole query string, which is also where
+    // ?as= lives locally (see devIdentityName). Dropping the lot here
+    // used to strip that too, so opening an invite link with ?as= on it
+    // silently fell through to a real LINE login instead of the dev
+    // identity being asked for.
+    params.delete("invite");
+    const rest = params.toString();
+    history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : ""));
+    pendingInviteToken = token;
+    try {
+      const res = await fetch(`${API_BASE}/invites/${encodeURIComponent(token)}`);
+      if (!res.ok) return; // renderInviteScreen shows "找不到這個球隊"
+      const invite = await res.json();
+      pendingInviteClubId = String(invite.club_id);
+      pendingInviteClubName = invite.club_name;
+      localStorage.setItem(CLUB_STORAGE_KEY, pendingInviteClubId);
+    } catch (e) {
+      // Same outcome as an invalid token — nothing to join, nothing lost.
+    }
+  })();
 
   const identityReady = (async function initIdentity() {
     const identityEl = document.getElementById("identity");
@@ -205,7 +237,7 @@
       document.getElementById("hero-wrap").innerHTML = signInFailureHtml(identified);
       return;
     }
-    if (pendingInviteClubId) {
+    if (pendingInviteToken) {
       renderInviteScreen();
       return;
     }
@@ -220,14 +252,13 @@
    * So the invite is the whole screen until it's answered. */
   function renderInviteScreen() {
     stopLoadingEscalation();
-    const club = allClubs.find((c) => String(c.id) === String(pendingInviteClubId));
     document.getElementById("season-picker").hidden = true;
     document.getElementById("hero-wrap").innerHTML = emptyStateHtml(
-      club ? `加入「${club.name}」？` : "找不到這個球隊",
-      club
+      pendingInviteClubId ? `加入「${pendingInviteClubName}」？` : "找不到這個球隊",
+      pendingInviteClubId
         ? "這是主揪分享的邀請連結。加入之後就能看到本季場次、請假和帳務。"
         : "這個邀請連結可能已經失效，或球隊已經被刪除。請向主揪確認。",
-      club
+      pendingInviteClubId
         ? { label: "加入球隊", onclick: "joinFromPrompt()" }
         : { label: "回到我的球隊", onclick: "forgetInvite()" }
     );
@@ -342,8 +373,8 @@
   /** GET /clubs is scoped to the caller now, so "every club" and "my
    * clubs" are the same list — it just also carries my role in each.
    * The one club that can be relevant without being mine is the target
-   * of an invite link, fetched by id below purely so the join prompt has
-   * a name to show. */
+   * of an invite link, resolved from its token by `inviteResolved`
+   * above purely so the join prompt has a name to show. */
   async function refreshMyClubs() {
     if (!myPlayerId) {
       myClubs = [];
@@ -368,17 +399,16 @@
       allClubs = [];
     }
 
-    // Only a club named by *this* load's ?club= counts as an invite. A
-    // remembered club that's no longer mine is a different situation —
-    // it was deleted, or I was removed — and there the picker's own
-    // "fall back to a club you are in" recovery is the right answer.
-    // Treating that as an invite too would strand them on a join screen
-    // for a club GET /clubs/{id} won't even return.
-    const pending = requestedClubId;
-    if (pending && !myClubs.some((c) => String(c.id) === String(pending))) {
-      pendingInviteClubId = pending;
-      const res = await fetch(`${API_BASE}/clubs/${pending}`, { headers: authHeader() });
-      if (res.ok) allClubs.push(await res.json());
+    // Only a club the invite token names, and only if it isn't already
+    // mine, counts as an invite to answer. Already being a member means
+    // this is somebody opening their own club's link again — the
+    // ordinary picker already lands there through the remembered club in
+    // localStorage, and there's nothing left to ask. Not resolving at
+    // all (a bad or expired token) leaves pendingInviteClubId unset,
+    // which renderInviteScreen reads as "找不到這個球隊".
+    await inviteResolved;
+    if (pendingInviteClubId && myClubs.some((c) => String(c.id) === String(pendingInviteClubId))) {
+      pendingInviteClubId = null;
     }
   }
 
@@ -533,6 +563,7 @@
       await postJson(API_BASE, `/clubs/${currentClubId()}/join`, {});
       await refreshMyClubs();
       pendingInviteClubId = null;
+      pendingInviteToken = null;
       renderManageButton();
       renderClubChip();
       // Not into the app yet — ask which kind of member they are first.

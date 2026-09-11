@@ -3134,6 +3134,59 @@ def test_setting_the_air_conditioning_to_what_it_already_is_changes_nothing(
     assert after == before, "a no-op write must not write a zero adjustment"
 
 
+def test_cancelling_a_drop_in_refunds_what_they_were_actually_charged(
+    client: TestClient, db_session: Session
+) -> None:
+    """Not the share recomputed as of the cancellation.
+
+    The air conditioning setting changes what a game costs, and it can
+    change between somebody signing up and cancelling. Refunding a
+    freshly recomputed share instead of the amount actually taken left a
+    residual balance on somebody no longer connected to the game at all
+    — found by a random sweep, not by a real invoice not adding up. See
+    routes._record_drop_in_charge and the migration that added
+    DropInRow.charged_amount.
+    """
+    season = _start_season(
+        client,
+        total_venue_cost="10000",
+        game_dates=["2026-08-04"],
+        member_names=["Alice"],
+        capacity=2,
+    )
+    season_id, game_id = season["id"], season["games"][0]["id"]
+    club_id = season["club_id"]
+    db_session.execute(
+        text("UPDATE seasons SET ac_surcharge = 1000 WHERE id = :s"), {"s": season_id}
+    )
+    client.put(f"/games/{game_id}/air-conditioning", json={"air_conditioned": True})
+
+    drop_in = client.post(
+        "/drop-ins", json={"player_name": "甲", "game_id": game_id}
+    ).json()
+    charged = Decimal(
+        client.get(f"/clubs/{club_id}/players/{drop_in['player_id']}/ledger").json()[
+            "balance"
+        ]
+    )
+    assert charged < 0, "signing up is a charge"
+
+    # The setting is corrected before they cancel — the share this game
+    # costs has now moved.
+    client.put(f"/games/{game_id}/air-conditioning", json={"air_conditioned": False})
+    client.post(f"/drop-ins/{drop_in['id']}/cancel", json={})
+
+    after = Decimal(
+        client.get(f"/clubs/{club_id}/players/{drop_in['player_id']}/ledger").json()[
+            "balance"
+        ]
+    )
+    assert after == 0, (
+        f"charged then cancelled must net to zero, not {after} — "
+        "the refund used today's share instead of what was actually charged"
+    )
+
+
 def test_a_member_cannot_change_the_air_conditioning(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
     game_id = season["games"][0]["id"]

@@ -5,6 +5,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from volleyflow.api.error_reporting import ErrorReportingMiddleware
 from volleyflow.api.line_webhook import router as line_webhook_router
 from volleyflow.api.routes import router
 
@@ -43,6 +44,12 @@ _PRIVATE_LAN_ORIGIN = (
 )
 _dev_login = os.environ.get("VOLLEYFLOW_DEV_LOGIN") == "1"
 
+# Order matters: Starlette wraps middleware added *later* around
+# middleware added earlier, so ErrorReportingMiddleware must be added
+# before CORSMiddleware for a caught error's response to still pass back
+# out through CORS and get its header — see ErrorReportingMiddleware's
+# own docstring for what goes wrong the other way around.
+app.add_middleware(ErrorReportingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,

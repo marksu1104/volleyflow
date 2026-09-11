@@ -10,6 +10,8 @@ normal case, not an edge one.
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from tests.api.factories import start_season
 
@@ -142,15 +144,18 @@ def test_somebody_elses_named_substitute_is_never_bumped(client: TestClient) -> 
 
 
 def test_a_full_game_of_named_substitutes_refuses_rather_than_overfilling(
-    client: TestClient,
+    client: TestClient, db_session: Session
 ) -> None:
-    # Both members are on the roster from the start rather than one being
-    # added later: add_member now refuses to put another expected body
-    # into a game that is already full, which is the rule this very test
-    # is about. A season created with more members than slots is the one
-    # remaining way to build the state — see docs/backlog.md, "roster
-    # changes", for the gap that leaves open.
-    season = start_season(client, member_names=["Alice", "Bob"], capacity=1)
+    # This is a safety net for a row that predates two rules added on
+    # 2026-09-12: start_season now refuses more members than capacity,
+    # and update_season refuses lowering capacity below the roster or any
+    # game's current attendance (see test_capacity_limits.py). Together
+    # they mean capacity >= roster size always, through every route the
+    # app itself offers — so "two members, one slot" can no longer be
+    # built by calling the API, only by a row already in that state from
+    # before those checks existed. Simulated here with a direct write,
+    # since the API correctly won't do it anymore.
+    season = start_season(client, member_names=["Alice", "Bob"], capacity=2)
     game_id = season["games"][0]["id"]
     absence = client.post(
         "/absences", json={"player_name": "Alice", "game_id": game_id}
@@ -158,9 +163,13 @@ def test_a_full_game_of_named_substitutes_refuses_rather_than_overfilling(
     bobs_absence = client.post(
         "/absences", json={"player_name": "Bob", "game_id": game_id}
     ).json()
+    client.put(f"/absences/{absence['id']}/substitute", json={"player_name": "Zoe"})
+    db_session.execute(
+        text("UPDATE seasons SET capacity = 1 WHERE id = :s"), {"s": season["id"]}
+    )
+    db_session.commit()
     # Zoe now holds the only slot, as Alice's own pick. Bob's absence has
     # nowhere to put a substitute.
-    client.put(f"/absences/{absence['id']}/substitute", json={"player_name": "Zoe"})
 
     response = client.put(
         f"/absences/{bobs_absence['id']}/substitute", json={"player_name": "Dave"}

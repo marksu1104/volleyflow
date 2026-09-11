@@ -40,6 +40,20 @@ class ClubOut(BaseModel):
     """
 
 
+class InviteOut(BaseModel):
+    """The join-link token for a club, and what it resolves to.
+
+    `token` is only present on GET /clubs/{id}/invite (the organizer
+    generating a link to share); GET /invites/{token} (a visitor opening
+    that link) only needs to answer "whose invite is this", not echo the
+    token back. See routes.get_club_invite and routes.resolve_invite.
+    """
+
+    club_id: int
+    club_name: str
+    token: str | None = None
+
+
 class MyClubOut(BaseModel):
     id: int
     name: str

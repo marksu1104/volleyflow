@@ -178,6 +178,19 @@ def remove_member(
     return f"remove_member({member['name']}, id {member['id']})", sent
 
 
+def change_capacity(
+    rng: random.Random, client: TestClient, season: dict[str, Any]
+) -> Done | None:
+    """Raises or lowers the cap that every other operation here is
+    supposed to respect — see test_capacity_limits.py for the rule this
+    exercises against everything else happening at the same time."""
+    detail = _detail(client, season)
+    delta = rng.choice([-2, -1, 1, 2])
+    new_capacity = max(1, detail["capacity"] + delta)
+    sent = client.patch(f"/seasons/{season['id']}", json={"capacity": new_capacity})
+    return f"change_capacity({detail['capacity']} -> {new_capacity})", sent
+
+
 # Weighted so the season stays busy rather than draining to nothing: the
 # interesting bugs live in a game that is full, with a queue behind it.
 OPERATIONS: list[tuple[Operation, int]] = [
@@ -191,6 +204,7 @@ OPERATIONS: list[tuple[Operation, int]] = [
     (flip_air_conditioning, 2),
     (add_member, 2),
     (remove_member, 1),
+    (change_capacity, 2),
 ]
 _CHOICES = [op for op, weight in OPERATIONS for _ in range(weight)]
 

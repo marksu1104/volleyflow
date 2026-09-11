@@ -56,6 +56,16 @@ function isGameFull(season, game) {
   return expectedAttendance(season, game) >= season.capacity;
 }
 
+/** Whether the first game has already happened — the line the roster
+ * change rules are drawn on (docs/backlog.md "Roster changes"): free and
+ * silent before it, a confirmation after, because a mid-season change
+ * moves money on somebody's ledger right away. `games` is assumed sorted
+ * by date, which is how every season detail response already orders it. */
+function seasonHasStarted(season) {
+  const first = season.games[0];
+  return !!first && describeDate(first.date).isPast;
+}
+
 /** What the air conditioning adds to one person's share of this game,
  * or nothing when it isn't running or the season doesn't charge for it.
  *
@@ -1033,13 +1043,18 @@ function renderGameDetail(container, season, game, options) {
     ${extraHtml}
     ${
       opts.onAddDropIn
-        ? `<div class="add-dropin">
-             <input type="text" placeholder="臨打姓名" data-new-dropin>
-             <select data-new-dropin-gender>
-               <option value="">性別</option><option value="male">男</option><option value="female">女</option>
-             </select>
-             <button type="button" data-add-dropin>新增臨打</button>
-           </div>`
+        ? // The trigger comes before its own popup in the markup, not
+          // after — the popup is an overlay the trigger produces, and
+          // putting it first pushed every button after it one or two
+          // places later in the document the moment it had ever been
+          // opened once, since it stays in the DOM (hidden, not gone)
+          // between opens. Index-based iteration in tests/visual/smoke.js
+          // caught this as buttons losing their own identity mid-run;
+          // the same reordering would confuse tab order for a keyboard
+          // user, which is the real reason to fix it rather than just
+          // the test.
+          `<button type="button" class="su-add" data-open-add-dropin>＋ 新增臨打</button>
+           <div class="add-dropin-picker"></div>`
         : ""
     }
     <div class="gd-tabs" role="tablist">
@@ -1190,22 +1205,60 @@ function renderGameDetail(container, season, game, options) {
       opts.onLeaveWaitlist(Number(removeWaitlist.dataset.removeWaitlist), removeWaitlist);
       return;
     }
-    const addDropIn = e.target.closest("[data-add-dropin]");
-    if (addDropIn && opts.onAddDropIn) {
-      const nameInput = container.querySelector("[data-new-dropin]");
-      const genderSelect = container.querySelector("[data-new-dropin-gender]");
-      const name = nameInput ? nameInput.value.trim() : "";
-      // Say why, rather than ignoring the tap. A control that does
-      // nothing visible is indistinguishable from a broken one, and
-      // "沒反應" is how it gets reported.
-      if (!name) {
-        toast("請先輸入臨打的名字");
-        if (nameInput && nameInput.focus) nameInput.focus();
-        return;
-      }
-      opts.onAddDropIn(name, (genderSelect && genderSelect.value) || null, addDropIn);
+    const openAddDropin = e.target.closest("[data-open-add-dropin]");
+    if (openAddDropin && opts.onAddDropIn) {
+      openAddDropinPicker(container);
+      return;
     }
   };
+
+  /** Who this game's 新增臨打 button may offer: anyone in the club who
+   * isn't already occupying a slot for it — a fixed member (attending or
+   * away; away is exactly when they'd want a substitute instead, see
+   * canAssignSubstitute), an existing drop-in, or somebody already
+   * queued. Mirrors substituteCandidates' reasoning for the same reason:
+   * half the club would otherwise be offered a name that's already on
+   * this game's own list.
+   */
+  function dropInCandidates() {
+    const alreadyThere = new Set(
+      season.members
+        .map((m) => m.name)
+        .concat(game.confirmed_drop_ins.map((d) => d.player_name))
+        .concat(game.waitlist_entries.map((w) => w.player_name))
+    );
+    const seen = new Set();
+    const out = [];
+    for (const person of [...clubMembers, ...(opts.myGuests || [])]) {
+      const name = person.name;
+      if (alreadyThere.has(name) || seen.has(name)) continue;
+      seen.add(name);
+      out.push({
+        id: person.id != null ? person.id : null,
+        name,
+        gender: person.gender,
+        note: person.times ? `報名過 ${person.times} 次` : "",
+      });
+    }
+    return out;
+  }
+
+  /** Opens the shared picker in place of the old bare name field and
+   * gender select (docs/backlog.md "The management screens") — the same
+   * modal the signup sheet and the substitute picker already use, rather
+   * than a third, differently-shaped way to type in a name. */
+  async function openAddDropinPicker(root) {
+    const holder = root.querySelector(".add-dropin-picker");
+    if (!holder) return;
+    renderPersonPicker(holder, {
+      title: "新增臨打",
+      hint: "選球隊裡的人，或直接輸入姓名。",
+      candidates: dropInCandidates(),
+    });
+    const picked = await choosePerson(holder);
+    if (!picked) return;
+    opts.onAddDropIn(picked.name, picked.gender, null);
+  }
 }
 
 /** Disables a button and swaps its label while an async action runs,
@@ -1538,6 +1591,162 @@ async function initLiffIdentity(apiBase, liffId) {
   return false;
 }
 
+/** Turns the API's own error detail — deliberately English; see
+ * CLAUDE.md's language policy — into something a Chinese-speaking
+ * organizer or member can actually read.
+ *
+ * Matched against fixed phrases in the message, not a code the backend
+ * doesn't send: giving every one of forty routes a stable error code
+ * would be a far larger change than this project's size calls for, and
+ * would touch code that a hard-won test suite already covers. What
+ * matters in practice is the handful of refusals an ordinary tap can
+ * actually reach — a duplicate signup, a season already settled, a
+ * roster at capacity — and those are what this covers.
+ *
+ * Anything not recognised still reaches the reader wrapped in a Chinese
+ * sentence, with the original reason attached rather than replacing it —
+ * a category this hasn't been taught yet is not the same as no reason at
+ * all.
+ */
+function translateApiError(detail) {
+  const text = String(detail == null ? "" : detail).trim();
+  for (const [pattern, translate] of _API_ERROR_PATTERNS) {
+    const match = text.match(pattern);
+    if (match) return translate(match);
+  }
+  return `操作失敗（${text}）`;
+}
+
+const _API_ERROR_PATTERNS = [
+  // Membership and permissions.
+  [/^Already a member of this (club|season)$/, () => "已經是這裡的成員了"],
+  [/^Not a member of this (club|season)$/, () => "不是這裡的成員"],
+  [/^Player is not a member of this club$/, () => "這個人不是球隊成員"],
+  [/^Player is not a fixed member of this game's season$/, () => "這個人不是本季的固定成員"],
+  [/^You are not a member of this club$/, () => "你不是這個球隊的成員"],
+  [/^Only this club's organizer can do that$/, () => "只有主揪可以這麼做"],
+  [/^This is the club's only organizer$/, () => "這是球隊唯一的主揪，不能移除"],
+  [
+    /^Still a fixed member of a season/,
+    () => "還是某一季的固定成員，請先在那一季把他移除",
+  ],
+  [
+    /^You can only do that for yourself, unless you're the organizer$/,
+    () => "只能對自己這麼做，除非你是主揪",
+  ],
+  [/^You can only list your own clubs$/, () => "只能查看自己的球隊"],
+  [
+    /^You can only rename yourself, or someone you added who has no account$/,
+    () => "只能改自己的名字，或是你新增、還沒有帳號的人",
+  ],
+  [/^You can only set your own gender$/, () => "只能設定自己的性別"],
+  [
+    /^That person has their own account/,
+    () => "這個人已經有自己的帳號，請讓他自己操作",
+  ],
+  [/^Those are the same player$/, () => "這是同一個人"],
+
+  // Signup, absence, waitlist.
+  [
+    /^(.+?) is already signed up for this game$/,
+    (m) => `${m[1]}已經在這一場的名單上了`,
+  ],
+  [/^That player is already signed up for this game$/, () => "這個人已經在這一場的名單上了"],
+  [
+    /^(.+?) is already on the waitlist for this game$/,
+    (m) => `${m[1]}已經在這一場的候補名單上了`,
+  ],
+  [
+    /^(.+?) is a fixed member of this season — no need to sign up$/,
+    (m) => `${m[1]}是本季固定成員，不需要另外報名`,
+  ],
+  [
+    /^(.+?) is a fixed member of this season and is already expected/,
+    (m) => `${m[1]}是本季固定成員，本來就會出席，不能再代打別人`,
+  ],
+  [
+    /^This player already has an absence recorded for this game$/,
+    () => "這個人這一場已經請過假了",
+  ],
+  [/^This absence was cancelled$/, () => "這筆請假已經取消了"],
+  [/^Already cancelled$/, () => "已經取消了"],
+  [/^Past this season's change deadline for this game$/, () => "已經過了這一場的更動期限"],
+
+  // Capacity and the roster.
+  [
+    /^No room for another member: (.+) already \d+ on court\. Cancel a signup on those games, or raise the capacity first\.$/,
+    (m) => `人數已滿：${m[1]}已經額滿。請先取消一場的報名，或調高人數上限`,
+  ],
+  [
+    /^(\d+) fixed members is more than the capacity of (\d+)$/,
+    (m) => `固定成員 ${m[1]} 人超過人數上限 ${m[2]} 人`,
+  ],
+  [
+    /^Can't lower capacity to (\d+) — (\d+) people are already on the roster or on a game's court$/,
+    (m) => `人數上限不能調到 ${m[1]} 人——目前已經有 ${m[2]} 人在名單或場上了`,
+  ],
+  [
+    /^This game is full \((\d+)\) and everyone in it was personally arranged/,
+    (m) => `這一場已經滿 ${m[1]} 人，且都是別人指定的代打——請先取消一位`,
+  ],
+  [
+    /^This game is full \((\d+)\)\. Name who comes out, or raise the capacity first\.$/,
+    (m) => `這一場已經滿 ${m[1]} 人。請先選一位換下來，或調高人數上限`,
+  ],
+  [
+    /^That roster entry is already linked to a LINE account$/,
+    () => "這個名單上的人已經連結過 LINE 帳號了",
+  ],
+  [/^That player has no LINE account to link$/, () => "這個人沒有 LINE 帳號可以連結"],
+  [
+    /^That LINE account already has (.+) of its own — remove the duplicate roster entry instead$/,
+    (m) => `這個 LINE 帳號已經有自己的${m[1]}紀錄了——請改移除重複的名單項目`,
+  ],
+
+  // Season and settlement.
+  [
+    /^Season is already settled — venue cost can't change now$/,
+    () => "這一季已經結算，場地費不能再改了",
+  ],
+  [/^Season i?s? already settled$/, () => "這一季已經結算了"],
+  [
+    /settled — its books can't be deleted$/,
+    () => "有一季已經結算，帳本不能刪除",
+  ],
+  [/^That would make the season's venue cost negative/, () => "這樣會讓場地費變成負的"],
+
+  // Not found.
+  [/^No club with id \d+$/, () => "找不到這個球隊"],
+  [/^No season with id \d+$/, () => "找不到這一季"],
+  [/^No game with id \d+$/, () => "找不到這一場"],
+  [/^No absence with id \d+$/, () => "找不到這筆請假"],
+  [/^No drop-in with id \d+/, () => "找不到這筆報名"],
+  [/^No waitlist entry with id \d+$/, () => "找不到這筆候補"],
+  [/^No player (with id \d+|named .+ in this club)$/, () => "找不到這個人"],
+  [/^This club no longer exists$/, () => "這個球隊已經不存在了"],
+  [/^Invite link not recognised$/, () => "這個邀請連結無法辨識"],
+
+  // Identity.
+  [
+    /^(Missing bearer token|Invalid or expired LINE ID token|No player identified for this LINE account yet)$/,
+    () => "請重新用 LINE 登入",
+  ],
+
+  // Everything else that's actually reachable from ordinary use.
+  [/^Name can't be empty$/, () => "名字不能空白"],
+  [/^Problem reporting isn't configured yet$/, () => "回報功能尚未設定"],
+  [/^Nothing to report$/, () => "沒有內容可以回報"],
+  [
+    /^Couldn't send the report/,
+    () => "送出失敗，請直接跟主揪說",
+  ],
+  [
+    /^(Screenshot is too large|Screenshot isn't valid base64|Screenshot must be)/,
+    () => "截圖格式或大小有問題，請重新截圖",
+  ],
+  [/^No such screenshot$/, () => "找不到這張截圖"],
+];
+
 async function postJson(apiBase, path, body, method) {
   // Whichever control was pressed shows the wait, and stops taking
   // taps, for as long as this takes — see markBusy. Claimed here rather
@@ -1560,11 +1769,16 @@ async function postJson(apiBase, path, body, method) {
     settled();
   }
   if (!res.ok) {
-    const error = new Error(data.detail || res.statusText);
+    const raw = data.detail || res.statusText;
+    const error = new Error(translateApiError(raw));
     // Callers that retry need to tell "the server didn't answer" from
     // "the server answered no" — see initLiffIdentity, which must not
     // retry a rejected token three times over.
     error.status = res.status;
+    // The untranslated detail, for the few callers that need to detect a
+    // specific condition programmatically rather than just display it —
+    // see e.g. offerToRaiseCapacity, which looks for "capacity" in this.
+    error.rawMessage = raw;
     throw error;
   }
   // Anything that writes invalidates every cached read: taking leave
@@ -1861,7 +2075,11 @@ async function deleteJson(apiBase, path) {
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.detail || res.statusText);
+    const raw = data.detail || res.statusText;
+    const error = new Error(translateApiError(raw));
+    error.status = res.status;
+    error.rawMessage = raw;
+    throw error;
   }
   clearResponseCache();
 }
