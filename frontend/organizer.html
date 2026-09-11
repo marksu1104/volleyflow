@@ -134,6 +134,8 @@
 
   async function loadDashboard(seasonId) {
     const ticket = dashboardLoad.take();
+    // See localRevision: what the screen knew when this read set off.
+    const askedAt = localRevision();
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
     try {
@@ -147,6 +149,13 @@
 
     function render(season) {
       if (!dashboardLoad.current(ticket)) return;
+      // Older than what is on screen — somebody changed something after
+      // this read set off, so painting it would undo their tap. A newer
+      // read is always already queued behind the change. See
+      // localRevision in shared.js.
+      if (currentSeason && currentSeason.id === season.id && localRevision() !== askedAt) {
+        return;
+      }
       // Same reasoning as the member page: every action here ends in a
       // reload, and redrawing data that hasn't changed costs a frame and
       // reads as a stutter a second after the tap already worked.
@@ -436,9 +445,13 @@
     },
   });
 
-  function refreshQuietly() {
-    if (currentSeason) loadDashboard(currentSeason.id);
-  }
+  /** Queued behind every pending write and collapsed to one — see
+   * coalescedRefresh. Fired straight away it overtakes a tap that has not
+   * been sent yet and paints it away, which is 「按了成功結果又切回去又切
+   * 回來」. */
+  const refreshQuietly = coalescedRefresh(() => {
+    if (currentSeason) return loadDashboard(currentSeason.id);
+  });
 
   /** Real absence ids, keyed by game and player — see member.html. The
    * organizer marks other people absent, so the same "tapped 取消請假

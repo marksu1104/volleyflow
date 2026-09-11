@@ -983,6 +983,35 @@ textarea {
 .toast.good { background: var(--good); color: var(--surface); }
 .toast.out { opacity: 0; transform: translateY(-6px); transition: opacity .2s, transform .2s; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* "Still saving", for a change that is already on screen.
+   An optimistic tap repaints in the same frame, so the button it was
+   made on no longer exists by the time a spinner would go on it — see
+   beginPendingWrite. This is the one place that wait is admitted to, and
+   it is deliberately quiet: the action worked, the person can carry on,
+   and the only news is that the server has not confirmed it yet. Below
+   the toasts so a real message is never hidden behind it. */
+.pending-chip {
+  position: fixed; top: 10px; left: 50%; z-index: 79;
+  transform: translate(-50%, -14px);
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 13px 6px 11px; border-radius: 999px;
+  background: var(--ink); color: var(--ground);
+  font-size: .76rem; font-weight: 600; letter-spacing: .02em;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .22);
+  opacity: 0; pointer-events: none;
+  transition: opacity .18s ease-out, transform .18s ease-out;
+}
+.pending-chip.shown { opacity: 1; transform: translate(-50%, 0); }
+.pending-chip::before {
+  content: ""; width: 11px; height: 11px; border-radius: 50%;
+  border: 2px solid currentColor; border-right-color: transparent;
+  animation: spin .7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pending-chip::before { animation-duration: 2s; }
+  .pending-chip { transition: opacity .18s ease-out; }
+}
 .meta-pill.ac { background: var(--warn-soft); color: var(--warn); font-weight: 700; }
 
 /* ---- a game's air conditioning ----

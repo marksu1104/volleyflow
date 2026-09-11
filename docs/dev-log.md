@@ -1348,3 +1348,84 @@ over capacity, nobody owing for a game they did not play.
 
 370 tests, 138 frontend tests, ten browser measurements. What is left is
 written down in `docs/backlog.md` rather than in a conversation.
+
+## 2026-09-11 — why a saved change flipped back, and every button re-measured
+
+Reported for the fourth time, and correctly: 「按了成功結果又切回去又切
+回來」. Each previous attempt had treated it as a rendering problem and
+made the rendering faster. This time the first thing built was an
+instrument rather than a fix — a throwaway script that wrapped `fetch`,
+`getJsonSWR` and every render function, then tapped 請假 and 取消請假
+300ms apart in a real browser and printed a timeline.
+
+The timeline settled it in one run:
+
+| time | the screen |
+|---|---|
+| 0ms | taps 請假 → 已請假 |
+| 316ms | taps 取消請假 → 請假 |
+| 1257ms | **flips back to 已請假** |
+| 2017ms | flips forward to 請假 |
+
+and the cause was two lines apart in the same log: the refresh `GET
+/seasons/68` went out at **676ms** and the cancel `POST` it was supposed
+to be reporting on went out at **677ms**. `enqueueRequest` serialises
+writes, but `refreshSeasonQuietly()` never went through it. The read
+overtook a write still waiting its turn, came back describing the roster
+from before that tap, and `render()` — which trusts every answer it is
+given — painted the tap away. The next refresh put it back. Nothing was
+broken in any screen; the reads were simply not ordered against the
+writes, and `staleGuard` only ever ordered reads against each other.
+
+Two rules, both in `shared.js`:
+
+- **`coalescedRefresh`** puts the refresh in the same queue as the
+  writes, so it cannot ask a question a pending write has not been
+  allowed to answer — and drops a request while one is already queued or
+  running, because that one will see everything anyway. Three quick taps
+  used to mean three full season reads.
+- **`localRevision`** counts local changes. Every loader notes it when a
+  read sets off and refuses the answer if it has moved on. That is the
+  general form of the bug: an answer older than the screen must never be
+  painted, whatever produced it.
+
+One action went from six requests to three, and the screen is now correct
+from the first frame to the last. `chaos.js` grew a scenario that taps
+those two buttons 300ms apart and watches the state 120 times over six
+seconds; with the fix reverted it fails at 850ms, which is the only
+evidence that a regression test is real.
+
+**Why the busy state was invisible.** Also answered, and it was
+structural rather than an oversight: `repaintGame()` runs 2ms after the
+tap and replaces the hero, so the button `markBusy` is holding has been
+off the page for 138ms by the time the spinner is due. It was working
+perfectly on every control it could reach and could never reach the two
+being judged by. Putting one on the *replacement* button would be worse —
+greying out 取消請假 right after 請假 succeeded says the opposite of what
+happened. So an optimistic action now gets a page-level 儲存中 chip
+(`beginPendingWrite`), after 450ms, once however many requests are
+outstanding: the change is made, the server is still being told.
+
+**`feedback.js`** presses all 128 controls on all six pages and measures
+how long until the screen admits it. 200ms is the bar; a control that
+sends a request and stays silent past it is a finding. It found exactly
+one: the 男/女 toggles sent a PUT even when the person was already that
+gender, so the tap changed nothing and said nothing for half a second.
+That control is now a no-op when it is already in the state it sets.
+
+**Where the slowness actually is.** Measured rather than assumed. A SQL
+round trip from this machine to Neon is 60ms, and `POST /absences` makes
+ten of them — 938ms locally. In production it is 130ms for the same
+request, because Render sits next to Neon; the query counts are fine and
+consolidating them would have been optimising the wrong machine. What
+was worth fixing was HTTP round trips per action, and dropping the
+roster and guest re-reads after a write that provably introduces nobody
+(`keepsPeople`) took two of the four away.
+
+**The dev links in `seed_dev.py` never worked.** `?as=楊于嫺` opened on
+「尚未加入任何球隊」, because signing in by a roster name creates a second
+player rather than becoming that person. The seed now does what the
+organizer does in the app — sign in, join, link — for the two names it
+advertises.
+
+370 tests, 151 frontend tests, four browser checks.

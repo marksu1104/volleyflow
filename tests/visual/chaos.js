@@ -95,7 +95,46 @@ async function hammer(page, selectors, rounds) {
   const soloState = await solo.page.evaluate(INVARIANTS);
   report("一個人狂點請假／取消請假", soloState.problems.concat(solo.errors));
 
-  // 2. Two people on the same game at the same time.
+  // 2. The exact sequence reported as 「按了成功結果又切回去又切回來」:
+  // take leave, then change your mind before the first change has
+  // finished saving. Measured on the real page before the fix, the screen
+  // was right at 316ms, wrong from 1257ms, and right again at 2017ms —
+  // the refresh after the first write had overtaken the second write and
+  // come back describing a roster from before it.
+  //
+  // Asserted by watching rather than by sampling the end: the end was
+  // always correct. What was wrong was the half-second in the middle.
+  const flipper = await open(browser, "member.html", "蘇懂");
+  const takeLeave = `(() => {
+    const b = [...document.querySelectorAll("#hero-wrap .hact")]
+      .find((x) => /^請假|^取消請假/.test(x.textContent.trim()));
+    if (!b) return null;
+    b.click();
+    return b.textContent.trim();
+  })()`;
+  const stance = `(() => {
+    const labels = [...document.querySelectorAll("#hero-wrap .hact")].map((b) => b.textContent.trim());
+    return labels.some((l) => l === "取消請假") ? "absent" : "playing";
+  })()`;
+
+  const firstTap = await flipper.page.evaluate(takeLeave);
+  await flipper.page.waitForTimeout(300);
+  const secondTap = await flipper.page.evaluate(takeLeave);
+  const settledOn = await flipper.page.evaluate(stance);
+  const wobbles = [];
+  for (let waited = 0; waited < 6000; waited += 50) {
+    const now = await flipper.page.evaluate(stance);
+    if (now !== settledOn) wobbles.push(`${waited}ms 變成 ${now}`);
+    await flipper.page.waitForTimeout(50);
+  }
+  report(
+    `連按「${firstTap}」「${secondTap}」之後畫面不會自己翻回去`,
+    firstTap && secondTap
+      ? wobbles.slice(0, 4).concat(flipper.errors)
+      : ["找不到請假按鈕，這項沒有測到"]
+  );
+
+  // 3. Two people on the same game at the same time.
   const organizer = await open(browser, "organizer.html", "蘇懂");
   // 阿哲 rather than a name off the roster: a roster entry the organizer
   // typed has no account behind it, so signing in as that name makes a

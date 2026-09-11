@@ -33,6 +33,19 @@ function makeStore() {
   };
 }
 
+/** A classList that remembers, so a test can ask whether something is
+ * marked busy or showing. The old stub answered `contains` with a flat
+ * false, which quietly made any such question untestable. */
+function makeClassList() {
+  const classes = new Set();
+  return {
+    add: (...names) => names.forEach((n) => classes.add(n)),
+    remove: (...names) => names.forEach((n) => classes.delete(n)),
+    toggle: (n, on) => (on === undefined ? !classes.delete(n) && classes.add(n) : on ? classes.add(n) : classes.delete(n)),
+    contains: (n) => classes.has(n),
+  };
+}
+
 function makeElement() {
   return {
     innerHTML: "",
@@ -42,7 +55,9 @@ function makeElement() {
     disabled: false,
     style: {},
     dataset: {},
-    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    classList: makeClassList(),
+    setAttribute() {},
+    removeAttribute() {},
     id: "",
     className: "",
     onclick: null,

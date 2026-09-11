@@ -74,8 +74,11 @@ uv run python scripts/seed_dev.py
 Builds a full season through the HTTP API — a roster of 18, 13 games
 priced at the club's real numbers, leave with and without a substitute,
 a guest somebody brought, one night where the air conditioning forecast
-was wrong, and members who have paid, part paid and overpaid. Re-running
-it removes its own club first, so it always lands in the same state.
+was wrong, and members who have paid, part paid and overpaid. Two of
+those members are linked to a sign-in of their own, so the links it
+prints at the end open on a real member's view rather than on "you
+haven't joined a club". Re-running it removes its own club first, so it
+always lands in the same state.
 
 It goes through the API rather than inserting rows because ledger
 entries are written by the route handlers: inserting directly would mean
@@ -120,23 +123,25 @@ uv run ruff format .           # formatting
 uv run mypy src scripts        # types
 uv run pytest -q               # 370 tests
 uv run lint-imports            # billing logic must not import the database
-node --test tests/frontend/*.test.js   # 138 frontend tests
+node --test tests/frontend/*.test.js   # 151 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
 node tests/visual/smoke.js     # presses every button and reports the dead ones
+node tests/visual/feedback.js  # and how long each one takes to react
 node tests/visual/chaos.js     # two people hammering one game at once
 ```
 
-The first five run in CI on every push. The last three need a browser and
-are run by hand — `check.js` when layout changes, `smoke.js` after
-anything that touches a click handler, `chaos.js` after anything that
-changes who may be on a roster.
+The first five run in CI on every push. The last four need a browser and
+are run by hand — `check.js` when layout changes, `smoke.js` and
+`feedback.js` after anything that touches a click handler or a write,
+`chaos.js` after anything that changes who may be on a roster.
 
 They earn their keep. `smoke.js` caught a bug every static check passed:
 a handler matched a data attribute its own container carried, so every
 control in the game sheet was silently swallowed. `check.js` caught a
 select pushed off the edge of a panel, and rows that measured 17px
-against Apple's 44pt guidance. All three want the local servers up, and
-`smoke.js` and `chaos.js` press destructive controls, so re-run
+against Apple's 44pt guidance. `chaos.js` catches a change that saves,
+flips back, and flips forward again. All four want the local servers up,
+and all but `check.js` press destructive controls, so re-run
 `seed_dev.py` afterwards. See
 [`tests/visual/README.md`](tests/visual/README.md).
 

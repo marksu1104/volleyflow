@@ -203,6 +203,25 @@ def main() -> int:
     )
     print(f"{visitor} joined the club and signed up with a guest")
 
+    # Two roster entries get a sign-in of their own, because the links
+    # printed at the end of this script promised them and didn't deliver:
+    # ?as=楊于嫺 opened on 尚未加入任何球隊, since signing in by that name
+    # makes a *second* player rather than becoming the one on the roster.
+    # Doing it properly is the same three steps the organizer does in the
+    # app — sign in, join the club, then have the organizer say the two
+    # are the same person — so this also exercises that endpoint on every
+    # seed, which is the point of building the data through the API.
+    for name in ("楊于嫺", "冠儀"):
+        identity = sign_in(name)
+        call("POST", f"/clubs/{club_id}/join", name)
+        call(
+            "POST",
+            f"/clubs/{club_id}/players/{by_name[name]}/link",
+            ORGANIZER,
+            {"line_player_id": identity["id"]},
+        )
+    print("楊于嫺 and 冠儀 can sign in as themselves")
+
     # The organizer has brought the same friend a few times, so the
     # quick-pick list on the signup and substitute sheets has something
     # in it — otherwise that whole feature is invisible locally until
