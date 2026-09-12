@@ -554,6 +554,30 @@ def _within_change_deadline(game: GameRow, season: SeasonRow) -> bool:
     return _today_in_taiwan() + timedelta(days=season.change_deadline_days) <= game.date
 
 
+def _require_season_open(season: SeasonRow) -> None:
+    """Refuses any change to a season whose books are closed.
+
+    `CLAUDE.md` 2.4: settlement "computes each member's absence refund and
+    locks the season". The roster endpoints had always honoured that;
+    attendance did not, and the gap was not theoretical — measured on
+    2026-09-12, after settling a season you could still sign somebody up,
+    which wrote them a real charge onto closed books, and still record a
+    member's leave, which earned a refund that could never be paid
+    because a season cannot be settled twice.
+
+    Deliberately not folded into _require_within_change_deadline below,
+    though every caller wants both: that rule exempts the organizer, and
+    this one must not. The organizer is exactly the person with the
+    buttons to do this, and "the books are closed" is not a rule they are
+    above — it is the one they most need held to.
+    """
+    if season.settled_at is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Season is already settled",
+        )
+
+
 def _require_within_change_deadline(
     db: Session, game: GameRow, season: SeasonRow, current_player: PlayerRow
 ) -> None:
@@ -2723,6 +2747,7 @@ def record_absence(
     player = _get_player_by_name(db, season.club_id, payload.player_name)
     _require_self_or_organizer(db, season.club_id, current_player, player.id)
     _require_season_member(db, game.season_id, player.id)
+    _require_season_open(season)
     _require_within_change_deadline(db, game, season, current_player)
 
     existing = (
@@ -2793,6 +2818,7 @@ def cancel_absence(
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
     _require_self_or_organizer(db, season.club_id, current_player, absence.player_id)
+    _require_season_open(season)
     _require_within_change_deadline(db, game, season, current_player)
 
     released_player_id = _release_whoever_is_covering(db, absence, season)
@@ -2846,6 +2872,7 @@ def set_substitute(
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
     _require_self_or_organizer(db, season.club_id, current_player, absence.player_id)
+    _require_season_open(season)
 
     existing = (
         db.query(DropInRow)
@@ -2976,6 +3003,7 @@ def sign_up(
     assert season is not None  # game.season_id is a foreign key, always valid
     player = _get_or_create_player(db, season.club_id, payload.player_name)
     _require_may_sign_up(db, season.club_id, current_player, player)
+    _require_season_open(season)
     _require_within_change_deadline(db, game, season, current_player)
     if player.gender is None and payload.gender is not None:
         player.gender = payload.gender
@@ -3036,6 +3064,7 @@ def sign_up_several(
     game = _get_game_or_404(db, game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
+    _require_season_open(season)
     _require_within_change_deadline(db, game, season, current_player)
 
     try:
@@ -3153,6 +3182,7 @@ def leave_waitlist(
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
     _require_self_or_organizer(db, season.club_id, current_player, entry.player_id)
+    _require_season_open(season)
     _require_within_change_deadline(db, game, season, current_player)
 
     player_id = entry.player_id
@@ -3193,6 +3223,7 @@ def promote_from_waitlist(
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
     _require_organizer(db, season.club_id, current_player)
+    _require_season_open(season)
 
     replaced_player_id: int | None = None
     if payload.replacing_drop_in_id is not None:
@@ -3261,6 +3292,7 @@ def cancel_drop_in(
     season = db.get(SeasonRow, game.season_id)
     assert season is not None
     _require_may_cancel_drop_in(db, drop_in, season, current_player)
+    _require_season_open(season)
     _require_within_change_deadline(db, game, season, current_player)
 
     drop_in.cancelled_at = _now()

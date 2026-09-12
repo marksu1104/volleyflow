@@ -21,6 +21,14 @@ money points at is not litter.
     uv run python scripts/tidy_dev_db.py          # count them
     uv run python scripts/tidy_dev_db.py --yes    # delete them
 
+`--drop-club "<name>"` removes a whole club and everything under it,
+which `seed_dev.py` cannot always do for itself: the API refuses to
+delete a club holding a **settled** season, correctly — those are real
+closed books — and anything that settles a season while testing leaves
+the seed club stuck, so every later seed run dies on the same refusal.
+The product rule stays as it is; this is the dev-only escape hatch for
+a database whose whole purpose is to be thrown away.
+
 Deleting needs `VOLLEYFLOW_DEV_LOGIN=1` — the flag this project already
 uses to mean "this is a development environment", set by dev-api.ps1 and
 never set in production. A first attempt tried to recognise the dev
@@ -37,6 +45,7 @@ import os
 import sys
 
 from sqlalchemy import text
+from sqlalchemy.engine import Connection
 
 from volleyflow.db.engine import database_url, get_engine
 
@@ -59,9 +68,63 @@ UNREFERENCED = "SELECT id FROM players p WHERE " + " AND ".join(
 )
 
 
+def drop_club(conn: Connection, name: str) -> None:
+    """Removes a club and everything hanging off it, children first.
+
+    Written out table by table rather than leaning on cascades, because
+    the schema deliberately has none: every delete in the product is an
+    explicit one so that "what does removing this take with it" is a
+    question the code answers rather than the database.
+    """
+    ids = [
+        row[0]
+        for row in conn.execute(
+            text("SELECT id FROM clubs WHERE name = :name"), {"name": name}
+        )
+    ]
+    if not ids:
+        print(f'no club named "{name}"')
+        return
+
+    seasons = [
+        row[0]
+        for row in conn.execute(
+            text("SELECT id FROM seasons WHERE club_id = ANY(:ids)"), {"ids": ids}
+        )
+    ]
+    games = [
+        row[0]
+        for row in conn.execute(
+            text("SELECT id FROM games WHERE season_id = ANY(:ids)"), {"ids": seasons}
+        )
+    ] or [0]
+    for statement, params in [
+        ("DELETE FROM waitlist_entries WHERE game_id = ANY(:ids)", {"ids": games}),
+        ("DELETE FROM drop_ins WHERE game_id = ANY(:ids)", {"ids": games}),
+        ("DELETE FROM absences WHERE game_id = ANY(:ids)", {"ids": games}),
+        ("DELETE FROM games WHERE season_id = ANY(:ids)", {"ids": seasons or [0]}),
+        (
+            "DELETE FROM season_members WHERE season_id = ANY(:ids)",
+            {"ids": seasons or [0]},
+        ),
+        ("DELETE FROM ledger_entries WHERE club_id = ANY(:ids)", {"ids": ids}),
+        ("DELETE FROM seasons WHERE club_id = ANY(:ids)", {"ids": ids}),
+        ("DELETE FROM club_members WHERE club_id = ANY(:ids)", {"ids": ids}),
+        ("DELETE FROM clubs WHERE id = ANY(:ids)", {"ids": ids}),
+    ]:
+        conn.execute(text(statement), params)
+    print(
+        f'dropped club "{name}" (id {", ".join(str(i) for i in ids)}) and its seasons'
+    )
+
+
 def main() -> int:
     host = database_url().split("@")[-1].split("/")[0]
     deleting = "--yes" in sys.argv
+    club = None
+    if "--drop-club" in sys.argv:
+        club = sys.argv[sys.argv.index("--drop-club") + 1]
+        deleting = True
     if deleting and os.environ.get("VOLLEYFLOW_DEV_LOGIN") != "1":
         print(f"about to delete from {host}", file=sys.stderr)
         print(
@@ -72,6 +135,10 @@ def main() -> int:
         return 1
 
     print(f"database: {host}")
+    if club is not None:
+        with get_engine().begin() as conn:
+            drop_club(conn, club)
+
     with get_engine().begin() as conn:
         total = conn.execute(text("SELECT count(*) FROM players")).scalar() or 0
         stranded = [row[0] for row in conn.execute(text(UNREFERENCED))]

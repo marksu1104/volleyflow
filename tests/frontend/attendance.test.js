@@ -627,3 +627,87 @@ test("only the first game in the list decides it, whatever comes later", () => {
   assert.equal(seasonHasStarted({ games: [{ date: past }, { date: future }] }), true);
   assert.equal(seasonHasStarted({ games: [{ date: future }, { date: past }] }), false);
 });
+
+// A settled season is closed to everybody, the organizer included. The
+// server refuses every one of these (routes._require_season_open); this
+// is the half that keeps them off the screen, because offering an action
+// and then explaining why it failed is a worse app than not offering it.
+function renderSettled(options = {}) {
+  const { season, game } = fixture();
+  season.settled_at = "2026-09-20T10:00:00";
+  const el = makeElement();
+  renderGameDetail(el, season, game, { viewerName: "蘇慬", ...options });
+  return el.innerHTML;
+}
+
+const ALL_ACTIONS = {
+  onAddDropIn: () => {},
+  onAssignSubstitute: () => {},
+  onCancelAbsence: () => {},
+  onCancelSubstitute: () => {},
+  onLeaveWaitlist: () => {},
+  onPromoteFromWaitlist: () => {},
+  onRecordAbsence: () => {},
+  onRemoveDropIn: () => {},
+};
+
+// Every control on the sheet is wired through one of these attributes —
+// see the click handler at the bottom of renderGameDetail. The three tab
+// buttons are deliberately not among them: a settled season is still
+// worth reading, and 出席 / 請假 / 候補 only change which list is shown.
+const ACTION_ATTRIBUTES = [
+  "data-mark-absent",
+  "data-undo-absence",
+  "data-toggle-sub",
+  "data-confirm-sub",
+  "data-cancel-sub",
+  "data-remove-drop-in",
+  "data-remove-waitlist",
+  "data-promote-waitlist",
+  "data-swap-out",
+];
+
+test("a settled season's sheet offers no way to change anything", () => {
+  const open = render(ALL_ACTIONS);
+  const settled = renderSettled(ALL_ACTIONS);
+
+  // The fixture really does produce controls when the season is open —
+  // otherwise this would pass against a sheet that draws nothing at all.
+  const offered = ACTION_ATTRIBUTES.filter((attr) => open.includes(attr));
+  assert.ok(offered.length >= 4, `the open season must have controls to lose: ${offered}`);
+
+  const left = ACTION_ATTRIBUTES.filter((attr) => settled.includes(attr));
+  assert.deepEqual(left, [], "a closed season's sheet is a list, not a form");
+});
+
+test("a settled season's sheet can still be read", () => {
+  // Read-only, not blank. The tabs stay, and so does everybody's name.
+  const settled = renderSettled(ALL_ACTIONS);
+
+  assert.match(settled, /data-gd-tab="queued"/);
+  assert.match(settled, /Ricky/);
+  assert.match(settled, /辭瑄/);
+});
+
+test("a settled season's sheet says why it is read-only", () => {
+  assert.match(renderSettled(ALL_ACTIONS), /已經結算/);
+});
+
+test("the settled notice outranks the change-deadline one", () => {
+  // Both are true of a settled season's past games, and "the deadline
+  // passed for this game" reads as though next week's is still open.
+  const { season, game } = fixture();
+  season.settled_at = "2026-09-20T10:00:00";
+  game.locked = true;
+  const el = makeElement();
+  renderGameDetail(el, season, game, { viewerName: "蘇慬", ...ALL_ACTIONS });
+
+  assert.match(el.innerHTML, /已經結算/);
+  assert.doesNotMatch(el.innerHTML, /已過更動期限/);
+});
+
+test("an open season is untouched by any of this", () => {
+  const html = render(ALL_ACTIONS);
+  assert.ok(html.includes("<button"));
+  assert.doesNotMatch(html, /已經結算/);
+});

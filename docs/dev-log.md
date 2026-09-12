@@ -1929,6 +1929,67 @@ the host and requires `VOLLEYFLOW_DEV_LOGIN=1` before deleting anything.
 
 413 tests, 170 frontend tests, seven browser checks.
 
+## 2026-09-12 (last) — the settled season wasn't actually locked
+
+「不然就是要設定好合理的機制，讓使用者不會去動用到這一塊，讓使用者被禁止
+做一些不正常或是會弄壞資料集的操作。」 — the right instinct, and better
+than what I had offered, which was another layer of undo. Prevention
+beats recovery, and it is also much less code.
+
+So rather than guess which operations were dangerous, I listed all 27
+mutating endpoints and asked, per endpoint, which guards its body
+actually applies (`ast`, twenty lines). The table had four suspicious
+gaps. Three were false alarms — the guards live in helper functions the
+static walk doesn't follow — and a probe confirmed a stranger cannot
+rename a member, set their gender, cancel their signup, or sign anyone
+up in a club they don't belong to. Worth the five minutes to be sure
+rather than to assume.
+
+The fourth was real, and it was the important one:
+
+```
+settled + record_absence  -> 200
+settled + cancel_absence  -> 200
+settled + sign_up         -> 200      ...and they are charged: balance -200
+```
+
+`CLAUDE.md` 2.4 says settlement "locks the season". The roster and
+pricing endpoints had always honoured that. **Attendance never had.** So
+after settling you could sign somebody up, which wrote a real charge
+onto books that had already been closed and paid out from, and record a
+member's leave, which earned a refund that could never be paid — because
+a season cannot be settled twice. Nothing would ever reconcile either.
+
+`_require_season_open` now guards all of it: absences, cancellations,
+signups (single and batch), substitutes, the queue, promotion, game
+cancellation, air conditioning. Deliberately *not* folded into
+`_require_within_change_deadline`, though every caller wants both — that
+rule exempts the organizer and this one must not. The organizer is
+exactly the person holding the buttons, and "the books are closed" is
+the rule they most need held to.
+
+**And the other half of the instruction: don't offer it either.** The
+member card and the game sheet still drew 請假 and ＋報名 on a settled
+season, so the fix alone would have turned a silent corruption into a
+confusing refusal. Every control on the sheet is reached through one of
+eight callbacks, so withholding those is the whole change in one place,
+rather than a `settled` check threaded through thirty lines of markup
+that would each have to remember it. The tabs stay — a settled season is
+still worth reading. Measured in a browser before and after settling:
+
+```
+結算前: hero [請假, ＋報名候補]  sheet [請假, ＋報名候補]
+結算後: hero [看名單]            sheet []   「這一季已經結算，名單與帳務都已鎖定」
+```
+
+**A naming trap found on the way.** `member.html` had a variable called
+`seasonSettled` that was set to `true` on every load and meant "the
+season has finished loading". In an app where `settled_at` means "this
+season's books are closed", that is a genuinely dangerous name to reuse.
+Renamed to `seasonLoaded`.
+
+417 tests, 175 frontend tests, seven browser checks.
+
 **And the load, measured request by request.** 「載入中的時間還能不能更
 縮短」 — so the next thing was to watch what a page load actually waits
 on, rather than just how long it took overall:

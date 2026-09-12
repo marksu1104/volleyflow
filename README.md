@@ -114,6 +114,19 @@ clicks now carries an HMAC token instead of a sequential integer, so
 finding a club by guessing small numbers no longer works from the one
 surface a stranger would try it on.
 
+**Settlement closes the books, and the screen stops offering.** Once a
+season is settled every write against it is refused — attendance
+included, which it hadn't been: you could sign somebody up on closed
+books and charge them, or record a member's leave that earned a refund
+nothing would ever pay, because a season cannot be settled twice. The
+guard is deliberately separate from the change-deadline one, though
+every caller wants both: that rule exempts the organizer and this one
+must not. And the controls come off the screen rather than being left
+there to be pressed and refused — every control on the game sheet is
+reached through one of eight callbacks, so withholding those is the
+whole of it in one place. The reading tabs stay; a settled season is
+still worth looking at.
+
 **Two tests earn back more time than they cost.** `tests/api/test_fuzz.py`
 fires a few hundred randomly chosen operations at a season and checks
 every invariant after each one — nobody on court twice, capacity never
@@ -194,9 +207,9 @@ place the whole time.
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
-uv run pytest -q               # 413 tests, including a randomised sweep
+uv run pytest -q               # 417 tests, including a randomised sweep
 uv run lint-imports             # billing logic must not import the database
-node --test tests/frontend/*.test.js   # 170 frontend tests
+node --test tests/frontend/*.test.js   # 175 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
 node tests/visual/smoke.js     # presses every button and reports the dead ones
 node tests/visual/feedback.js  # and how long each one takes to react
