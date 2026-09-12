@@ -248,15 +248,21 @@
     }
   }
 
-  async function loadBalances(season) {
+  /** `apply` is how the caller says whether this answer is still wanted.
+   * It has to be its decision, not a check afterwards: applyBalances
+   * replaces the whole map, so an answer older than the screen has
+   * already overwritten the payment it was about by the time anyone
+   * could notice and skip the repaint. */
+  async function loadBalances(season, apply) {
+    const use = apply || applyBalances;
     try {
       await getJsonSWR(
         `${API_BASE}/clubs/${currentClubId()}/balances?season_id=${season.id}`,
-        (rows) => applyBalances(rows),
+        (rows) => use(rows),
         { headers: authHeader() }
       );
     } catch (e) {
-      applyBalances([]);
+      use([]);
     }
   }
 
@@ -266,6 +272,39 @@
     balances = {};
     for (const row of rows) balances[row.player_id] = row;
   }
+
+  /** Re-reads everyone's balance after a payment, without being able to
+   * undo the payment that asked for it.
+   *
+   * This used to fire a GET the instant one payment's POST came back.
+   * Tap 已收 on several rows in a row and that GET overtakes the taps
+   * still waiting their turn in the write queue: the answer describes
+   * the books as they were before those taps, the tabs are rebuilt from
+   * it, and the rows flip back — then the next payment's own refresh
+   * puts them forward again. Exactly the 「切回原來的狀態又切回來」
+   * reported on 請假, in a second place that had its own copy of the
+   * same mistake.
+   *
+   * Two rules fix it, both borrowed from the member screen:
+   * coalescedRefresh puts the read in the same queue as the writes, so
+   * it can never ask a question the pending taps haven't been allowed to
+   * answer; and the revision check drops an answer that set off before
+   * the latest local change. Repainting only on a real difference stays
+   * — after a payment the server normally agrees, and rebuilding three
+   * tabs of identical markup is itself a visible stutter. */
+  const refreshBalancesQuietly = coalescedRefresh(async () => {
+    if (!currentSeason) return;
+    const askedAt = localRevision();
+    const optimistic = JSON.stringify(balances);
+    const ticket = ledgerLoad.take();
+    let changed = false;
+    await loadBalances(currentSeason, (rows) => {
+      if (!ledgerLoad.current(ticket) || localRevision() !== askedAt) return;
+      applyBalances(rows);
+      changed = JSON.stringify(balances) !== optimistic;
+    });
+    if (changed) renderTabsFromBalances();
+  });
 
   /** The zero row for someone with no ledger entries at all — a member
    * added moments ago, a drop-in who hasn't been charged yet. */
@@ -400,26 +439,33 @@
       balance: String(Number(row.balance) + Number(amount)),
       season_total: String(Number(row.season_total) + Number(amount)),
     };
+    // The screen now knows something the server hasn't been told yet, so
+    // any balances read already in the air is out of date — same rule
+    // the member screen follows. See refreshBalancesQuietly.
+    bumpLocalRevision();
     renderTabsFromBalances();
 
     try {
-      await postJson(API_BASE, `/clubs/${currentClubId()}/players/${playerId}/payments`, {
-        amount: String(amount),
-        season_id: currentSeason.id,
-        note: "帳務頁記錄",
-        client_token: token,
-      });
-      const ticket = ledgerLoad.take();
-      const optimistic = JSON.stringify(balances);
-      await loadBalances(currentSeason);
-      if (!ledgerLoad.current(ticket)) return;
-      // Only repaint if the server disagreed with what's already on
-      // screen — which after a payment it normally doesn't. Rebuilding
-      // three tabs' worth of identical markup costs a frame and reads as
-      // the stutter that made a working tap feel broken.
-      if (JSON.stringify(balances) !== optimistic) renderTabsFromBalances();
+      // Queued, like every other write in the app. This page had never
+      // been: five taps on 已收 sent five requests at once and each one
+      // asked for a re-read the moment it landed, so a read could be
+      // answering the books as they were three payments ago while those
+      // three sat unsent. That is what put rows back to 未收 for half a
+      // second before they settled — the same 「切回原來的狀態又切回來」
+      // as 請假, from the same cause, on a screen that had never been
+      // given the fix.
+      await enqueueRequest(() =>
+        postJson(API_BASE, `/clubs/${currentClubId()}/players/${playerId}/payments`, {
+          amount: String(amount),
+          season_id: currentSeason.id,
+          note: "帳務頁記錄",
+          client_token: token,
+        })
+      );
+      refreshBalancesQuietly();
     } catch (e) {
       balances[playerId] = before;
+      bumpLocalRevision();
       renderTabsFromBalances();
       toast("記錄失敗：" + e.message);
     }

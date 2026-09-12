@@ -63,14 +63,36 @@ const SNAPSHOT = `(() => {
   return { html: s.length + ":" + h, url: location.href };
 })()`;
 
-async function settle(page) {
-  // Sections stay hidden until the season arrives, and a hidden control
-  // has no height — auditing too early finds one button and calls the
-  // page clean.
-  await page
-    .waitForFunction(() => document.querySelectorAll("button").length > 3, null, { timeout: 15000 })
-    .catch(() => {});
-  await page.waitForTimeout(1200);
+/** Waits for the page to be worth auditing.
+ *
+ * This, not `goto`'s own wait condition, is what decides the page is
+ * ready — the pages are loaded with `domcontentloaded` on purpose.
+ * Playwright's `networkidle` looked stricter and was simply flaky: it
+ * failed the run outright on two different pages on two different days,
+ * having found nothing wrong with either, because a page that is
+ * perfectly usable can keep a connection busy past thirty seconds.
+ *
+ * What replaces it has to be at least as strong, and the first attempt
+ * was not: "more than three buttons, unchanged for a moment" audited 4
+ * controls on the money screen instead of 24, and passed. These pages
+ * build in waves — identity, then clubs, then the season, then the
+ * roster — and between two waves the button count sits perfectly still
+ * while a request is in flight. So both conditions have to hold: nothing
+ * outstanding to this project's own API, and the controls have stopped
+ * appearing. */
+async function settle(page, traffic) {
+  let stable = 0;
+  let last = -1;
+  for (let waited = 0; waited < 25000 && stable < 3; waited += 250) {
+    const now = await page
+      .evaluate(() => document.querySelectorAll("button").length)
+      .catch(() => last);
+    const quiet = !traffic || traffic.inFlight === 0;
+    stable = quiet && now === last && now > 3 ? stable + 1 : 0;
+    last = now;
+    await page.waitForTimeout(250);
+  }
+  await page.waitForTimeout(600);
 }
 
 async function pressEach(page, path, { only, dialogs }) {
@@ -146,8 +168,8 @@ async function pressEach(page, path, { only, dialogs }) {
     }
 
     if (before.url !== after.url) {
-      await page.goto(`${BASE}/${path}?as=${AS}`, { waitUntil: "networkidle" });
-      await settle(page);
+      await page.goto(`${BASE}/${path}?as=${AS}`, { waitUntil: "domcontentloaded" });
+      await settle(page, dialogs);
     }
   }
   return { pressed, dead };
@@ -181,17 +203,24 @@ async function auditPage(browser, path) {
       notes.push(line);
     }
   });
-  const dialogs = { count: 0, requests: 0 };
+  const dialogs = { count: 0, requests: 0, inFlight: 0 };
   page.on("dialog", (d) => {
     dialogs.count += 1;
     d.accept("1");
   });
   page.on("request", (r) => {
-    if (r.url().includes(":8000")) dialogs.requests += 1;
+    if (!r.url().includes(":8000")) return;
+    dialogs.requests += 1;
+    dialogs.inFlight += 1;
   });
+  const finished = (r) => {
+    if (r.url().includes(":8000")) dialogs.inFlight = Math.max(0, dialogs.inFlight - 1);
+  };
+  page.on("requestfinished", finished);
+  page.on("requestfailed", finished);
 
-  await page.goto(`${BASE}/${path}?as=${AS}`, { waitUntil: "networkidle" });
-  await settle(page);
+  await page.goto(`${BASE}/${path}?as=${AS}`, { waitUntil: "domcontentloaded" });
+  await settle(page, dialogs);
 
   // Pass one: the page as it opens.
   const first = await pressEach(page, path, { dialogs });

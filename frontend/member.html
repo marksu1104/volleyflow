@@ -747,17 +747,30 @@
       // identical sheet again: the flicker reported as 瞬間跳針.
       // (paintBalance was also called twice here, once before this and
       // once after, for the same reason and with the same effect.)
-      fetchMyGuests(API_BASE, currentClubId()).then((g) => {
-        if (JSON.stringify(g) === JSON.stringify(myGuests)) return;
-        myGuests = g;
-        renderSelectedGameDetail();
-      });
+      refreshMyGuestsQuietly();
       fetchClubMembers(API_BASE, currentClubId()).then((m) => {
         if (JSON.stringify(m) === JSON.stringify(clubMembers)) return;
         clubMembers = m;
         renderSelectedGameDetail();
       });
     }
+  }
+
+  /** The "people you've brought before" quick picks, re-read in the
+   * background. Signing somebody up is the only thing that can add to
+   * this list, and the signup path no longer re-reads the season — which
+   * is where this used to be picked up. Repaints only on a real
+   * difference: drawing the identical sheet again is the flicker
+   * reported as 瞬間跳針. */
+  function refreshMyGuestsQuietly() {
+    if (!currentClubId()) return;
+    fetchMyGuests(API_BASE, currentClubId())
+      .then((g) => {
+        if (JSON.stringify(g) === JSON.stringify(myGuests)) return;
+        myGuests = g;
+        renderSelectedGameDetail();
+      })
+      .catch(() => {});
   }
 
   function playerName() {
@@ -1176,26 +1189,91 @@
     renderSignup();
   });
 
+  /** Signing up, drawn before the network rather than after it.
+   *
+   * This used to send the write, wait for it, and then reload the whole
+   * season before anything moved — two round trips of a sheet closing
+   * onto an unchanged list, reported as 「報名候補後名單沒有立即反應，
+   * 更新很慢」. Everything needed to draw the answer is already on
+   * screen: renderSignup has just told the person which of them get a
+   * slot and which go on the queue, using the same capacity arithmetic
+   * the server uses, in the same list order the server spends capacity
+   * in.
+   *
+   * So the guess is drawn immediately and checked against the answer.
+   * If the server agreed — the ordinary case — the rows only gain their
+   * real ids and nothing is re-read. If it disagreed, somebody else
+   * moved in between and only then is the season re-read. */
   document.getElementById("su-go").addEventListener("click", async () => {
     if (!suPeople.length) return toast("請先新增報名對象");
     for (const p of suPeople) {
       if (!p.playerId && !p.gender) return toast(`請幫「${p.name}」選性別`);
     }
-    // No manual disable: postJson marks whichever control was pressed
-    // and clears it when the request settles — see markBusy.
-    try {
-      await postJson(API_BASE, `/games/${suGame.id}/drop-ins`, {
-        people: suPeople.map((p) => ({
-          player_name: p.name.trim(),
-          gender: p.gender,
-          player_id: p.playerId,
-        })),
-      });
-      closeSignup();
-      await loadSeason(currentSeasonId);
-    } catch (err) {
-      toast("報名失敗：" + err.message);
-    }
+    const gameId = suGame.id;
+    const people = suPeople.map((p) => ({
+      player_name: p.name.trim(),
+      gender: p.gender,
+      player_id: p.playerId,
+    }));
+    // Closed first: the tap is finished and the sheet has nothing left
+    // to show. Leaving it up until the write returned was most of what
+    // made this feel slow.
+    closeSignup();
+
+    let guessHeld = true;
+    const result = await optimistically(
+      (season) => {
+        const game = season.games.find((g) => g.id === gameId);
+        if (!game) return;
+        let free = Math.max(0, season.capacity - expectedAttendance(season, game));
+        for (const p of people) {
+          if (free > 0) {
+            game.confirmed_drop_ins.push({
+              id: -1,
+              player_id: p.player_id || -1,
+              player_name: p.player_name,
+              gender: p.gender || null,
+              covering: null,
+              signed_up_by_me: true,
+            });
+            free -= 1;
+          } else {
+            game.waitlist_entries.push({
+              id: -1,
+              player_name: p.player_name,
+              gender: p.gender || null,
+            });
+          }
+        }
+      },
+      () => postJson(API_BASE, `/games/${gameId}/drop-ins`, { people }),
+      "報名失敗：",
+      (batch, season) => {
+        const game = season.games.find((g) => g.id === gameId);
+        if (!game) return;
+        const results = (batch && batch.results) || [];
+        const placedHere = game.confirmed_drop_ins.filter((d) => d.id === -1);
+        const queuedHere = game.waitlist_entries.filter((w) => w.id === -1);
+        const confirmed = results.filter((r) => r.status === "confirmed");
+        const queued = results.filter((r) => r.status === "waitlisted");
+        // A displacement moves somebody this screen can't name, so that
+        // is a re-read whatever else matched.
+        guessHeld =
+          placedHere.length === confirmed.length &&
+          queuedHere.length === queued.length &&
+          !results.some((r) => r.displaced_player_id);
+        if (!guessHeld) return;
+        placedHere.forEach((row, i) => {
+          row.id = confirmed[i].id;
+          row.player_id = confirmed[i].player_id;
+        });
+        queuedHere.forEach((row, i) => {
+          row.id = queued[i].id;
+        });
+      }
+    );
+    if (!result || !guessHeld) refreshSeasonQuietly();
+    else refreshMyGuestsQuietly();
   });
 
   /** Your money, in the row that already names the season — a section

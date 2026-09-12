@@ -239,6 +239,18 @@ class AbsenceRow(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(default=None)
     """Set if the member decided to attend after all. Only allowed while
     nothing is covering this absence yet — see routes.cancel_absence."""
+    retired_at: Mapped[datetime | None] = mapped_column(default=None)
+    """Set, alongside cancelled_at, when this absence was closed only
+    because the player was taken off the season's roster — not because
+    they said they were coming after all.
+
+    The two have to be told apart, because only this one is undone by
+    putting them back on the roster. Without it, removing a member whose
+    slot a drop-in had filled was a one-way door: the roster dropped to
+    17 of 18 while that game stayed at 18 on court, so adding the same
+    person back was refused for having no room. See
+    routes._restore_retired_absences; the drop-in side of the same idea
+    is DropInRow.absorbed_at."""
 
 
 class DropInRow(Base):

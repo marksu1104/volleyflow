@@ -81,6 +81,78 @@ def test_adding_someone_already_on_the_roster_is_refused_not_a_crash(
     assert "already a member" in response.json()["detail"].lower()
 
 
+def test_removing_a_member_a_drop_in_was_covering_can_be_undone(
+    client: TestClient,
+) -> None:
+    """Reported from real use, 2026-09-12: 18 members, remove one, the
+    roster reads 17 — and adding them back says to raise the capacity to
+    19.
+
+    Removing them closes their leave but leaves their substitute on
+    court, so the game stays at capacity while the roster is one short.
+    The person adds no body to that game on the way back in, because
+    rejoining restores the leave the removal closed, so it must not be
+    refused for having no room.
+    """
+    season = start_season(client, member_names=["Alice", "Bob", "Carol"], capacity=3)
+    game_id = season["games"][0]["id"]
+    alice = client.get(f"/seasons/{season['id']}").json()["members"][0]
+    client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
+    client.post("/drop-ins", json={"player_name": "訪客", "game_id": game_id})
+
+    client.delete(f"/seasons/{season['id']}/members/{alice['id']}")
+    back = client.post(
+        f"/seasons/{season['id']}/members", json={"player_name": "Alice"}
+    )
+
+    assert back.status_code == 200, back.json()
+    game = client.get(f"/seasons/{season['id']}").json()["games"][0]
+    assert [a["player_name"] for a in game["absences"]] == ["Alice"], (
+        "the leave the removal closed comes back with her"
+    )
+    assert [d["player_name"] for d in game["confirmed_drop_ins"]] == ["訪客"], (
+        "and her stand-in keeps the slot, having released nothing"
+    )
+
+
+def test_undoing_a_removal_does_not_overfill_the_court(client: TestClient) -> None:
+    # The other half of the rule above: the exemption must not become a
+    # way past capacity. Three members, one away, one drop-in covering —
+    # the court is full, and it is still full after the round trip.
+    season = start_season(client, member_names=["Alice", "Bob", "Carol"], capacity=3)
+    game_id = season["games"][0]["id"]
+    alice = client.get(f"/seasons/{season['id']}").json()["members"][0]
+    client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
+    client.post("/drop-ins", json={"player_name": "訪客", "game_id": game_id})
+    client.delete(f"/seasons/{season['id']}/members/{alice['id']}")
+    client.post(f"/seasons/{season['id']}/members", json={"player_name": "Alice"})
+
+    extra = client.post("/drop-ins", json={"player_name": "另一位", "game_id": game_id})
+
+    assert extra.json()["status"] == "waitlisted"
+
+
+def test_a_member_who_cancelled_their_own_leave_does_not_get_it_back(
+    client: TestClient,
+) -> None:
+    # Only leave a *removal* closed comes back. Somebody who said they
+    # were coming after all, was taken off the roster and later added
+    # back is simply expected, exactly as they were.
+    season = start_season(client, member_names=["Alice", "Bob"], capacity=4)
+    game_id = season["games"][0]["id"]
+    alice = client.get(f"/seasons/{season['id']}").json()["members"][0]
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    client.post(f"/absences/{absence['id']}/cancel", json={})
+
+    client.delete(f"/seasons/{season['id']}/members/{alice['id']}")
+    client.post(f"/seasons/{season['id']}/members", json={"player_name": "Alice"})
+
+    game = client.get(f"/seasons/{season['id']}").json()["games"][0]
+    assert game["absences"] == []
+
+
 def test_capacity_cannot_drop_below_the_current_roster(client: TestClient) -> None:
     season = start_season(client, member_names=["Alice", "Bob", "Carol"], capacity=3)
 
