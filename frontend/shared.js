@@ -735,8 +735,34 @@ function showGameDetailTab(container, key) {
   }
 }
 
+/** Every control on the game sheet is reached through one of these
+ * callbacks, so withholding them is how the sheet becomes read-only —
+ * in one place, rather than a `settled` check threaded through thirty
+ * lines of markup that would each have to remember it. */
+const GAME_SHEET_ACTIONS = [
+  "onAddDropIn",
+  "onAssignSubstitute",
+  "onCancelAbsence",
+  "onCancelSubstitute",
+  "onLeaveWaitlist",
+  "onPromoteFromWaitlist",
+  "onRecordAbsence",
+  "onRemoveDropIn",
+];
+
 function renderGameDetail(container, season, game, options) {
-  const opts = options || {};
+  const given = options || {};
+  // A settled season is closed to everybody, the organizer included, and
+  // the server refuses every one of these (_require_season_open). The
+  // buttons come off the sheet rather than being left there to be
+  // pressed and refused: a screen that offers an action it knows will
+  // fail is worse than one that doesn't offer it.
+  const closed = !!season.settled_at;
+  const opts = closed
+    ? Object.fromEntries(
+        Object.entries(given).filter(([key]) => !GAME_SHEET_ACTIONS.includes(key))
+      )
+    : given;
   const extraHtml = opts.extraHtml || "";
   const clubMembers = opts.clubMembers || [];
   const viewerName = opts.viewerName || "";
@@ -1075,7 +1101,13 @@ function renderGameDetail(container, season, game, options) {
       statusHtml: opts.statusHtml,
       actionsHtml: opts.actionsHtml,
     })}
-    ${game.locked ? '<div class="gdetail-locked">已過更動期限，這一場無法再變更</div>' : ""}
+    ${
+      closed
+        ? '<div class="gdetail-locked">這一季已經結算，名單與帳務都已鎖定</div>'
+        : game.locked
+          ? '<div class="gdetail-locked">已過更動期限，這一場無法再變更</div>'
+          : ""
+    }
     ${extraHtml}
     ${
       opts.onAddDropIn

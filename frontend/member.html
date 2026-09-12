@@ -147,7 +147,7 @@
   let pendingInviteClubName = null;
   // False until we know whether there's a season and who's on it. Guards
   // renderIntentAsk; see the comment there.
-  let seasonSettled = false;
+  let seasonLoaded = false;
 
   // A club's "用連結加入球隊" link carries ?invite=<token> — LIFF forwards
   // query params from the liff.line.me URL through to this page, so
@@ -343,7 +343,7 @@
    * leaving empty cards on screen. */
   function renderNoSeason() {
     currentSeason = null;
-    seasonSettled = true;
+    seasonLoaded = true;
     document.getElementById("cal-label").hidden = true;
     document.getElementById("month-cal").hidden = true;
     document.getElementById("month-cal").innerHTML = "";
@@ -455,16 +455,20 @@
    * question is not a reason to let someone commit to money. */
   /** Whether to put the question on screen at all.
    *
-   * `settled` is the half that was missing and got reported from a real
-   * phone: called before the season loads, this asked over the top of a
-   * hero that still said 載入中, and asked people who were *already*
+   * `loaded` is the half that was missing and got reported from a real
+   * phone: called before the season arrives, this asked over the top of
+   * a hero that still said 載入中, and asked people who were *already*
    * fixed members — because onRoster can't be true when there's no
    * roster yet to check against. Everything here is an argument so the
    * rule can be tested directly; renderIntentAsk below just supplies
    * the page's current values.
+   *
+   * Named `loaded`, not `settled`: it once was, and in an app where
+   * `settled_at` means "this season's books are closed" that is a
+   * genuinely dangerous name to reuse for "the page finished loading".
    */
-  function shouldAskIntent(settled, membership, onRoster) {
-    if (!settled) return false;
+  function shouldAskIntent(loaded, membership, onRoster) {
+    if (!loaded) return false;
     if (!membership) return false; // not in this club — the join prompt's job
     // The organizer decides the roster; asking them to apply to
     // themselves and wait for their own approval is incoherent, and it
@@ -483,7 +487,7 @@
       currentSeason && currentSeason.members.some((m) => m.name === playerName())
     );
 
-    if (!shouldAskIntent(seasonSettled, mine, onRoster)) {
+    if (!shouldAskIntent(seasonLoaded, mine, onRoster)) {
       el.hidden = true;
       return;
     }
@@ -722,12 +726,12 @@
       // with. Redrawing identical data is invisible work that isn't
       // invisible: it costs a frame and reads as a stutter.
       if (currentSeason && JSON.stringify(season) === JSON.stringify(currentSeason)) {
-        seasonSettled = true;
+        seasonLoaded = true;
         return;
       }
       const isNewSeason = !currentSeason || currentSeason.id !== season.id;
       currentSeason = season;
-      seasonSettled = true;
+      seasonLoaded = true;
       if (isNewSeason || !season.games.some((g) => g.id === selectedGameId)) {
         const upcoming = season.games.find((g) => !describeDate(g.date).isPast) || season.games[season.games.length - 1];
         selectedGameId = upcoming ? upcoming.id : null;
@@ -978,6 +982,19 @@
     const blocked = currentViewingOnlyReason();
     if (blocked) {
       return { status: `<div class="hero-status">${escapeHtml(blocked)}</div>`, actions: "" };
+    }
+    // Checked before the deadline, because it outranks it: the deadline
+    // is about one game and the organizer is exempt from it, while a
+    // settled season is closed to everybody for good. The server refuses
+    // all of it too (_require_season_open) — this is so the buttons are
+    // not on screen to be pressed in the first place. Offering an action
+    // and then explaining why it failed is a worse app than not
+    // offering it.
+    if (season.settled_at) {
+      return {
+        status: '<div class="hero-status">這一季已經結算，名單與帳務都已鎖定</div>',
+        actions: "",
+      };
     }
     if (game.locked) {
       return {
@@ -1309,7 +1326,7 @@
         myLedger = ledger;
         // Only repaint here if the page has already drawn once; the
         // first paint comes from render().
-        if (seasonSettled) paintBalance();
+        if (seasonLoaded) paintBalance();
       },
       { headers: authHeader() }
     ).catch(() => {});
