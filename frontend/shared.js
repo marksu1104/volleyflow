@@ -205,6 +205,15 @@ function currentClubId() {
  * Seasons live under a club now (GET /clubs/{id}/seasons), so the two
  * pickers can't be initialised independently: the season list is
  * meaningless until a club is chosen.
+ *
+ * `knownClubs`, when given, is `{ list, fresh }` from a caller that has
+ * already read the same clubs for its own reasons — member.html needs
+ * `wants_fixed_membership`, which only GET /players/{id}/clubs carries,
+ * so it was asking for the caller's clubs twice on every single load,
+ * from two endpoints that answer with the same clubs. The two reads were
+ * serial, not parallel, because nothing here can start until a club is
+ * chosen: measured at 485ms of a 586ms warm load spent re-reading a list
+ * the page already had in a variable.
  */
 async function initClubAndSeasonPickers(
   apiBase,
@@ -213,7 +222,8 @@ async function initClubAndSeasonPickers(
   seasonStorageKey,
   onSeasonChange,
   onError,
-  clubFilter
+  clubFilter,
+  knownClubs
 ) {
   // Without this, a failed fetch (offline, CORS, a backend that never
   // woke up) rejected an un-awaited promise and the page just sat there
@@ -228,6 +238,11 @@ async function initClubAndSeasonPickers(
   }
 
   async function loadClubs() {
+    if (knownClubs) {
+      const mine = clubFilter ? knownClubs.list.filter(clubFilter) : knownClubs.list;
+      await applyClubs(mine, { fresh: knownClubs.fresh });
+      return;
+    }
     // applyClubs kicks off the season fetch, and getJsonSWR may call it
     // twice (cache then network) — its rejection has to be caught here
     // rather than escaping as an unhandled rejection, which is exactly

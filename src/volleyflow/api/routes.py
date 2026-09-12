@@ -1884,9 +1884,16 @@ def start_season(
     ]
     db.add_all(games)
 
+    # The same person named twice is one member, not two rows and a
+    # crash: two names that resolve to one player (the list typed twice,
+    # or two spellings the club already maps to one person) would
+    # otherwise build two identical season_members rows and fail on the
+    # primary key. Nothing about the season changes — a roster is a set.
     member_ids = []
     for name in payload.member_names:
         player = _get_or_create_player(db, club_id, name)
+        if player.id in member_ids:
+            continue
         db.add(SeasonMemberRow(season_id=season.id, player_id=player.id))
         member_ids.append(player.id)
 
@@ -2109,8 +2116,22 @@ def add_member(
     new member is charged their full season fee immediately, and every
     other current member's charge is corrected for the new, lower share
     — see _sync_season_fee_ledger.
+
+    Locks the season row for the rest of the transaction, same reasoning
+    as _get_game_or_404 and found the same way — by two requests racing
+    for real. This route reads "is this person already a member" and
+    "is there room", then writes based on those reads. Two overlapping
+    calls for the same name each read no and each wrote: with the name
+    already known to the club, that was a duplicate key and a 500; with
+    a brand new name, far worse and completely silent — two Player rows
+    for one person, both on the roster, both charged a season fee. The
+    roster screen produces the overlap by itself, since adding somebody
+    reloads the whole roster and a second tap lands on the redrawn
+    button while the first request is still in the air.
     """
-    season = db.get(SeasonRow, season_id)
+    season = (
+        db.query(SeasonRow).filter(SeasonRow.id == season_id).with_for_update().first()
+    )
     if season is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
     _require_organizer(db, season.club_id, current_player)
@@ -2171,7 +2192,26 @@ def add_member(
         )
 
     db.add(SeasonMemberRow(season_id=season_id, player_id=player.id))
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as e:
+        # Two of these arrived close enough together that both got past
+        # the "already a member" read above; the primary key caught the
+        # loser. Which is the answer the loser wanted anyway — they are a
+        # member of this season — so it is the same 400 that check gives,
+        # not a 500.
+        #
+        # It takes two overlapping requests, which is exactly what the
+        # roster screen produces: adding somebody reloads the whole
+        # roster, the reload redraws the buttons, and a second tap lands
+        # on the redrawn one while the first request is still in the air.
+        # Found by tests/visual/smoke.js pressing every button on that
+        # page (2026-09-12) — reported three times before that as an
+        # unexplained 500.
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Already a member of this season"
+        ) from e
     _absorb_drop_ins_into_membership(db, season, player.id)
     _sync_season_fee_ledger(db, season)
     db.commit()

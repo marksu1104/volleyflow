@@ -44,6 +44,43 @@ def test_a_season_with_exactly_capacity_members_is_fine(client: TestClient) -> N
     assert response.status_code == 200
 
 
+def test_a_name_given_twice_becomes_one_member(client: TestClient) -> None:
+    # A roster is a set. The same person named twice used to build two
+    # identical season_members rows and fail on the primary key — a 500
+    # for something that isn't even an error.
+    club = create_club(client)
+
+    response = client.post(
+        f"/clubs/{club['id']}/seasons",
+        json={
+            "total_venue_cost": "10000",
+            "game_dates": ["2026-08-18"],
+            "member_names": ["Alice", "Bob", "Alice"],
+            "capacity": 5,
+        },
+    )
+
+    assert response.status_code == 200
+    names = [
+        m["name"]
+        for m in client.get(f"/seasons/{response.json()['id']}").json()["members"]
+    ]
+    assert sorted(names) == ["Alice", "Bob"]
+
+
+def test_adding_someone_already_on_the_roster_is_refused_not_a_crash(
+    client: TestClient,
+) -> None:
+    season = start_season(client, member_names=["Alice"], capacity=5)
+
+    response = client.post(
+        f"/seasons/{season['id']}/members", json={"player_name": "Alice"}
+    )
+
+    assert response.status_code == 400
+    assert "already a member" in response.json()["detail"].lower()
+
+
 def test_capacity_cannot_drop_below_the_current_roster(client: TestClient) -> None:
     season = start_season(client, member_names=["Alice", "Bob", "Carol"], capacity=3)
 

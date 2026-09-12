@@ -166,6 +166,63 @@ test("a failed club fetch reaches the page instead of vanishing", async () => {
   assert.equal(error.message, "Failed to fetch");
 });
 
+test("a club list the caller already has is not fetched a second time", async () => {
+  // member.html reads GET /players/{id}/clubs for its own reasons — it
+  // is the only endpoint carrying wants_fixed_membership — and then had
+  // the picker read GET /clubs for the same clubs, serially, on every
+  // load. 485ms of a 586ms warm load, spent on a list already in a
+  // variable.
+  const { initClubAndSeasonPickers } = load();
+  const asked = [];
+  globalThis.fetch = async (url) => {
+    asked.push(url);
+    return { ok: true, json: async () => [] };
+  };
+
+  await initClubAndSeasonPickers(
+    "http://x",
+    makeSelect(),
+    makeSelect(),
+    "k",
+    () => {},
+    () => {},
+    null,
+    { list: [{ id: 3, name: "測試" }], fresh: true }
+  );
+
+  assert.ok(
+    !asked.some((u) => u.endsWith("/clubs")),
+    "the club list was handed over, so nothing should have asked for it"
+  );
+  assert.ok(
+    asked.some((u) => u.includes("/clubs/3/seasons")),
+    "and the seasons of the handed-over club are still read"
+  );
+});
+
+test("a handed-over list the server never confirmed doesn't forget a club", async () => {
+  // Same rule as the cached-empty case above, arriving by a different
+  // road: member.html starts with an empty list and fills it from the
+  // network, so an empty one marked not-fresh means the read failed —
+  // not that the clubs are gone. Forgetting is not undoable.
+  const { initClubAndSeasonPickers, currentClubId } = load();
+  localStorage.setItem("vf_club", "3");
+  globalThis.fetch = async () => ({ ok: true, json: async () => [] });
+
+  await initClubAndSeasonPickers(
+    "http://x",
+    makeSelect(),
+    makeSelect(),
+    "k",
+    () => {},
+    () => {},
+    null,
+    { list: [], fresh: false }
+  );
+
+  assert.equal(currentClubId(), "3");
+});
+
 // Two loads overlap on most page loads, because the season picker fires
 // its callback once from cache and once from the network. Whichever
 // finishes last wins, and that is not always the newest one.
