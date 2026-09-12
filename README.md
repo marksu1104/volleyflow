@@ -184,7 +184,7 @@ an `Access-Control-Allow-Origin` header, and the browser reports a
 same-origin violation instead of the real 500. That is exactly how a
 crash in `link_player` first surfaced. The middleware logs every
 unhandled exception, naming the deepest line of this project's own code
-it passed through — `routes.py:2173 in add_member` — because a database
+it passed through — `seasons.py:2173 in add_member` — because a database
 error's own text is the failing SQL and identifies no route at all.
 
 Locally only, the whole traceback comes back in the response body. That
@@ -388,11 +388,34 @@ src/volleyflow/
 ├── schedule.py      Season and Game
 ├── players.py       Player and Membership
 ├── attendance.py    Absence, DropIn, WaitlistEntry
-├── api/             FastAPI routes, request/response schemas, LINE auth,
-│                    the invite-token module, crash reporting
+├── api/             FastAPI: request/response schemas, LINE auth, the
+│   │                invite-token module, crash reporting
+│   └── routes/      one module per resource, over three helper layers
 ├── db/              SQLAlchemy models and the engine
 └── notify/          LINE Messaging API client and the reminder job
 ```
+
+`api/routes/` is the one place where layering is enforced by convention
+rather than by a tool:
+
+```
+clubs  seasons  games  attendance  players  money  reports
+    |  routes: request in, response out, one resource each
+    v
+_attendance   the rules about who is on court
+    v
+_money        what that costs, and what it writes to the ledger
+    v
+_people       who the caller is, and what they may do
+```
+
+It was one 3,884-line file until the layers were measured rather than
+guessed at — a short `ast` pass asking which group each helper calls
+into found exactly these three, with no cycles. The split moved code and
+changed nothing else, which was checked by reading the old file's 41
+route declarations out of git and comparing them against what the live
+app registers: same routes, and no path can shadow another in either
+order.
 
 The first six files are pure Python: no database, no web framework, no
 I/O. That is deliberate and enforced — `lint-imports` fails the build if
@@ -402,8 +425,9 @@ quietly change what someone is charged.
 
 ## What's left
 
-[`docs/backlog.md`](docs/backlog.md) is the running list — notification
-message types beyond the two already built, `routes.py`'s eventual split
-into per-resource files, and the loose ends around invite-link scope and
-error-message coverage that were deliberately kept narrow rather than
-chased to 100%.
+[`docs/backlog.md`](docs/backlog.md) is the running list. What remains
+are loose ends kept narrow on purpose rather than chased to 100%: the
+join endpoint still accepts a plain club id from an authenticated
+caller, the Chinese error-message table covers what an ordinary tap
+reaches rather than all 41 routes, and the backup script has been
+rehearsed against the dev branch but not production.

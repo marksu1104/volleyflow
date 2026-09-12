@@ -1990,6 +1990,71 @@ Renamed to `seasonLoaded`.
 
 417 tests, 175 frontend tests, seven browser checks.
 
+## 2026-09-13 — routes.py, at last
+
+The last real item on the backlog, held back for two days precisely so
+it could be done on its own. 3,884 lines and 41 routes into eleven
+files:
+
+```
+seasons 888   _attendance 871   attendance 666   clubs 556
+money 263   _money 243   _people 287   players 171   reports 163
+games 124   __init__ 51
+```
+
+Seven route modules over three helper layers, `_attendance` → `_money` →
+`_people`, dependency running one way, `_people` importing nothing else
+in the package. The layering was chosen by measuring rather than taste:
+a twenty-line `ast` pass over the original file asked which group each
+helper calls into, and reported `att → money`, `att → people`,
+`money → people` and no cycles. That is the layering; I just wrote it
+down.
+
+**Done as a move and nothing else**, which is the only way a refactor
+this size is checkable. Every function is byte-for-byte where it was.
+The slicing was mechanical — a script cutting line ranges — because
+retyping 3,884 lines is how a "no behaviour change" refactor changes
+behaviour.
+
+Two things went wrong and both are worth recording.
+
+**The first slice silently dropped every decorator.** `ast` reports a
+decorated function's `lineno` at the `def`, not at the `@`, so cutting
+`node.lineno..end_lineno` takes the body and leaves `@router.post(...)`
+behind. 316 tests failed, `POST /clubs` answered 405, and the cause was
+invisible in the diff because the functions were all present and
+correct. Fixed by cutting from *the end of the previous top-level node*
+instead, which keeps decorators and the comments above them attached and
+provably loses nothing — the script asserts the spans tile the whole
+file. Then: 41 decorators before, 41 after.
+
+**And the split surfaced a trap in the tests.** `verify_id_token` was
+patched on the importing module — the old comment in `conftest.py`
+explained carefully why patching `auth` wouldn't work — and after the
+split there are *two* importing modules (the Authorization header in
+`_people`, the body of `/players/identify` in `players`). Patching one
+would have left the other calling the real LINE API from a test. The fix
+is the one the original comment ruled out, made to work: both callers
+import the *module* and call `auth.verify_id_token(...)`, so the single
+patch on `auth` reaches every caller, including the next one somebody
+adds. Same for `push_to_user` in `reports`.
+
+**How "no behaviour change" was actually checked**, rather than asserted:
+the original file still exists at `HEAD`, so its 41 route declarations
+were read statically and compared against what the live app registers.
+Same set of (method, path): yes. Same *order*: no — grouping by resource
+necessarily reorders, and FastAPI matches in registration order, so that
+needed an answer rather than a shrug. The answer: expand every `{param}`
+to `[^/]+` and ask whether any earlier route with the same method
+matches a later route's literal path. Zero shadowing pairs before, zero
+after. The reorder cannot change which handler answers.
+
+Also 421 tests green (417 plus the four Postgres ones), `lint-imports`
+still holding the billing/database boundary, and `smoke.js` clean across
+all six pages against the real API.
+
+417 tests, 175 frontend tests, seven browser checks.
+
 **And the load, measured request by request.** 「載入中的時間還能不能更
 縮短」 — so the next thing was to watch what a page load actually waits
 on, rather than just how long it took overall:

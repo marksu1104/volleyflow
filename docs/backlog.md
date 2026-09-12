@@ -37,15 +37,17 @@ settlement, waitlist promotion, and the pre-game reminder) are a
 wishlist and, after two rounds of this, mostly an unwanted one. Adding
 any of them is real, separate work and needs asking first.
 
-## 2. `routes.py` split
+## 2. `routes.py` split — done, 2026-09-13
 
-3,600-odd lines and over 40 routes now — larger than a week ago, since
-this stage's fixes (capacity limits, the invite token, the crash-
-reporting middleware) all landed in it. The seams are clear enough
-(clubs, seasons, attendance, money), but splitting it is a large diff
-with no behaviour change, and doing it in the same wave as several real
-behaviour changes to the same file is exactly the "busy moment" this
-note has always warned against. Wants its own quiet stage.
+3,884 lines and 41 routes became eleven files, the largest 888. Seven
+route modules (clubs, seasons, games, attendance, players, money,
+reports) over three helper layers (`_attendance` → `_money` →
+`_people`), with the dependency running one way and `_people` importing
+nothing else in the package.
+
+Held back for two days on purpose, because the point of it is to change
+nothing, and mixing it with real behaviour changes to the same file
+leaves no way to tell which half broke something.
 
 ## 3. Loose ends, deliberately left open
 

@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 
 from tests.api.factories import auth_headers, create_club, identify
 from tests.api.factories import start_season as _start_season
-from volleyflow.api import routes
-from volleyflow.api.routes import _today_in_taiwan
+from volleyflow.api.routes import reports
+from volleyflow.api.routes._people import _today_in_taiwan
 from volleyflow.db.models import AbsenceRow, DropInRow, PlayerRow
 
 
@@ -2623,7 +2623,7 @@ def test_a_report_reaches_the_developer_with_its_context(
     attaches rather than asking someone to type."""
     sent: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        routes, "push_to_user", lambda uid, text: sent.append((uid, text))
+        reports.line_client, "push_to_user", lambda uid, text: sent.append((uid, text))
     )
     monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
     club = create_club(client, name="啪排郎")
@@ -2672,7 +2672,7 @@ def test_a_report_that_cannot_be_delivered_says_so(
     def explode(user_id: str, text: str) -> None:
         raise RuntimeError("LINE quota exhausted")
 
-    monkeypatch.setattr(routes, "push_to_user", explode)
+    monkeypatch.setattr(reports.line_client, "push_to_user", explode)
     monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
     alice = identify(client, "Alice")
 
@@ -2698,9 +2698,13 @@ def test_a_report_with_a_screenshot_sends_the_picture_too(
     the picture has to be reachable without any of our credentials."""
     sent_text: list[str] = []
     sent_images: list[str] = []
-    monkeypatch.setattr(routes, "push_to_user", lambda uid, t: sent_text.append(t))
     monkeypatch.setattr(
-        routes, "push_image_to_user", lambda uid, url: sent_images.append(url)
+        reports.line_client, "push_to_user", lambda uid, t: sent_text.append(t)
+    )
+    monkeypatch.setattr(
+        reports.line_client,
+        "push_image_to_user",
+        lambda uid, url: sent_images.append(url),
     )
     monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
     alice = identify(client, "Alice")
@@ -2727,7 +2731,7 @@ def test_a_report_with_a_screenshot_sends_the_picture_too(
 def test_a_screenshot_that_is_not_an_image_is_refused(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(routes, "push_to_user", lambda uid, t: None)
+    monkeypatch.setattr(reports.line_client, "push_to_user", lambda uid, t: None)
     monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
     alice = identify(client, "Alice")
 
@@ -3144,7 +3148,7 @@ def test_cancelling_a_drop_in_refunds_what_they_were_actually_charged(
     freshly recomputed share instead of the amount actually taken left a
     residual balance on somebody no longer connected to the game at all
     — found by a random sweep, not by a real invoice not adding up. See
-    routes._record_drop_in_charge and the migration that added
+    routes/_money.py's _record_drop_in_charge and the migration that added
     DropInRow.charged_amount.
     """
     season = _start_season(
