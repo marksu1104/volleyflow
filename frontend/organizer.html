@@ -491,7 +491,9 @@
       announceId(null);
       delete pendingAbsenceId[key];
     }
-    refreshQuietly();
+    // Only when somebody was promoted off the queue — see
+    // needsRefreshAfter. Otherwise the screen already matches the server.
+    if (needsRefreshAfter(result)) refreshQuietly();
   }
 
   async function cancelAbsenceFor(absenceId, btn) {
@@ -499,7 +501,7 @@
     const game = currentSeason.games.find((g) => g.id === gameId);
     const row = (game.absences || []).find((a) => a.id === absenceId);
     const playerName = row ? row.player_name : null;
-    await optimistically(
+    const result = await optimistically(
       (season) => {
         for (const g of season.games) {
           g.absences = g.absences.filter((a) => a.id !== absenceId);
@@ -516,7 +518,9 @@
       },
       "取消請假失敗："
     );
-    refreshQuietly();
+    // Only when somebody was actually released back to the queue — see
+    // needsRefreshAfter.
+    if (needsRefreshAfter(result)) refreshQuietly();
   }
 
   async function addDropIn(name, gender, btn) {
@@ -628,14 +632,16 @@
 
   async function cancelSubstitute(dropInId, btn) {
     if (dropInId < 0) return; // still saving; the real id isn't known yet
-    await optimistically(
+    const result = await optimistically(
       // Clears the absence row that named them too — see
       // removeDropInLocally.
       (season) => removeDropInLocally(season, dropInId),
       () => postJson(API_BASE, `/drop-ins/${dropInId}/cancel`, {}),
       "移除失敗："
     );
-    refreshQuietly();
+    // The freed slot is offered to the queue, and the answer says
+    // whether anyone took it — see needsRefreshAfter.
+    if (needsRefreshAfter(result)) refreshQuietly();
   }
 
   function statusLabel(status) {

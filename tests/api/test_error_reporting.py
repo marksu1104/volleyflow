@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 
-from volleyflow.api import error_reporting, main
+from volleyflow.api import error_reporting, main, routes
 from volleyflow.api.error_reporting import (
     ErrorReportingMiddleware,
     report_unhandled_error,
@@ -153,6 +153,49 @@ def test_reports_to_the_organizer_when_configured(
     assert sent[0][0] == "U123"
     assert "ValueError" in sent[0][1]
     assert "/some/path" in sent[0][1]
+
+
+def test_the_report_says_which_line_of_this_project_raised_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Without this the alert carried the exception's own text and nothing
+    # else, cut at 200 characters — which for a database error is the
+    # failing SQL and names no route at all. A 500 on
+    # POST /seasons/{id}/members was reported three times before anyone
+    # could say which line wrote the row.
+    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U123")
+    sent = []
+    monkeypatch.setattr(
+        error_reporting, "push_to_user", lambda uid, text: sent.append(text)
+    )
+
+    try:
+        # Raised from inside the package, so the frame walk has something
+        # of this project's own to find — the point of _where is that it
+        # skips the SQLAlchemy frames a bare traceback ends on.
+        routes.list_clubs(db=None, current_player=None)  # type: ignore[arg-type]
+    except Exception as exc:
+        report_unhandled_error("/clubs", exc)
+
+    assert "routes.py:" in sent[0]
+
+
+def test_an_exception_from_outside_the_package_still_reports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U123")
+    sent = []
+    monkeypatch.setattr(
+        error_reporting, "push_to_user", lambda uid, text: sent.append(text)
+    )
+
+    # No traceback at all — constructed, never raised. The location is
+    # unknown and the alert must still go out saying so, rather than
+    # failing and leaving the organizer with nothing.
+    report_unhandled_error("/p", ValueError("nowhere in particular"))
+
+    assert len(sent) == 1
+    assert "ValueError" in sent[0]
 
 
 def test_does_nothing_extra_without_an_organizer_configured(

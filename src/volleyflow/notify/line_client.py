@@ -56,6 +56,9 @@ def push_image_to_user(user_id: str, image_url: str) -> None:
     response.raise_for_status()
 
 
-def push_to_group(group_id: str, text: str) -> None:
-    """A message to the group chat — used for the roster reminder."""
-    _push(group_id, text)
+# There is deliberately no push_to_group. One existed, for a nightly
+# roster message to the club's LINE group, and the organizer asked for
+# it to be dropped — the group already talks about the game in the
+# group, so a bot repeating the roster into it was noise. Deleted rather
+# than left behind an unused import, so nothing can quietly start using
+# it again. See notify/reminders.send_game_reminder.
