@@ -185,3 +185,132 @@ def test_a_missing_entry_is_a_404(client: TestClient) -> None:
     start_season(client, member_names=["Alice"])
 
     assert client.post("/waitlist/99999/promote", json={}).status_code == 404
+
+
+def _future(weeks: int) -> str:
+    from datetime import date, timedelta
+
+    return str(date.today() + timedelta(weeks=weeks))
+
+
+def test_taking_a_member_off_the_roster_offers_their_place_to_the_queue(
+    client: TestClient,
+) -> None:
+    """Asked for on 2026-09-12, after the removal fix turned up a game
+    sitting at 2 on a court for 3 with somebody still queued for it.
+
+    CLAUDE.md 2.3 lists an absence and a cancelled signup as the moments
+    a slot is offered on; a removal frees one just as squarely.
+    """
+    season = start_season(
+        client,
+        member_names=["Alice", "Bob", "Carol"],
+        capacity=3,
+        game_dates=[_future(1)],
+    )
+    game_id = season["games"][0]["id"]
+    client.post("/drop-ins", json={"player_name": "訪客", "game_id": game_id})
+    alice = client.get(f"/seasons/{season['id']}").json()["members"][0]
+
+    client.delete(f"/seasons/{season['id']}/members/{alice['id']}")
+
+    detail = client.get(f"/seasons/{season['id']}").json()
+    game = detail["games"][0]
+    assert [d["player_name"] for d in game["confirmed_drop_ins"]] == ["訪客"]
+    assert game["waitlist_entries"] == []
+    assert [m["name"] for m in detail["members"]] == ["Bob", "Carol"], (
+        "and they came off the queue as a drop-in for that game, "
+        "not into the fixed roster the leaver vacated"
+    )
+
+
+def test_the_promoted_person_is_charged_for_that_game(client: TestClient) -> None:
+    season = start_season(
+        client,
+        total_venue_cost="900",
+        member_names=["Alice", "Bob", "Carol"],
+        capacity=3,
+        game_dates=[_future(1)],
+    )
+    game_id = season["games"][0]["id"]
+    guest = client.post(
+        "/drop-ins", json={"player_name": "訪客", "game_id": game_id}
+    ).json()
+    alice = client.get(f"/seasons/{season['id']}").json()["members"][0]
+
+    client.delete(f"/seasons/{season['id']}/members/{alice['id']}")
+
+    ledger = client.get(
+        f"/clubs/{season['club_id']}/players/{guest['player_id']}/ledger"
+    ).json()
+    assert ledger["balance"] == "-300", "one game's share, same as a direct signup"
+
+
+def test_a_game_the_leaver_was_away_from_promotes_nobody(client: TestClient) -> None:
+    # They were not on that court, so their removal frees nothing there.
+    # Their stand-in already holds the place.
+    season = start_season(
+        client,
+        member_names=["Alice", "Bob", "Carol"],
+        capacity=3,
+        game_dates=[_future(1)],
+    )
+    game_id = season["games"][0]["id"]
+    client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
+    client.post("/drop-ins", json={"player_name": "代打", "game_id": game_id})
+    client.post("/drop-ins", json={"player_name": "排隊的", "game_id": game_id})
+    alice = client.get(f"/seasons/{season['id']}").json()["members"][0]
+
+    client.delete(f"/seasons/{season['id']}/members/{alice['id']}")
+
+    game = client.get(f"/seasons/{season['id']}").json()["games"][0]
+    assert [w["player_name"] for w in game["waitlist_entries"]] == ["排隊的"]
+
+
+def test_nobody_is_promoted_into_a_game_that_has_already_been_played(
+    client: TestClient,
+) -> None:
+    # A removal frees the slot at every game in the season, last month's
+    # included. Promoting somebody there would put them on a roster they
+    # never stood on and charge them for the night.
+    season = start_season(
+        client,
+        member_names=["Alice", "Bob", "Carol"],
+        capacity=3,
+        game_dates=["2026-01-06", _future(1)],
+    )
+    past_game = season["games"][0]["id"]
+    client.post("/drop-ins", json={"player_name": "訪客", "game_id": past_game})
+    alice = client.get(f"/seasons/{season['id']}").json()["members"][0]
+
+    client.delete(f"/seasons/{season['id']}/members/{alice['id']}")
+
+    past = client.get(f"/seasons/{season['id']}").json()["games"][0]
+    assert [w["player_name"] for w in past["waitlist_entries"]] == ["訪客"]
+    assert past["confirmed_drop_ins"] == []
+
+
+def test_the_queue_never_fills_more_places_than_were_freed(
+    client: TestClient,
+) -> None:
+    season = start_season(
+        client,
+        member_names=["Alice", "Bob", "Carol"],
+        capacity=3,
+        game_dates=[_future(1)],
+    )
+    game_id = season["games"][0]["id"]
+    for name in ["甲", "乙", "丙"]:
+        client.post("/drop-ins", json={"player_name": name, "game_id": game_id})
+    alice = client.get(f"/seasons/{season['id']}").json()["members"][0]
+
+    client.delete(f"/seasons/{season['id']}/members/{alice['id']}")
+
+    detail = client.get(f"/seasons/{season['id']}").json()
+    game = detail["games"][0]
+    on_court = (
+        len(detail["members"]) - len(game["absences"]) + len(game["confirmed_drop_ins"])
+    )
+    assert on_court == 3, f"one place freed, one filled: {on_court} on a court for 3"
+    assert [d["player_name"] for d in game["confirmed_drop_ins"]] == ["甲"]
+    assert [w["player_name"] for w in game["waitlist_entries"]] == ["乙", "丙"]

@@ -1859,6 +1859,76 @@ about it.
 
 414 tests, 170 frontend tests, seven browser checks.
 
+## 2026-09-12 (late) — one rule decided, one feature deleted, 2,161 people swept up
+
+Three questions from the organizer, and the interesting thing is that
+two of them were about *removing* things.
+
+**The queue now gets a slot freed by a removal.** Raised as a finding
+yesterday and decided today, with the part that mattered supplied by the
+organizer rather than guessed at: 「候補可以遞補，但不代表他會占掉原來的
+固定名額，他只是來候補那一場而已」. That distinction is the whole rule.
+Somebody coming off the queue joins **one game as a drop-in** — they do
+not inherit the fixed-member place the leaver vacated, because a fixed
+membership is a season-long commitment to a fee and nobody agreed to
+that by queuing for one night.
+
+Almost no new machinery: `_promote_entry` already wrote a `DropInRow`
+and charged one game's share, because that is what promotion has always
+meant everywhere else. What was missing was the call. Two things did
+need thinking about, and both are in the tests: a game the leaver was
+*away* from frees nothing (their stand-in already holds the place), and
+**past games are excluded** — a removal frees the slot at every game in
+the season, and promoting somebody into last month's game would put them
+on a roster they never stood on and charge them for the night.
+
+`CLAUDE.md` 2.3 updated, since this is a domain rule and that file is
+where they live.
+
+**The LINE crash report is deleted.** Built on the 12th to solve a real
+problem — a 500 in production was invisible — and it solved it by
+interrupting the one person who could do nothing about it, spending a
+push from the free tier's 200 a month each time. 「我覺得這不是必要功能，
+而且這是不是會佔到額度？」 Yes, it was. Removed outright rather than
+flagged off, the same as the group message, for the same reason: a thing
+nobody wants must not be one environment variable away from restarting.
+
+What was actually valuable survived and is free: the log line naming the
+route and the deepest line of *this project's* code (`routes.py:2173 in
+add_member`), and the full traceback in the response body in local
+development. The second of those is what solved the three-session 500 in
+one run. The report was never the useful part; knowing where to look
+was. Second feature in two days removed for being an unrequested
+notification — worth noticing as a pattern rather than as two incidents.
+
+**And the dev database was 97% litter.** The question was 「你現在的資料庫
+資料會不會很複雜很麻煩阿？」, which deserved a count rather than an
+opinion:
+
+```
+players: 2223       in no club: 2162
+```
+
+Nothing wrong with the schema — eleven tables, two to eleven columns
+each, three clubs, three seasons. The 2,162 were mine. Deleting a club
+deliberately never deletes players (a `Player` is global and outlives
+any one club, `CLAUDE.md` 2.1), which is right for the product and
+wrong for a script that deletes and rebuilds the same club twenty times
+in an afternoon. `scripts/tidy_dev_db.py` removes only a player in no
+club that *nothing* points at — no ledger entry, no signup, no absence,
+no queue place — and lists the referencing tables explicitly rather than
+deriving them, so adding a table to the schema without thinking about
+this shows up as a count that doesn't match rather than as a silently
+deleted person. 2,223 down to 62.
+
+Its first guard was wrong in an instructive way: it tried to recognise
+the dev branch by hostname, and Neon names every branch something like
+`ep-dawn-pine-azbsvr6x`. A guard that cannot tell production from
+development is worse than none, because it reads like one. It now prints
+the host and requires `VOLLEYFLOW_DEV_LOGIN=1` before deleting anything.
+
+413 tests, 170 frontend tests, seven browser checks.
+
 **And the load, measured request by request.** 「載入中的時間還能不能更
 縮短」 — so the next thing was to watch what a page load actually waits
 on, rather than just how long it took overall:

@@ -22,12 +22,20 @@ can quietly start posting again. What remains is the short-roster alert
 to the organizer alone (`LINE_ORGANIZER_USER_ID`, already set), which
 will fire for real on the next short-handed game.
 
-Beyond that, the five message types described in a previous draft of
-this file (new joiners, unpaid-fee chase, settlement, waitlist
-promotion, and the pre-game reminder) are a wishlist and, after this
-decision, mostly an unwanted one — `notify/reminders.py` sends exactly
-the short-roster alert. Adding any of the rest is real, separate work
-and needs asking first, not a bug fix.
+The crash report over LINE is gone too (2026-09-12), for the same
+reasons and at the same person's request: unprompted messages that meant
+nothing to whoever read them, each one spending a push from the same
+200 a month the short-roster alert needs. An unhandled exception now
+leaves a log line on Render naming the route and the line that raised
+it, which is where a crash report belongs.
+
+**What this leaves is one push message in the whole system**, and that
+is the right default to hold: `notify/reminders.py` sends the
+short-roster alert and nothing else. The five message types described in
+a previous draft of this file (new joiners, unpaid-fee chase,
+settlement, waitlist promotion, and the pre-game reminder) are a
+wishlist and, after two rounds of this, mostly an unwanted one. Adding
+any of them is real, separate work and needs asking first.
 
 ## 2. `routes.py` split
 

@@ -49,7 +49,7 @@ other club sharing the same deployment.
                                                                          ^
                                                                          |
   Organizer, privately  <--push--  LINE Messaging API  <--reads---------+
-    (short-roster and crash alerts; never the group chat)
+    (one message: a short-handed game. Never the group chat.)
 
   GitHub Actions, on its own schedule:
     CI            test -> migrate production -> trigger the Render deploy
@@ -170,10 +170,23 @@ attaches outside `CORSMiddleware`, so the response it builds never gets
 an `Access-Control-Allow-Origin` header, and the browser reports a
 same-origin violation instead of the real 500. That is exactly how a
 crash in `link_player` first surfaced. The middleware logs every
-unhandled exception, and — rate-limited to once per (exception type,
-route) per half hour, so a client retrying a broken request can't spend
-a month's LINE quota reporting the same bug — sends the organizer a LINE
-message naming what broke and where.
+unhandled exception, naming the deepest line of this project's own code
+it passed through — `routes.py:2173 in add_member` — because a database
+error's own text is the failing SQL and identifies no route at all.
+
+Locally only, the whole traceback comes back in the response body. That
+is not a convenience: a browser-driven check can read a response and
+cannot read the server's console, so a 500 that `smoke.js` had reported
+three times as a bare status code handed over its cause in one run the
+moment this existed.
+
+It used to push a crash report to the organizer over LINE as well. That
+was removed at their request — unasked-for messages that meant nothing to
+the person receiving them, each one spending a push from the free tier's
+200 a month. Worth recording as a judgement that was wrong: the feature
+was built to solve a real problem (a 500 nobody could see) and solved it
+by interrupting somebody who could not act on it. The log was the right
+place the whole time.
 
 ## Checks
 
@@ -181,7 +194,7 @@ message naming what broke and where.
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
-uv run pytest -q               # 414 tests, including a randomised sweep
+uv run pytest -q               # 413 tests, including a randomised sweep
 uv run lint-imports             # billing logic must not import the database
 node --test tests/frontend/*.test.js   # 170 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
@@ -293,6 +306,21 @@ those members are linked to a sign-in of their own, so the links it
 prints at the end open on a real member's view rather than on "you
 haven't joined a club". Re-running it removes its own club first, so it
 always lands in the same state.
+
+What it can't remove is the people. Deleting a club never deletes
+players — a `Player` is global and outlives any one club — which is right
+for the product and means twenty seed runs leave twenty casts behind.
+After a heavy day of it:
+
+```
+uv run python scripts/tidy_dev_db.py          # count them
+uv run python scripts/tidy_dev_db.py --yes    # delete them
+```
+
+It removes only a player who is in no club and that nothing at all points
+at — no ledger entry, no signup, no absence, no queue place — and needs
+`VOLLEYFLOW_DEV_LOGIN=1` before it will delete. (2,223 players, 2,162 of
+them stranded, was the state that prompted it.)
 
 It goes through the API rather than inserting rows because ledger
 entries are written by the route handlers: inserting directly would mean

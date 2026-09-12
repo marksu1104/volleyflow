@@ -78,8 +78,16 @@ the queue.
 **The waitlist**
 - A `DropIn` signs up for a future game; once full, further signups queue
   in order of `queued_at`.
-- Recording an `Absence`, or cancelling a confirmed `DropIn`, offers the
-  freed slot to the queue in order — automatically, first-queued-first.
+- Recording an `Absence`, cancelling a confirmed `DropIn`, or taking a
+  member off the season's roster offers the freed slot to the queue in
+  order — automatically, first-queued-first. Removal was added to this
+  list on 2026-09-12: it frees a slot as squarely as the other two, and
+  leaving it off meant a game could sit below capacity with somebody
+  still queued for it. Whoever comes off the queue joins **that one
+  game as a `DropIn`** — they do not inherit the fixed-member place the
+  leaver vacated. Future games only: a removal frees the slot at every
+  game in the season, and promoting somebody into one already played
+  would charge them for a night they didn't attend.
 - The organizer may override that order by promoting a specific person;
   on a full game they must name who steps out, and both happen in one
   transaction so only those two ledgers move. Ordinary members cannot

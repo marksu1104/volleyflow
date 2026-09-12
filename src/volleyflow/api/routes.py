@@ -903,6 +903,55 @@ def _promote_from_waitlist(db: Session, game_id: int) -> int | None:
     return _promote_entry(db, entry).player_id
 
 
+def _offer_freed_slots_to_the_queue(db: Session, season: SeasonRow) -> list[int]:
+    """Taking somebody off the roster frees their place at every game they
+    were expected at, so the queue is offered those places — earliest
+    queued first, one person per place, exactly as an absence does.
+
+    Asked for on 2026-09-12, after the removal fix turned up a game
+    sitting at 2 on a court for 3 with somebody still waiting in the
+    queue for it. `CLAUDE.md` 2.3 lists an absence and a cancelled signup
+    as the moments a slot is offered on; a removal frees a slot just as
+    squarely and was simply not on the list.
+
+    Whoever comes off the queue joins that one game as a drop-in — the
+    organizer's words: 「不代表他會占掉原來的固定名額，他只是來候補那一
+    場而已」. That is already what promotion means everywhere else
+    (_promote_entry writes a DropInRow and charges one game's share), so
+    nothing here has to make it true; it is worth writing down only
+    because "somebody left the roster, so somebody else joins it" would
+    be the wrong reading.
+
+    Future games only. A removal frees the slot at every game in the
+    season including ones already played, and promoting somebody into
+    last month's game would put them on a roster they never stood on and
+    charge them for the night.
+    """
+    promoted: list[int] = []
+    today = _today_in_taiwan()
+    games = (
+        db.query(GameRow)
+        .filter(
+            GameRow.season_id == season.id,
+            GameRow.status == GameStatus.SCHEDULED,
+            GameRow.date >= today,
+        )
+        .order_by(GameRow.date)
+        .all()
+    )
+    for game in games:
+        # A game can free more than one place if the roster shrank by
+        # more than one person before this ran, so keep offering until
+        # the court is full or the queue is empty.
+        while _has_open_slot(db, game, season):
+            player_id = _promote_from_waitlist(db, game.id)
+            if player_id is None:
+                break
+            db.flush()
+            promoted.append(player_id)
+    return promoted
+
+
 def _gather_member_settlements(
     db: Session, season_id: int
 ) -> tuple[SeasonRow, list[MemberSettlement]]:
@@ -2353,6 +2402,12 @@ def remove_member(
     # Before the fee sync, so the restored drop-in charges are already
     # in the ledger when it works out what everyone owes.
     _restore_absorbed_drop_ins(db, season, player_id, away_from)
+    # After the restore, so a game this player is back on as a drop-in is
+    # correctly seen as still full and nobody is promoted into a place
+    # that never opened. Before the fee sync, for the same reason the
+    # restore is: the promoted drop-ins' charges belong in the ledger the
+    # sync then reads.
+    _offer_freed_slots_to_the_queue(db, season)
     _sync_season_fee_ledger(db, season)
     db.commit()
 
