@@ -142,6 +142,20 @@ an ordering bug — a background refresh could overtake the write it was
 meant to confirm — findable only by instrumenting a real page and
 watching the timestamps, not by reading the code.
 
+It also caught the one bug in this project that three sessions of reading
+the code could not. A 500 on "add this person to the season", reported
+three times and never reproduced: the roster screen reloads itself after
+every change, redrawing its buttons, so a second tap lands while the
+first request is still in flight, and both requests read "not a member
+yet" before either writes. Writing that race down as a test — two
+threads, real Postgres — turned up something worse than the crash and
+completely silent: with a name the club had never seen, all four
+concurrent requests *succeed*, each creating its own `Player` row, and
+one person ends up on the roster four times with four season fees
+charged. A read that decides something and a write that acts on it need
+a lock between them, and `add_member` now takes one on the season row,
+exactly as the signup path has always taken one on the game.
+
 **CI migrates production before it deploys, and provably fails shut if
 it can't.** Deploying code before its migration took production down
 once. Now `alembic upgrade head` runs against production as its own CI
@@ -167,9 +181,9 @@ message naming what broke and where.
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
-uv run pytest -q               # 409 tests, including a randomised sweep
+uv run pytest -q               # 411 tests, including a randomised sweep
 uv run lint-imports             # billing logic must not import the database
-node --test tests/frontend/*.test.js   # 168 frontend tests
+node --test tests/frontend/*.test.js   # 170 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
 node tests/visual/smoke.js     # presses every button and reports the dead ones
 node tests/visual/feedback.js  # and how long each one takes to react

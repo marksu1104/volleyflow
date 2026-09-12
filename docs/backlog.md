@@ -41,16 +41,6 @@ note has always warned against. Wants its own quiet stage.
 
 ## 3. Loose ends, deliberately left open
 
-- **One 500 seen three times and never reproduced.** A foreign key
-  violation on `POST /seasons/{id}/members` —
-  `season_members_player_id_fkey`, a `player_id` not present in
-  `players`. Every route that writes a parent and a child flushes between
-  them, the dev branch has no orphaned rows and every constraint is
-  valid, and the whole suite now runs with foreign keys enforced (see
-  `tests/conftest.py`) without reproducing it. Left open rather than
-  guessed at: the crash alert now names the line of this project's code
-  that raised it, so the next occurrence identifies itself instead of
-  starting another hunt.
 - **Joining a club without the invite link.** `?invite=<token>` (an HMAC
   of the club id, `src/volleyflow/api/invites.py`) closed the
   reconnaissance half of "the invite link carries a guessable id" — a

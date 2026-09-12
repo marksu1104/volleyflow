@@ -1732,17 +1732,86 @@ for exactly this reason; what was missing was anything that would notice
 when one didn't. Now a test does: `tests/db/test_models.py` fails the
 moment the PRAGMA goes missing.
 
-The original 500 is still not reproduced — the dev branch has no orphaned
-rows and every constraint is valid, so whatever produced it is a sequence
-nothing has repeated yet. What changed is that the next one will say
-where it came from: the LINE alert now names the deepest line of this
-project's own code the exception passed through (`routes.py:2173 in
-add_member`), instead of spending its 200 characters on the failing SQL
-and naming no route at all. Locally the 500 response carries the whole
-traceback, which is what a browser-driven check like `smoke.js` can read
-and a server console can't.
+**And then the 500 itself, at the fourth attempt.** Two changes made it
+catchable rather than guessable. The alert now names the deepest line of
+this project's own code the exception passed through (`routes.py:2173 in
+add_member`) instead of spending its 200 characters on the failing SQL
+and naming no route at all; and locally the 500 response carries the
+whole traceback, which is exactly what a browser-driven check can read
+and a server console can't. `smoke.js` pressing every button on the
+roster page then handed it over in full:
 
-Honest note on where this leaves things: a bug seen three times and not
-found is not a bug fixed. What is fixed is the reason it could hide.
+```
+duplicate key value violates unique constraint "season_members_pkey"
+DETAIL: Key (season_id, player_id)=(121, 1000378) already exists.
+```
 
-409 tests, 168 frontend tests, six browser checks.
+Not a foreign key at all — the reconstruction from the original phone
+screenshot had been wrong about that, which is its own lesson about
+debugging from a photograph of an error. `add_member` reads "are they
+already a member", gets no, and inserts. Two overlapping requests both
+read no. The roster screen produces that overlap by itself: adding
+somebody reloads the whole roster, the reload redraws the buttons, and a
+second tap lands on the redrawn one while the first request is still in
+the air.
+
+Writing the race as a test — two threads, real Postgres, no dependency
+override — turned up something worse than the crash, and silent:
+
+```
+AssertionError: exactly one may win: [200, 200, 200, 200]
+```
+
+With a name the club already knows, the race is a duplicate key and a
+500. With a **new** name it succeeds four times: each transaction looks
+for that name, finds nothing, and creates its own `Player`. Four people
+with one name, all four on the roster, all four charged a season fee.
+That is a money bug that would never have shown up as an error — and the
+dev branch is already carrying three duplicate names that this is the
+likeliest explanation for.
+
+The fix is the same one `_get_game_or_404` has always used and for the
+same reason: `add_member` now locks the season row for the rest of its
+transaction, so the second request waits and then sees the first
+request's write before making its own decision. The duplicate-key case
+that can still reach the database is answered with the 400 it deserved —
+"already a member" is what the loser wanted to hear anyway. And a season
+started with the same name typed twice now gets one member rather than a
+primary-key crash, because a roster is a set.
+
+Honest note on how long this took: four sessions, three of them spent
+reasoning about code that was fine. What actually found it was making
+the error report say where it came from, and then pressing buttons.
+
+**And the load, measured request by request.** 「載入中的時間還能不能更
+縮短」 — so the next thing was to watch what a page load actually waits
+on, rather than just how long it took overall:
+
+```
+member 冷啟動: 第一次看到人數 4491ms
+     177ms +2388ms  /players/identify
+    2566ms + 613ms  /players/101/clubs
+    3180ms + 179ms  /clubs
+    3360ms + 494ms  /clubs/1000004/seasons
+    3855ms + 630ms  /seasons/118
+```
+
+Five requests, each starting only once the one above it finished,
+because nothing here means anything until a club is chosen. And the
+third one is the second one again: `GET /clubs` and
+`GET /players/{id}/clubs` answer with the same clubs. member.html reads
+the second because it is the only one carrying
+`wants_fixed_membership`, and then handed the picker nothing, so the
+picker read the first for itself — every load, since the day the two
+existed. It now hands the list over: one round trip fewer, and on a warm
+load that request alone had been 485ms of a 586ms first paint.
+
+What is left is three requests that genuinely do depend on each other —
+who you are, which clubs are yours, which season. Collapsing those means
+either painting one person's roster before knowing whether the viewer is
+that person, or reading the clubs before the identity call has created
+the player row a first-time visitor doesn't have yet. Both trade a
+first-run guarantee for about 300ms, so both are a decision to put to
+the organizer rather than to make quietly.
+
+411 tests, 170 frontend tests, six browser checks.

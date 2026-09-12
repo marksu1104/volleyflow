@@ -129,6 +129,10 @@
   let myPlayerId = null;
   let allClubs = [];
   let myClubs = [];
+  // Whether myClubs came back from the server on this load, as opposed
+  // to being the empty list this page starts with. The pickers are told,
+  // because "no clubs" is only worth acting on when the server said so.
+  let myClubsAreCurrent = false;
   let clubMembers = [];
   // People this viewer has brought before — the quick picks in the
   // substitute and signup sheets. See fetchMyGuests.
@@ -323,7 +327,13 @@
       if (id) loadSeason(id);
       else renderNoSeason();
     },
-    (e) => showPageError(document.getElementById("hero-wrap"), e.message)
+    (e) => showPageError(document.getElementById("hero-wrap"), e.message),
+    null,
+    // refreshMyClubs has already read the same clubs, from the one
+    // endpoint that also says whether each membership has answered the
+    // fixed-member question. Handed over rather than fetched again —
+    // see initClubAndSeasonPickers.
+    { list: myClubs, fresh: myClubsAreCurrent }
   );
   }
 
@@ -379,12 +389,14 @@
     if (!myPlayerId) {
       myClubs = [];
       allClubs = [];
+      myClubsAreCurrent = false;
       return;
     }
     // Everything on this page waits behind this one request — the
     // pickers can't start until we know which clubs exist. Through
     // getJsonSWR it answers from the last known list immediately, and
-    // corrects itself a moment later.
+    // corrects itself a moment later. The pickers are then handed this
+    // list rather than reading GET /clubs for themselves.
     try {
       await getJsonSWR(
         `${API_BASE}/players/${myPlayerId}/clubs`,
@@ -394,9 +406,15 @@
         },
         { headers: authHeader() }
       );
+      // Resolved, so the server answered (getJsonSWR only falls back to
+      // the cached copy silently, and that copy is the last thing the
+      // server did say). An empty list is then something to act on —
+      // forgetting a club that no longer exists — rather than a guess.
+      myClubsAreCurrent = true;
     } catch (e) {
       myClubs = [];
       allClubs = [];
+      myClubsAreCurrent = false;
     }
 
     // Only a club the invite token names, and only if it isn't already

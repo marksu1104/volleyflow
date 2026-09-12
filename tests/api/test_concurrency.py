@@ -133,3 +133,66 @@ def test_concurrent_signups_never_exceed_capacity(
         assert results.count("waitlisted") == contenders - open_slots
     finally:
         _cleanup(club_id, season_id)
+
+
+def test_adding_the_same_member_twice_at_once_is_refused_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 500 reported three times on POST /seasons/{id}/members.
+
+    Not a bug in the roster rules at all: `add_member` reads "are they
+    already a member", gets no, and inserts — and two requests that
+    overlap both read no. The primary key catches the loser, which used
+    to surface as an unhandled IntegrityError.
+
+    The roster screen produces exactly this overlap by itself: adding
+    somebody reloads the whole roster, the reload redraws the buttons,
+    and a second tap lands on the redrawn button while the first request
+    is still in the air. tests/visual/smoke.js pressing every button on
+    that page reproduced it; this is the same thing without a browser.
+
+    Postgres-only, like the test above: the SQLite session every other
+    API test shares has nothing to race against.
+    """
+    monkeypatch.setattr(routes, "verify_id_token", lambda token: token)
+
+    client = TestClient(app)
+    organizer_token = f"{_TEST_PLAYER_PREFIX}organizer"
+    client.post(
+        "/players/identify",
+        json={
+            "id_token": organizer_token,
+            "display_name": f"{_TEST_PLAYER_PREFIX}Organizer",
+        },
+    )
+    client.headers.update({"Authorization": f"Bearer {organizer_token}"})
+    club_id = client.post(
+        "/clubs", json={"name": f"{_TEST_PLAYER_PREFIX}Club2"}
+    ).json()["id"]
+    season_id = client.post(
+        f"/clubs/{club_id}/seasons",
+        json={
+            "total_venue_cost": "1000",
+            "game_dates": ["2031-01-14"],
+            "member_names": [f"{_TEST_PLAYER_PREFIX}Member"],
+            "capacity": 6,
+        },
+    ).json()["id"]
+
+    try:
+        newcomer = f"{_TEST_PLAYER_PREFIX}Newcomer"
+
+        def add(_i: int) -> int:
+            return client.post(
+                f"/seasons/{season_id}/members", json={"player_name": newcomer}
+            ).status_code
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            codes = list(pool.map(add, range(4)))
+
+        assert max(codes) < 500, f"a race must never be a crash: {codes}"
+        assert codes.count(200) == 1, f"exactly one may win: {codes}"
+        roster = client.get(f"/seasons/{season_id}").json()["members"]
+        assert [m["name"] for m in roster].count(newcomer) == 1
+    finally:
+        _cleanup(club_id, season_id)

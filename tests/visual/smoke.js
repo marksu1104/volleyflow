@@ -80,6 +80,26 @@ async function pressEach(page, path, { only, dialogs }) {
   const dead = [];
   let pressed = 0;
   for (let i = 0; i < total; i += 1) {
+    // Every press in this pass starts from the same screen: sheets shut.
+    // Without it, a press that redraws the page shifts the indices, the
+    // same control comes round again at a later one, and opening a sheet
+    // that is already open is correctly nothing — which read as a dead
+    // 看名單 button and cost an investigation to prove otherwise.
+    //
+    // Before the button is measured, not after: a control inside a sheet
+    // this just shut has no height, so it is skipped as unreachable
+    // rather than pressed into a closed sheet and reported dead — which
+    // is what every ✕ did when this sat below. The second pass
+    // deliberately does none of it: its whole subject is the controls
+    // inside the open sheet.
+    if (!only) {
+      await page.evaluate(() => {
+        document.querySelectorAll(".gsheet-backdrop").forEach((el) => {
+          el.hidden = true;
+        });
+      });
+    }
+
     // Re-read the list every time rather than holding handles or tags.
     // Almost every click here redraws part of the page, which detaches
     // whatever was noted earlier — an earlier version tagged the buttons
