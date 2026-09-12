@@ -174,11 +174,13 @@
     });
     document.getElementById("no-season").innerHTML = hasSeason
       ? ""
-      : emptyStateHtml(
-          "這個球隊尚未開季",
-          "季費、當天臨打和季末結算都是跟著一季走的。建立第一季之後，每個人的應收金額就會出現在這裡。",
-          { label: "建立第一季", href: "organizer-settings.html" }
-        );
+      : currentClubId()
+        ? emptyStateHtml(
+            "這個球隊尚未開季",
+            "季費、當天臨打和季末結算都是跟著一季走的。建立第一季之後，每個人的應收金額就會出現在這裡。",
+            { label: "建立第一季", href: "organizer-settings.html" }
+          )
+        : noClubYetHtml();
     if (hasSeason) showTab(location.hash === "#settle" ? "closing" : "fee");
   }
 

@@ -1990,6 +1990,65 @@ Renamed to `seasonLoaded`.
 
 417 tests, 175 frontend tests, seven browser checks.
 
+## 2026-09-13 (later) — emptying it to open it
+
+「我想要用最乾淨的方式上線開始給別人用」. The production database was
+carrying a term's worth of testing, including the removed member who
+couldn't be added back, and the decision was to start clean rather than
+repair any of it — which is the right call: none of that data belonged
+to anybody.
+
+**First, a tool that had already misled us once.** The duplicate-name
+report was run and came back describing 小測試 and 測試二 — the dev
+branch, not production. It had printed the host, correctly, and the host
+is `ep-dawn-pine-azbsvr6x`, which tells a human nothing. Neon names every
+branch like that.
+
+The answer is that "what host" is the wrong question. `.env` is the dev
+branch by this project's convention and production is only ever reached
+by setting `DATABASE_URL` in a shell on purpose, so the knowable thing is
+*where the URL came from* — and `load_dotenv()` not overriding an
+existing variable is what makes it knowable. `scripts/_target.py` now
+answers that, and every script that can destroy something prints it.
+
+**`scripts/reset_db.py`** empties every table and leaves the schema and
+`alembic_version` alone, so the app comes back on an empty database
+rather than a broken one. Two guards, both earned rather than
+decorative: it **always takes a backup first** and refuses to delete
+anything if that backup fails, because `restore_db.py` is the only way
+back and Neon's free-plan point-in-time restore reaches six hours; and
+against anything that is not the dev branch it makes you **type the host
+name**, because a flag is something you paste from history without
+reading, which is precisely the mistake of the previous paragraph.
+
+Rehearsed on the dev branch end to end rather than reasoned about: 839
+rows out, app still healthy on the empty database, 839 rows back in from
+the backup.
+
+**And emptying it found a bug nothing else could.** With no club at all,
+帳務 and 名單 told a brand-new person 「這個球隊尚未開季」 and offered to
+copy the invite link — for a club that did not exist. 總覽 had handled
+this since it was written; the other two had simply never been looked at
+in that state, because every check in the repo runs against seed data.
+That is the one screen every real user sees exactly once, and on launch
+day it is the *only* screen anybody sees.
+
+Fixed, and then made permanent as `tests/visual/firstrun.js`, the one
+browser check that wants an empty database and says so rather than
+passing quietly against a seeded one. Confirmed real by reverting one of
+the two fixes and watching it fail on exactly that page.
+
+**Launch checks that needed no code**, only asking:
+
+```
+dev-login backdoor in production   Bearer dev:蘇懂 -> 401 "LINE rejected this ID token"
+/openapi.json in production        404 (docs disabled, as intended)
+```
+
+The first is the one worth stating plainly: `?as=<name>` signs you in as
+anybody, and it is gated on `VOLLEYFLOW_DEV_LOGIN`, which Render does not
+set. Verified by trying it rather than by reading the config.
+
 ## 2026-09-13 — routes.py, at last
 
 The last real item on the backlog, held back for two days precisely so

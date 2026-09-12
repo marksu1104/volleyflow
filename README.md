@@ -215,9 +215,10 @@ node tests/visual/smoke.js     # presses every button and reports the dead ones
 node tests/visual/feedback.js  # and how long each one takes to react
 node tests/visual/chaos.js     # tapping faster than the network answers
 node tests/visual/adverse.js   # the same, on a slow network and against refusals
+node tests/visual/firstrun.js   # what a new user meets on an empty database
 ```
 
-The first five run in CI on every push. The last five need a browser and
+The first five run in CI on every push. The last six need a browser and
 are run by hand — `check.js` when layout changes, `smoke.js` and
 `feedback.js` after anything that touches a click handler or a write,
 `chaos.js` and `adverse.js` after anything that changes who may be on a
@@ -227,6 +228,12 @@ skips the request queue, which is how it caught the money screen doing
 exactly that a day after the roster screen was fixed. All five want the local servers up, and all but `check.js`
 press destructive controls, so re-run `seed_dev.py` afterwards. See
 [`tests/visual/README.md`](tests/visual/README.md).
+
+`firstrun.js` is the odd one out: it wants an **empty** database, because
+it checks the one screen every user sees exactly once. Two management
+pages were confidently telling a brand-new user that their (nonexistent)
+club had not started a season yet, and offering to copy its invite link.
+Every other check runs against seed data, so none of them could see it.
 
 `tests/api/test_fuzz.py` is worth knowing about on its own: rather than
 asserting an outcome, it fires a few hundred randomly chosen operations
