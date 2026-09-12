@@ -2145,6 +2145,29 @@ function emptyStateHtml(title, body, action) {
   `;
 }
 
+/** What a management screen shows when there is no season to show, which
+ * is two different situations wearing the same shape:
+ *
+ *   - this club hasn't started a season yet. Each page says what *it*
+ *     would show once one exists, so that copy stays on the page;
+ *   - there is no club at all — a brand new person, and on launch day,
+ *     everybody.
+ *
+ * The second was only handled on two of the four management screens.
+ * Emptying the database to open the app to real users (2026-09-13) is
+ * what made that obvious: 帳務 and 名單 both said 「這個球隊尚未開季」
+ * and offered to copy an invite link, for a club that did not exist.
+ * Saying the wrong thing confidently is worse on somebody's first
+ * screen than anywhere else.
+ */
+function noClubYetHtml() {
+  return emptyStateHtml(
+    "尚未加入任何球隊",
+    "請先到會員頁用 LINE 開啟，建立一個球隊，或用主揪給你的連結加入。",
+    { label: "前往會員頁", href: "member.html" }
+  );
+}
+
 /** What to show when initLiffIdentity came back falsy. Its two failures
  * need different words: one is the reader's to fix by opening the page
  * in LINE, the other is the server being asleep and fixes itself. Every

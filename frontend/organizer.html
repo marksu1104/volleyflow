@@ -123,10 +123,7 @@
           "建立第一季之後，這裡會顯示下一場的出席人數、男女比，以及需要你處理的事情。",
           { label: "建立第一季", href: "organizer-settings.html" }
         )
-      : emptyStateHtml("尚未加入任何球隊", "請先到會員頁用 LINE 開啟，建立或加入一個球隊。", {
-          label: "前往會員頁",
-          href: "member.html",
-        });
+      : noClubYetHtml();
     document.getElementById("hero-wrap").onclick = null;
   }
 
