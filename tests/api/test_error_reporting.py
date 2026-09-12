@@ -18,11 +18,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 
-from volleyflow.api import error_reporting, main, routes
+from volleyflow.api import error_reporting, main
 from volleyflow.api.error_reporting import (
     ErrorReportingMiddleware,
     report_unhandled_error,
 )
+from volleyflow.api.routes import clubs
 
 
 def _toy_app() -> FastAPI:
@@ -111,18 +112,19 @@ def test_the_log_line_names_the_route_and_the_line_that_raised_it(
     # entry named only the request path, and a database error's own text
     # is the failing SQL — which identifies no route at all. A 500 on
     # POST /seasons/{id}/members was reported three times before anyone
-    # could say which line wrote the row.
+    # could say which line wrote the row. The file it names is the one
+    # the route now lives in — routes/clubs.py, since the split.
     try:
         # Raised from inside the package, so the frame walk has something
         # of this project's own to find — the point of _where is that it
         # skips the SQLAlchemy frames a bare traceback ends on.
-        routes.list_clubs(db=None, current_player=None)  # type: ignore[arg-type]
+        clubs.list_clubs(db=None, current_player=None)  # type: ignore[arg-type]
     except Exception as exc:
         with caplog.at_level(logging.ERROR, logger="volleyflow.errors"):
             report_unhandled_error("/clubs", exc)
 
     assert "/clubs" in caplog.text
-    assert "routes.py:" in caplog.text
+    assert "clubs.py:" in caplog.text
 
 
 def test_an_exception_with_no_traceback_still_gets_logged(

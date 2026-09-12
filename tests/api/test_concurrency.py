@@ -7,7 +7,7 @@ race against. This test runs against the real Neon database with no
 dependency override, so each request gets its own session from the
 connection pool exactly like production, and can genuinely race another
 request for the same open slot. It's what actually exercises the
-SELECT ... FOR UPDATE lock in routes._get_game_or_404 — SQLite ignores
+SELECT ... FOR UPDATE lock in routes/_attendance.py's _get_game_or_404 — SQLite ignores
 that clause entirely, so this is the only place that would catch it
 being accidentally removed.
 """
@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from volleyflow.api import routes
+from volleyflow.api import auth
 from volleyflow.api.main import app
 from volleyflow.db.engine import get_session
 
@@ -75,7 +75,7 @@ def test_concurrent_signups_never_exceed_capacity(
     # fixture, applied by hand since this test deliberately doesn't use
     # that fixture (it needs a dependency-override-free TestClient to
     # exercise real connection-pool concurrency).
-    monkeypatch.setattr(routes, "verify_id_token", lambda token: token)
+    monkeypatch.setattr(auth, "verify_id_token", lambda token: token)
 
     client = TestClient(app)
     capacity = 4
@@ -112,7 +112,7 @@ def test_concurrent_signups_never_exceed_capacity(
         # Every racer signs up under the organizer's identity — the
         # concurrency being tested is about the game's capacity, not
         # about who's allowed to sign someone up (see
-        # routes._require_self_or_organizer), so one authorized caller
+        # routes/_people.py's _require_self_or_organizer), so one authorized caller
         # racing itself N times exercises the same lock.
         def sign_up(i: int) -> str:
             res = client.post(
@@ -154,7 +154,7 @@ def test_adding_the_same_member_twice_at_once_is_refused_not_a_crash(
     Postgres-only, like the test above: the SQLite session every other
     API test shares has nothing to race against.
     """
-    monkeypatch.setattr(routes, "verify_id_token", lambda token: token)
+    monkeypatch.setattr(auth, "verify_id_token", lambda token: token)
 
     client = TestClient(app)
     organizer_token = f"{_TEST_PLAYER_PREFIX}organizer"
