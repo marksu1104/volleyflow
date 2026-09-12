@@ -1643,3 +1643,106 @@ wave as several real behaviour changes to the same file is exactly the
 remaining item, deliberately, rather than folded in here.
 
 410 tests, 163 frontend tests, six browser checks.
+
+## 2026-09-12 (later) — the cache that never once worked
+
+Three things reported after a day of real use, and the third turned out
+to be the one that mattered.
+
+**The group message is gone.** Asked for, forgotten, and asked again —
+「我之前不是說過我想取消群組通知了嗎？」. `push_to_group` and
+`LINE_GROUP_ID` are deleted outright rather than left behind a flag, and
+`send_game_reminder` now reads a roster it never announces: the count is
+only there to decide whether the *organizer* needs telling that a game is
+short-handed. The reasoning, so it doesn't get proposed a third time: the
+group already discusses the game in the group, and a bot repeating the
+roster into that conversation is noise rather than news. Written to the
+project memory as well as here.
+
+**「儲存中」on every tap.** Reported as appearing constantly, and it was:
+at a 450ms threshold against a ~750ms write, it appeared on essentially
+every action and vanished ~300ms later. Too brief to read, long enough to
+notice — and worse than saying nothing, because a marker that appears
+*after* the screen has already changed reads as "that hasn't taken effect
+yet". Now 1200ms before it appears at all, and once it does it stays at
+least 700ms so it can't blink. A high threshold alone wasn't enough: a
+write landing just past it would still flash.
+
+**"The number lags."** It doesn't — measured at 5-12ms on both pages, and
+still 11ms with every request held for two seconds. But measuring it
+turned up the real problem two layers down.
+
+The action cost **two** round trips: the write, then a full season re-read
+to catch what the optimistic update couldn't know. For the two most-used
+actions in the app the server already answers that question —
+`promoted_from_waitlist` on recording an absence, `released_player_id` on
+cancelling one, `promoted_from_waitlist` again on cancelling a signup.
+Both null means the screen is already exactly right and the second trip
+is spent proving it. `needsRefreshAfter` skips it: **1.4s to settled
+became 0.75s**, and with the chip's new threshold there is now nothing to
+see at all on a normal action.
+
+Then the page load, measured for the first time: 2.2s cold, **1.9s warm**
+— a stale-while-revalidate cache doing essentially nothing. The reason is
+one line. `postJson` clears the whole response cache after every write,
+correctly, because a write invalidates reads. But `/players/identify` is
+a POST — it is a POST only because it carries a LINE token in a body —
+and it is the *first request of every single page load*. So the cache was
+emptied before one cached read could ever be served, on every load, since
+the day it was written. Exempting it: **warm load 1.9s → 0.56s**.
+
+That is the largest single user-visible win in the project so far, and it
+was sitting behind a feature that had looked "done" for weeks. Worth
+remembering why it hid: the cache was never *broken*, so nothing failed
+and no test noticed — it was simply never used. The only way to see it
+was to time the thing end to end and ask why the second load wasn't
+faster than the first.
+
+413 tests, 168 frontend tests, six browser checks.
+
+## 2026-09-12 (later still) — the test database was enforcing less than the real one
+
+Chasing a 500 that had been reported three times on
+`POST /seasons/{id}/members` — a foreign key violation, `player_id` not
+present — and that no test, including the random sweep written the day
+before specifically to find things nobody thought of, could reproduce.
+
+The reason no test could: **SQLite parses `REFERENCES` and then ignores
+it.** Foreign keys are off unless every connection asks for them, and
+`tests/conftest.py` never did. Four hundred tests were running against a
+database that enforced less than production, which is the worst property
+a test database can have — it doesn't fail to catch bugs, it actively
+certifies them.
+
+One `PRAGMA foreign_keys=ON` later, two real ordering faults fell out
+immediately, and behind them something worth knowing about this codebase:
+
+```
+club_members -> clubs -> games -> players -> season_members -> seasons
+```
+
+That is the order a single `flush()` actually inserts these tables in:
+`club_members` before `clubs`, `games` before `seasons`. It is
+alphabetical by mapper class name. `models.py` declares no
+`relationship()` anywhere — deliberately, they add lazy-loading and
+cascade behaviour this project has no use for — so the ORM has **no
+dependency edges to sort by** and falls back to sorting mappers by name.
+Every route that writes a parent and a child already flushes between them
+for exactly this reason; what was missing was anything that would notice
+when one didn't. Now a test does: `tests/db/test_models.py` fails the
+moment the PRAGMA goes missing.
+
+The original 500 is still not reproduced — the dev branch has no orphaned
+rows and every constraint is valid, so whatever produced it is a sequence
+nothing has repeated yet. What changed is that the next one will say
+where it came from: the LINE alert now names the deepest line of this
+project's own code the exception passed through (`routes.py:2173 in
+add_member`), instead of spending its 200 characters on the failing SQL
+and naming no route at all. Locally the 500 response carries the whole
+traceback, which is what a browser-driven check like `smoke.js` can read
+and a server console can't.
+
+Honest note on where this leaves things: a bug seen three times and not
+found is not a bug fixed. What is fixed is the reason it could hide.
+
+409 tests, 168 frontend tests, six browser checks.

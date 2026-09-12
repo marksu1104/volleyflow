@@ -23,6 +23,7 @@ reported, just not more than once every RATE_LIMIT_SECONDS.
 import logging
 import os
 import time
+import traceback
 from collections.abc import Awaitable, Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -35,6 +36,30 @@ logger = logging.getLogger("volleyflow.errors")
 
 RATE_LIMIT_SECONDS = 30 * 60
 _last_reported: dict[str, float] = {}
+
+
+def _where(exc: BaseException) -> str:
+    """The deepest line of this project's own code the exception passed
+    through — "routes.py:2173 in add_member".
+
+    The alert used to carry only the exception's own text, cut at 200
+    characters. For a database error that text is the whole failing SQL
+    statement, so the 200 characters were spent on column lists and the
+    one thing worth knowing — which route wrote the row — never arrived.
+    The deepest volleyflow frame, not the deepest frame overall: the
+    latter is always somewhere inside SQLAlchemy and names nothing that
+    can be fixed here.
+    """
+    here = ""
+    tb = exc.__traceback__
+    while tb is not None:
+        frame = tb.tb_frame
+        name = frame.f_globals.get("__name__", "")
+        if name.startswith("volleyflow.") and not name.endswith("error_reporting"):
+            here = f"{os.path.basename(frame.f_code.co_filename)}:{tb.tb_lineno}"
+            here += f" in {frame.f_code.co_name}"
+        tb = tb.tb_next
+    return here or "（位置不明）"
 
 
 def report_unhandled_error(path: str, exc: Exception) -> None:
@@ -77,7 +102,8 @@ def report_unhandled_error(path: str, exc: Exception) -> None:
     try:
         push_to_user(
             organizer_id,
-            f"系統發生錯誤：{path}\n{type(exc).__name__}: {str(exc)[:200]}",
+            f"系統發生錯誤：{path}\n{_where(exc)}\n"
+            f"{type(exc).__name__}: {str(exc)[:200]}",
         )
     except Exception:
         # Reporting the error must never itself crash the request that
@@ -111,6 +137,21 @@ class ErrorReportingMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         except Exception as exc:
             report_unhandled_error(request.url.path, exc)
+            # Locally, the reason travels back with the response. The
+            # server's own console is the usual place to read a traceback
+            # and it is exactly the place a browser-driven test can't
+            # look: tests/visual/smoke.js found a 500 twice and could
+            # only report the status, which cost a day of guessing.
+            # Never in production — a stack trace names table columns and
+            # file paths, and the organizer gets the LINE alert instead.
+            if os.environ.get("VOLLEYFLOW_DEV_LOGIN") == "1":
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "detail": f"{type(exc).__name__}: {exc}",
+                        "traceback": traceback.format_exc().splitlines()[-25:],
+                    },
+                )
             return JSONResponse(
                 status_code=500, content={"detail": "Internal server error"}
             )

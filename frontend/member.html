@@ -895,7 +895,7 @@
   async function cancelAbsence(absenceId, btn) {
     const name = playerName();
     const gameId = selectedGameId;
-    await optimistically(
+    const result = await optimistically(
       (season) => {
         for (const game of season.games) {
           game.absences = game.absences.filter(
@@ -917,7 +917,9 @@
       },
       "取消請假失敗："
     );
-    refreshSeasonQuietly();
+    // Only when somebody was actually released back to the queue — see
+    // needsRefreshAfter.
+    if (needsRefreshAfter(result)) refreshSeasonQuietly();
   }
 
   /** Re-reads the season without blocking whatever the person does next.
@@ -1405,7 +1407,10 @@
       announceId(null); // it failed; unblock anything waiting on the id
       delete pendingAbsenceId[key];
     }
-    refreshSeasonQuietly();
+    // Only when somebody was actually promoted off the queue — see
+    // needsRefreshAfter. Otherwise the screen already matches the server
+    // and the second round trip is pure waiting.
+    if (needsRefreshAfter(result)) refreshSeasonQuietly();
   }
 
 
@@ -1428,12 +1433,14 @@
 
   async function cancelDropIn(dropInId, btn) {
     if (dropInId < 0) return;  // still saving; the real id isn't known yet
-    await optimistically(
+    const result = await optimistically(
       (season) => removeDropInLocally(season, dropInId),
       () => postJson(API_BASE, `/drop-ins/${dropInId}/cancel`, {}),
       "取消失敗："
     );
-    refreshSeasonQuietly();
+    // Cancelling a signup offers the freed slot to the queue, and the
+    // answer says whether anyone took it — see needsRefreshAfter.
+    if (needsRefreshAfter(result)) refreshSeasonQuietly();
   }
 </script>
 </body>

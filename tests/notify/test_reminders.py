@@ -1,7 +1,12 @@
-"""Tests for pre-game reminders and short-roster alerts.
+"""Tests for the short-roster alert.
 
-push_to_group/push_to_user are monkeypatched so nothing here ever hits
-the real LINE API — see the sent_messages fixture.
+There is no group message any more — the organizer asked for it to be
+dropped (see reminders.send_game_reminder). What is left reads the
+roster only to decide whether anybody needs telling, and tells one
+person when they do.
+
+push_to_user is monkeypatched so nothing here ever hits the real LINE
+API — see the sent_messages fixture.
 """
 
 from datetime import date, datetime, time
@@ -21,21 +26,20 @@ from volleyflow.db.models import (
 )
 from volleyflow.notify import reminders
 
-SentMessages = dict[str, list[tuple[str, str]]]
+SentMessages = list[tuple[str, str]]
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def sent_messages(monkeypatch: pytest.MonkeyPatch) -> SentMessages:
-    sent: SentMessages = {"group": [], "user": []}
-
-    def fake_push_to_group(group_id: str, text: str) -> None:
-        sent["group"].append((group_id, text))
+    """Autouse, so no test in this file can reach the real LINE API even
+    by forgetting to ask for the fixture."""
+    sent: SentMessages = []
 
     def fake_push_to_user(user_id: str, text: str) -> None:
-        sent["user"].append((user_id, text))
+        sent.append((user_id, text))
 
-    monkeypatch.setattr(reminders, "push_to_group", fake_push_to_group)
     monkeypatch.setattr(reminders, "push_to_user", fake_push_to_user)
+    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "Uorganizer")
     return sent
 
 
@@ -61,12 +65,10 @@ def _season(
     return season
 
 
-def test_reminder_sends_roster_to_the_group(
-    db_session: Session, sent_messages: SentMessages, monkeypatch: pytest.MonkeyPatch
+def test_a_short_roster_alerts_the_organizer(
+    db_session: Session, sent_messages: SentMessages
 ) -> None:
-    monkeypatch.setenv("LINE_GROUP_ID", "Cgroup123")
-    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "Uorganizer")
-    season = _season(db_session)
+    season = _season(db_session, minimum_roster=5)
     alice = PlayerRow(name="Alice")
     db_session.add(alice)
     db_session.flush()
@@ -77,60 +79,49 @@ def test_reminder_sends_roster_to_the_group(
 
     reminders.send_game_reminder(db_session, game)
 
-    assert len(sent_messages["group"]) == 1
-    group_id, text = sent_messages["group"][0]
-    assert group_id == "Cgroup123"
-    assert "Alice" in text
+    assert len(sent_messages) == 1
+    user_id, text = sent_messages[0]
+    assert user_id == "Uorganizer"
+    assert "人數不足" in text
 
 
-def test_reminder_includes_the_season_time_slot_when_set(
-    db_session: Session, sent_messages: SentMessages, monkeypatch: pytest.MonkeyPatch
+def test_a_roster_above_the_minimum_says_nothing_at_all(
+    db_session: Session, sent_messages: SentMessages
 ) -> None:
-    monkeypatch.setenv("LINE_GROUP_ID", "Cgroup123")
-    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "Uorganizer")
-    season = _season(
-        db_session, game_start_time=time(18, 30), game_end_time=time(22, 0)
-    )
-    game = GameRow(season_id=season.id, date=date(2026, 8, 25))
-    db_session.add(game)
-    db_session.flush()
-
-    reminders.send_game_reminder(db_session, game)
-
-    _, text = sent_messages["group"][0]
-    assert "18:30-22:00" in text
-
-
-def test_reminder_omits_time_range_when_season_has_none(
-    db_session: Session, sent_messages: SentMessages, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("LINE_GROUP_ID", "Cgroup123")
-    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "Uorganizer")
-    season = _season(db_session)
-    game = GameRow(season_id=season.id, date=date(2026, 8, 25))
-    db_session.add(game)
-    db_session.flush()
-
-    reminders.send_game_reminder(db_session, game)
-
-    _, text = sent_messages["group"][0]
-    assert ":" not in text
-
-
-def test_reminder_excludes_absent_members_and_includes_drop_ins(
-    db_session: Session, sent_messages: SentMessages, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("LINE_GROUP_ID", "Cgroup123")
-    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "Uorganizer")
+    # The whole point of dropping the group message: a game that is fine
+    # is not news, and nobody hears from this at all.
     season = _season(db_session, minimum_roster=1)
     alice = PlayerRow(name="Alice")
-    carol = PlayerRow(name="Carol")
-    db_session.add_all([alice, carol])
+    db_session.add(alice)
     db_session.flush()
     db_session.add(SeasonMemberRow(season_id=season.id, player_id=alice.id))
     game = GameRow(season_id=season.id, date=date(2026, 8, 25))
     db_session.add(game)
     db_session.flush()
+
+    reminders.send_game_reminder(db_session, game)
+
+    assert sent_messages == []
+
+
+def test_the_count_excludes_absent_members_and_includes_drop_ins(
+    db_session: Session, sent_messages: SentMessages
+) -> None:
+    """The roster arithmetic still decides whether to alert, even though
+    the names themselves are no longer announced anywhere."""
+    season = _season(db_session, minimum_roster=3)
+    alice = PlayerRow(name="Alice")
+    bob = PlayerRow(name="Bob")
+    carol = PlayerRow(name="Carol")
+    db_session.add_all([alice, bob, carol])
+    db_session.flush()
+    db_session.add(SeasonMemberRow(season_id=season.id, player_id=alice.id))
+    db_session.add(SeasonMemberRow(season_id=season.id, player_id=bob.id))
+    game = GameRow(season_id=season.id, date=date(2026, 8, 25))
+    db_session.add(game)
+    db_session.flush()
+    # Alice is away, Carol drops in: two members minus one absence plus
+    # one drop-in is two, which is below the minimum of three.
     db_session.add(
         AbsenceRow(
             player_id=alice.id, game_id=game.id, recorded_at=datetime(2026, 8, 1)
@@ -145,39 +136,19 @@ def test_reminder_excludes_absent_members_and_includes_drop_ins(
 
     reminders.send_game_reminder(db_session, game)
 
-    _, text = sent_messages["group"][0]
-    assert "Alice" not in text
-    assert "Carol" in text
+    assert len(sent_messages) == 1
+    assert "只有 2 人" in sent_messages[0][1]
 
 
-def test_short_roster_alerts_only_the_organizer(
+def test_nothing_is_sent_to_a_group_even_if_one_is_configured(
     db_session: Session, sent_messages: SentMessages, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("LINE_GROUP_ID", raising=False)
-    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "Uorganizer")
-    season = _season(db_session, minimum_roster=5)
-    alice = PlayerRow(name="Alice")
-    db_session.add(alice)
-    db_session.flush()
-    db_session.add(SeasonMemberRow(season_id=season.id, player_id=alice.id))
-    game = GameRow(season_id=season.id, date=date(2026, 8, 25))
-    db_session.add(game)
-    db_session.flush()
-
-    reminders.send_game_reminder(db_session, game)
-
-    assert sent_messages["group"] == []
-    assert len(sent_messages["user"]) == 1
-    user_id, text = sent_messages["user"][0]
-    assert user_id == "Uorganizer"
-    assert "人數不足" in text
-
-
-def test_roster_above_minimum_does_not_alert_organizer(
-    db_session: Session, sent_messages: SentMessages, monkeypatch: pytest.MonkeyPatch
-) -> None:
+    """A leftover LINE_GROUP_ID in some environment must not resurrect
+    the message the organizer asked to be rid of. There is no code path
+    left that could, and this is what says so out loud."""
     monkeypatch.setenv("LINE_GROUP_ID", "Cgroup123")
-    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "Uorganizer")
+    assert not hasattr(reminders, "push_to_group")
+
     season = _season(db_session, minimum_roster=1)
     alice = PlayerRow(name="Alice")
     db_session.add(alice)
@@ -189,15 +160,13 @@ def test_roster_above_minimum_does_not_alert_organizer(
 
     reminders.send_game_reminder(db_session, game)
 
-    assert sent_messages["user"] == []
+    assert sent_messages == []
 
 
 def test_send_reminders_for_date_only_processes_scheduled_games_that_day(
-    db_session: Session, sent_messages: SentMessages, monkeypatch: pytest.MonkeyPatch
+    db_session: Session, sent_messages: SentMessages
 ) -> None:
-    monkeypatch.setenv("LINE_GROUP_ID", "Cgroup123")
-    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "Uorganizer")
-    season = _season(db_session)
+    season = _season(db_session, minimum_roster=5)
     db_session.add_all(
         [
             GameRow(season_id=season.id, date=date(2026, 8, 25)),
@@ -210,4 +179,4 @@ def test_send_reminders_for_date_only_processes_scheduled_games_that_day(
     count = reminders.send_reminders_for_date(db_session, date(2026, 8, 25))
 
     assert count == 2
-    assert len(sent_messages["group"]) == 2
+    assert len(sent_messages) == 2, "both of that day's games are short-handed"

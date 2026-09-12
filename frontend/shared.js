@@ -537,6 +537,27 @@ function optimisticRunner({ getState, setState, repaint }) {
  *    three full season reads of about 600ms each, all but the last of
  *    them pointless.
  */
+/** Whether a finished write actually needs the season re-read.
+ *
+ * The refresh after a change costs a full season document — measured at
+ * 650ms locally and a couple of hundred on a phone, on top of the write
+ * itself. It exists to catch what the optimistic update couldn't know,
+ * and for the two most-used actions in the app the server already says
+ * whether there *was* anything: recording an absence answers with
+ * `promoted_from_waitlist`, cancelling one with `released_player_id`.
+ * Both null means the screen is already exactly right and the second
+ * round trip is spent proving it — which is what made a tap that had
+ * already visibly worked keep showing 儲存中 afterwards.
+ *
+ * A failed write still refreshes: the rollback is local, and the one
+ * moment worth paying a round trip to be certain about is the one where
+ * the screen and the server just disagreed.
+ */
+function needsRefreshAfter(result) {
+  if (!result) return true; // the write failed; make sure of the truth
+  return Boolean(result.promoted_from_waitlist || result.released_player_id);
+}
+
 function coalescedRefresh(load) {
   let busy = false;
   return function refresh() {
@@ -1340,7 +1361,20 @@ let _pendingTimer = null;
 
 /** Long enough that the common case — a change that saves in under half
  * a second — never mentions itself at all. */
-const PENDING_AFTER_MS = 450;
+/** A write that finishes in about a second needs no announcement at all
+ * — the change is already on screen, and saying "儲存中" after the fact
+ * reads as "that hasn't taken effect yet", which is the opposite of what
+ * happened. At 450ms this appeared on nearly every action and vanished
+ * ~300ms later: too brief to read, long enough to notice, and reported
+ * as exactly that noise.
+ *
+ * So it now waits for a wait worth mentioning, and once it does appear
+ * it stays long enough to be read rather than blinking. The pair is what
+ * matters: a high threshold alone would still flash when a write happens
+ * to land just past it. */
+const PENDING_AFTER_MS = 1200;
+const PENDING_MIN_VISIBLE_MS = 700;
+let _pendingShownAt = 0;
 
 function pendingIndicator() {
   let el = document.getElementById("vf-pending");
@@ -1361,7 +1395,10 @@ function beginPendingWrite() {
   if (_pendingWrites === 1 && !_pendingTimer) {
     _pendingTimer = setTimeout(() => {
       _pendingTimer = null;
-      if (_pendingWrites > 0) pendingIndicator().classList.add("shown");
+      if (_pendingWrites > 0) {
+        _pendingShownAt = Date.now();
+        pendingIndicator().classList.add("shown");
+      }
     }, PENDING_AFTER_MS);
   }
   let released = false;
@@ -1373,7 +1410,20 @@ function beginPendingWrite() {
     clearTimeout(_pendingTimer);
     _pendingTimer = null;
     const el = document.getElementById("vf-pending");
-    if (el) el.classList.remove("shown");
+    if (!el || !el.classList.contains("shown")) return;
+    // Shown for at least long enough to read. Hiding it the instant the
+    // write lands is what turned it into a blink on every action.
+    const shownFor = Date.now() - _pendingShownAt;
+    const remaining = PENDING_MIN_VISIBLE_MS - shownFor;
+    if (remaining <= 0) {
+      el.classList.remove("shown");
+      return;
+    }
+    setTimeout(() => {
+      // Another write may have started while this one was finishing;
+      // that one owns the chip now.
+      if (_pendingWrites === 0) el.classList.remove("shown");
+    }, remaining);
   };
 }
 
@@ -1785,7 +1835,16 @@ async function postJson(apiBase, path, body, method) {
   // changes the season detail, adding a member changes the season list,
   // creating a club changes the club list. Dropping the lot is cheap
   // (a handful of small keys) and can't get the invalidation wrong.
-  clearResponseCache({ keepPeople: keepsPeople(path) });
+  //
+  // Except identify, which writes nothing anybody reads — and which is
+  // the *first* request of every single page load. Clearing the cache
+  // there emptied it before one cached read could ever be served, so
+  // stale-while-revalidate never once did the job it exists for:
+  // measured at 2.2s to first content cold and 1.9s warm, which is no
+  // cache at all. See identifiesOnly.
+  if (!identifiesOnly(path)) {
+    clearResponseCache({ keepPeople: keepsPeople(path) });
+  }
   return data;
 }
 
@@ -1807,6 +1866,15 @@ function keepsPeople(path) {
     /^\/absences\/\d+\/cancel$/.test(path) ||
     /^\/waitlist\/\d+\/cancel$/.test(path)
   );
+}
+
+/** Resolving who the caller is, which changes nothing any cached read
+ * returns. It is a POST only because it carries a LINE token in a body
+ * rather than a URL, and it runs first on every page load — so treating
+ * it like an ordinary write meant the response cache was wiped before it
+ * could serve anything, on every load, forever. */
+function identifiesOnly(path) {
+  return /^\/players\/identify$/.test(path);
 }
 
 /**

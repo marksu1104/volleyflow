@@ -49,10 +49,17 @@ def _use_sqlite(sqlite_engine: Engine, monkeypatch: pytest.MonkeyPatch) -> Engin
 
 
 def _seed(session: Session) -> None:
+    # Flushed in three waves, parents before children. models.py declares
+    # no relationship(), so the ORM sorts its mappers alphabetically by
+    # class name and would otherwise insert absences before players and
+    # games — which SQLite used to accept silently and Postgres never
+    # would.
     club = ClubRow(id=1, name="測試球隊", created_at=datetime(2026, 1, 1))
     session.add(club)
     session.add(PlayerRow(id=1, name="蘇懂"))
     session.add(PlayerRow(id=2, name="Alice", gender="female"))
+    session.flush()
+
     session.add(
         ClubMemberRow(
             club_id=1, player_id=1, role="organizer", joined_at=datetime(2026, 1, 1)
@@ -67,6 +74,8 @@ def _seed(session: Session) -> None:
         game_start_time=time(18, 30),
     )
     session.add(season)
+    session.flush()
+
     session.add(
         GameRow(
             id=1,
@@ -85,6 +94,8 @@ def _seed(session: Session) -> None:
         )
     )
     session.add(SeasonMemberRow(season_id=1, player_id=2))
+    session.flush()
+
     session.add(
         AbsenceRow(id=1, player_id=2, game_id=1, recorded_at=datetime(2026, 8, 17, 9))
     )

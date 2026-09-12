@@ -19,7 +19,7 @@ from volleyflow.db.models import (
     SeasonMemberRow,
     SeasonRow,
 )
-from volleyflow.notify.line_client import push_to_group, push_to_user
+from volleyflow.notify.line_client import push_to_user
 from volleyflow.schedule import GameStatus
 
 
@@ -49,26 +49,25 @@ def _expected_roster(session: Session, game: GameRow, season: SeasonRow) -> list
 
 
 def send_game_reminder(session: Session, game: GameRow) -> None:
+    """The short-roster alert, to the organizer alone.
+
+    There is deliberately no message to the group chat. One was built —
+    the roster and the price, the night before — and the organizer asked
+    for it to be dropped: the group already talks about the game in the
+    group, and a bot repeating the roster into that conversation is noise
+    rather than news. The only thing worth interrupting anyone for is the
+    thing nobody would otherwise notice in time, which is a game that
+    doesn't have enough people yet, and that is one person's problem to
+    solve.
+
+    So this reads a roster it never announces. That asymmetry is the
+    point: counting who is coming is what decides whether to say
+    anything at all.
+    """
     season = session.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
 
     roster = _expected_roster(session, game, season)
-
-    group_id = os.environ.get("LINE_GROUP_ID")
-    if group_id:
-        time_range = ""
-        if season.game_start_time and season.game_end_time:
-            time_range = (
-                f"（{season.game_start_time.strftime('%H:%M')}"
-                f"-{season.game_end_time.strftime('%H:%M')}）"
-            )
-        location = f"・{season.location}" if season.location else ""
-        roster_text = "、".join(roster) if roster else "目前沒有人"
-        message = (
-            f"{game.date} 球局提醒{time_range}{location}\n"
-            f"預計出席（{len(roster)} 人）：{roster_text}"
-        )
-        push_to_group(group_id, message)
 
     if len(roster) < season.minimum_roster:
         organizer_id = os.environ["LINE_ORGANIZER_USER_ID"]

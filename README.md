@@ -30,9 +30,9 @@ waitlist when a game is full, and see their own running balance.
 
 **An organizer** manages the roster, marks payments received, corrects a
 game's air conditioning setting after the fact, and settles a season.
-The group chat gets the same roster reminder before every game; the
-organizer alone gets a second, private message when that roster is
-short-handed.
+Nothing this system sends goes to the group chat: the only push message
+is a private one to the organizer, when a game is short-handed and
+somebody has to go and ask. The club reads the roster in the app.
 
 **Anyone** can create a club and become its organizer. A club is a full
 tenant: its own roster, seasons, games, and books, invisible to every
@@ -48,8 +48,8 @@ other club sharing the same deployment.
                                                                     Postgres (Neon)
                                                                          ^
                                                                          |
-  LINE group + organizer  <--push--  LINE Messaging API  <--reads-------+
-    (reminders, crash alerts)
+  Organizer, privately  <--push--  LINE Messaging API  <--reads---------+
+    (short-roster and crash alerts; never the group chat)
 
   GitHub Actions, on its own schedule:
     CI            test -> migrate production -> trigger the Render deploy
@@ -167,9 +167,9 @@ message naming what broke and where.
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
-uv run pytest -q               # 410 tests, including a randomised sweep
+uv run pytest -q               # 409 tests, including a randomised sweep
 uv run lint-imports             # billing logic must not import the database
-node --test tests/frontend/*.test.js   # 163 frontend tests
+node --test tests/frontend/*.test.js   # 168 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
 node tests/visual/smoke.js     # presses every button and reports the dead ones
 node tests/visual/feedback.js  # and how long each one takes to react
@@ -193,6 +193,14 @@ found eight real bugs in code that 370 hand-written tests already
 covered — see "Design decisions" above. `tests/api/invariants.py` holds
 the rules it checks, reusable by any future test that wants the same
 answers.
+
+The SQLite test database runs with `PRAGMA foreign_keys=ON`. SQLite
+parses `REFERENCES` and then ignores it unless every connection asks, so
+without that line the whole suite was certifying rows that point at
+nothing — and since `db/models.py` declares no `relationship()`, the ORM
+sorts its mappers alphabetically and will happily insert `games` before
+`seasons` if a route forgets to flush between them. A test fails the
+moment that PRAGMA goes missing.
 
 A handful of tests are marked `postgres` and hit the real Neon dev
 branch instead of in-memory SQLite — excluded by default

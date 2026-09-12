@@ -7,26 +7,27 @@ has not been built yet, in the order it should be built.
 Anything not on this list is either done or deliberately out of scope
 (see CLAUDE.md §4, "Explicitly out of scope").
 
-## 1. Notifications need `LINE_GROUP_ID`
+## 1. Notifications: one message, to the organizer only
 
 `reminders.yml` pointed at the Neon **dev** branch since the day it was
 written — the same secret `ci.yml`'s Postgres tests use — so its daily
 09:00 run "succeeded" against seed data and no reminder had ever reached
 a real game. Fixed on 2026-09-12: it now reads `PRODUCTION_DATABASE_URL`.
 
-What's still missing is the one thing only the organizer can supply:
-**`LINE_GROUP_ID` has never been set as a secret**, so the group message
-stays silent — the short-roster alert to the organizer alone
-(`LINE_ORGANIZER_USER_ID`, already set) will start firing for real on
-the next short-handed game, but nobody in the group chat sees anything
-until that secret is added.
+The group message is gone, by the organizer's decision (2026-09-12): the
+club already reads the roster in the app, and a bot posting into the
+chat every week is noise they did not ask for. `push_to_group` and
+`LINE_GROUP_ID` were deleted rather than left behind a flag, so nothing
+can quietly start posting again. What remains is the short-roster alert
+to the organizer alone (`LINE_ORGANIZER_USER_ID`, already set), which
+will fire for real on the next short-handed game.
 
 Beyond that, the five message types described in a previous draft of
 this file (new joiners, unpaid-fee chase, settlement, waitlist
-promotion, and the two already built) are still just a wishlist —
-`notify/reminders.py` sends exactly the pre-game reminder and the
-short-roster alert, matching milestone 4's original scope. Building the
-rest is real, separate work, not a bug fix.
+promotion, and the pre-game reminder) are a wishlist and, after this
+decision, mostly an unwanted one — `notify/reminders.py` sends exactly
+the short-roster alert. Adding any of the rest is real, separate work
+and needs asking first, not a bug fix.
 
 ## 2. `routes.py` split
 
@@ -40,6 +41,16 @@ note has always warned against. Wants its own quiet stage.
 
 ## 3. Loose ends, deliberately left open
 
+- **One 500 seen three times and never reproduced.** A foreign key
+  violation on `POST /seasons/{id}/members` —
+  `season_members_player_id_fkey`, a `player_id` not present in
+  `players`. Every route that writes a parent and a child flushes between
+  them, the dev branch has no orphaned rows and every constraint is
+  valid, and the whole suite now runs with foreign keys enforced (see
+  `tests/conftest.py`) without reproducing it. Left open rather than
+  guessed at: the crash alert now names the line of this project's code
+  that raised it, so the next occurrence identifies itself instead of
+  starting another hunt.
 - **Joining a club without the invite link.** `?invite=<token>` (an HMAC
   of the club id, `src/volleyflow/api/invites.py`) closed the
   reconnaissance half of "the invite link carries a guessable id" — a
