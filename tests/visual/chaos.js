@@ -169,6 +169,50 @@ async function hammer(page, selectors, rounds) {
   report("兩個人同時操作同一場", shared.problems.concat(organizer.errors, member.errors));
   console.log(`     場上 ${shared.playing.length}/${shared.capacity} 人・候補 ${shared.queued.length} 人`);
 
+  // 4. A burst of 已收 on the money screen. Same failure as 2, on a page
+  // that had its own, unqueued copy of the write path: five taps sent
+  // five requests at once, each asking for a re-read as it landed, so a
+  // read could describe the books as they were three payments ago. Rows
+  // went back to 未收 for about half a second and then forward again.
+  // Measured here as "a row the screen had marked paid asks for money
+  // again", which is what a person sees and no unit test can reach.
+  const money = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  const moneyErrors = [];
+  money.on("pageerror", (e) => moneyErrors.push(String(e).slice(0, 140)));
+  money.on("dialog", (d) => d.accept("1"));
+  await money.goto(`${BASE}/organizer-ledger.html?as=${as("蘇懂")}`, {
+    waitUntil: "networkidle",
+  });
+  await money.waitForTimeout(2500);
+  const stillOwing = () =>
+    money.evaluate(() => document.querySelectorAll("#tab-fee .m-net.owe").length);
+
+  const owingAtStart = await stillOwing();
+  const seen = [];
+  for (let i = 0; i < 5; i += 1) {
+    await money.evaluate(() => {
+      const b = document.querySelector("#tab-fee button.paid");
+      if (b) b.click();
+    });
+    seen.push(await stillOwing());
+    await money.waitForTimeout(120);
+  }
+  for (let waited = 0; waited < 8000; waited += 100) {
+    seen.push(await stillOwing());
+    await money.waitForTimeout(100);
+  }
+  const wentBackwards = seen.filter((n, i) => i > 0 && n > seen[i - 1]).length;
+  report(
+    "連續按「已收」之後不會有已收的列又變回未收",
+    owingAtStart < 2
+      ? ["這一季沒有足夠的未收款項，這項沒有測到"]
+      : (wentBackwards
+          ? [`${wentBackwards} 次倒退：${seen.slice(0, 30).join(",")}`]
+          : []
+        ).concat(moneyErrors)
+  );
+  console.log(`     未收 ${owingAtStart} -> ${seen[seen.length - 1]} 列`);
+
   await browser.close();
   console.log(failed ? `\n${failed} 項有問題。` : "\n亂按之後畫面與資料仍然一致，沒有卡住的按鈕。");
   process.exit(failed ? 1 : 0);

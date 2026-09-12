@@ -1783,6 +1783,82 @@ Honest note on how long this took: four sessions, three of them spent
 reasoning about code that was fine. What actually found it was making
 the error report say where it came from, and then pressing buttons.
 
+## 2026-09-12 (evening) — three from ten minutes of real use
+
+Ten minutes on a phone, three reports, and all three were real.
+
+**Removing a fixed member was a one-way door.** 18 members, remove one,
+the roster reads 17 — and adding them back says to raise the capacity to
+19. Reproduced in four lines: take leave, let a drop-in fill the slot,
+remove the member. Their leave is closed and their stand-in keeps the
+slot, which is correct on its own terms (nobody released that slot, so
+nothing should open) — but it leaves the game at 18 on court while the
+roster is one short, and the person who left can no longer come back to a
+court they were never going to stand on.
+
+The fix is the rule `CLAUDE.md` 2.3 already states: *a slot opens only
+because somebody released it, and closes again when they take that back.*
+Removal now marks those absences `retired_at` rather than merely
+cancelling them, and rejoining the roster restores exactly those —
+never the ones the member cancelled themselves, which are a different
+statement entirely. The capacity check exempts games the returning member
+will be away from again, because on those they add nobody. The mirror of
+`DropInRow.absorbed_at`, which has done the same job for drop-ins since
+September 10th; the absence half was simply missing.
+
+Worth noting what the column buys: without it the two kinds of cancelled
+absence are indistinguishable, and "undo the removal" would have to guess.
+A nullable timestamp and a migration is a small price for not guessing
+about somebody's money.
+
+**Signing up drew nothing until two round trips had finished.** 「報名候補
+後名單沒有立即反應，更新很慢」 — the sheet closed, the write went, and
+then the *whole season* was re-read before a single row moved. Everything
+needed to draw the answer was already on screen: the signup sheet has
+just told the person which of them get a slot and which go on the queue,
+using the same capacity arithmetic the server uses, in the same list
+order the server spends capacity in. So the guess is drawn immediately
+and checked against the answer; agreement (the ordinary case) costs no
+re-read at all. **10ms to the list moving**, from about 1.4s.
+
+**And the same revert-flicker as 請假, on the money screen.** Tap 已收 down
+a column and rows flip back to 未收 for half a second before settling.
+Same symptom, same cause, different page — and the cause was not subtle
+once measured: `submitPayment` called `postJson` **directly**, outside the
+request queue every other write in the app goes through. Five taps meant
+five simultaneous requests, each asking for a re-read the instant it
+landed, so a read could describe the books as they were three payments
+ago while those three were still in flight.
+
+Measured before: `11,10,9,8,7,7,7,7,9,9,9,8,8,8,7,7,7…` — two rows asking
+for money again. After: no backward step in three consecutive runs. It is
+now the fourth scenario in `tests/visual/chaos.js`, and that check was
+confirmed by reverting the one-line fix and watching it fail with exactly
+the sequence above.
+
+The general lesson, and the reason this one is worth a paragraph: the
+ordering fix from September 11th was written as shared machinery
+(`enqueueRequest`, `optimisticRunner`, `coalescedRefresh`) and then
+adopted on the screens that had the reported bug. A screen that never
+adopted it kept its own copy of the old mistake, silently, until somebody
+tapped the same column five times. Shared machinery is not the same thing
+as applied machinery.
+
+**A postscript on the instrument itself.** `smoke.js` had failed a run
+twice, on two different pages on two different days, with a `networkidle`
+timeout and nothing actually wrong. Replacing it with "wait for the
+buttons to stop appearing" made the flake go away and quietly gutted the
+check: it audited **4** controls on the money screen instead of 24, and
+passed. These pages build in waves — identity, then clubs, then the
+season, then the roster — and between two waves the button count sits
+perfectly still while a request is in flight. The condition that actually
+holds is both together: nothing outstanding to our own API *and* the
+controls have stopped appearing. Worth recording because the failure mode
+is the dangerous one — a test that got easier to pass and said nothing
+about it.
+
+414 tests, 170 frontend tests, seven browser checks.
+
 **And the load, measured request by request.** 「載入中的時間還能不能更
 縮短」 — so the next thing was to watch what a page load actually waits
 on, rather than just how long it took overall:

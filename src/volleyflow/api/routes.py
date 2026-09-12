@@ -1058,6 +1058,13 @@ def _close_absences_of_former_member(
     are no longer "X's 代打" for an X who has left the season, which is
     both untrue and the sort of thing the game sheet would print.
 
+    Marked `retired_at`, not merely cancelled, so putting the same person
+    back on the roster can put their leave back with them. Without that
+    mark the two look identical and a removal could not be undone: the
+    substitute keeps the slot, so the game stays at capacity while the
+    roster drops by one, and re-adding the person is refused for having
+    no room on a court they were never going to stand on.
+
     Returns the games they were away from, because the absorbed signups
     restored next must not put them back into one of those.
     """
@@ -1082,11 +1089,65 @@ def _close_absences_of_former_member(
     now = _now()
     for absence in absences:
         absence.cancelled_at = now
+        absence.retired_at = now
         db.query(DropInRow).filter(DropInRow.covers_absence_id == absence.id).update(
             {DropInRow.covers_absence_id: None}, synchronize_session=False
         )
     db.flush()
     return {int(absence.game_id) for absence in absences}
+
+
+def _retired_absences(
+    db: Session, season: SeasonRow, player_id: int
+) -> list[AbsenceRow]:
+    """The leave records this player would get back by rejoining this
+    season's roster — the ones a removal closed, never the ones they
+    cancelled themselves.
+    """
+    game_ids = [
+        row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id)
+    ]
+    if not game_ids:
+        return []
+    return (
+        db.query(AbsenceRow)
+        .filter(
+            AbsenceRow.player_id == player_id,
+            AbsenceRow.game_id.in_(game_ids),
+            AbsenceRow.retired_at.is_not(None),
+        )
+        .all()
+    )
+
+
+def _retired_absence_game_ids(
+    db: Session, season: SeasonRow, player_id: int
+) -> set[int]:
+    return {int(a.game_id) for a in _retired_absences(db, season, player_id)}
+
+
+def _restore_retired_absences(db: Session, season: SeasonRow, player_id: int) -> None:
+    """Puts back the leave a removal closed, when the same person is put
+    back on the same season's roster.
+
+    The mirror of _restore_absorbed_drop_ins, and for the same reason:
+    taking somebody off the roster must be undoable. They said they were
+    away on those nights and somebody is standing in for them; coming
+    back to the roster does not make them available on nights they had
+    already said they would miss.
+
+    The 代打 arrangement is deliberately not re-made — `covers_absence_id`
+    stays cleared. Who personally arranged whom is a relationship between
+    two people (CLAUDE.md 2.3) and it was genuinely dropped when the
+    member left; the FIFO rule that decides which absence gets refunded
+    is billing, works off the counts, and needs no such link.
+    """
+    absences = _retired_absences(db, season, player_id)
+    for absence in absences:
+        absence.cancelled_at = None
+        absence.retired_at = None
+    if absences:
+        db.flush()
 
 
 def _restore_absorbed_drop_ins(
@@ -2172,14 +2233,28 @@ def add_member(
         )
 
     # And every game needs a free slot right now as well, since a drop-in
-    # may be standing in one that the new member would claim. Drop-ins
-    # absorbed into their own membership below don't count — those are
-    # this same player's signups, about to become the membership rather
-    # than sit beside it.
+    # may be standing in one that the new member would claim. Two kinds of
+    # game don't count, because on both of them this player adds nobody to
+    # the court:
+    #
+    #  - one they already hold a signup for. Those are absorbed into the
+    #    membership below rather than sitting beside it.
+    #  - one they are about to be away from again, because a removal
+    #    closed their leave and rejoining puts it back (see
+    #    _restore_retired_absences). This is the case that made removing
+    #    a member a one-way door: their substitute keeps the slot, so the
+    #    game sits at capacity while the roster is one short, and putting
+    #    them back was refused over a court they were never going to
+    #    stand on. Reported from real use on 2026-09-12 — 18 members,
+    #    remove one, 17 on the roster and still "raise the capacity to
+    #    19" when adding them back.
+    away_again = {
+        game_id for game_id in _retired_absence_game_ids(db, season, player.id)
+    }
     full = [
         game
         for game in _games_with_no_room(db, season)
-        if not _is_signed_up(db, game, player.id)
+        if not _is_signed_up(db, game, player.id) and game.id not in away_again
     ]
     if full:
         dates = ", ".join(str(game.date) for game in full[:3])
@@ -2212,6 +2287,9 @@ def add_member(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Already a member of this season"
         ) from e
+    # Before the fee sync, so the season's charges are worked out with
+    # this member's leave already back where it was.
+    _restore_retired_absences(db, season, player.id)
     _absorb_drop_ins_into_membership(db, season, player.id)
     _sync_season_fee_ledger(db, season)
     db.commit()

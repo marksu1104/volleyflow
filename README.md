@@ -181,13 +181,13 @@ message naming what broke and where.
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
-uv run pytest -q               # 411 tests, including a randomised sweep
+uv run pytest -q               # 414 tests, including a randomised sweep
 uv run lint-imports             # billing logic must not import the database
 node --test tests/frontend/*.test.js   # 170 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
 node tests/visual/smoke.js     # presses every button and reports the dead ones
 node tests/visual/feedback.js  # and how long each one takes to react
-node tests/visual/chaos.js     # two people hammering one game at once
+node tests/visual/chaos.js     # tapping faster than the network answers
 node tests/visual/adverse.js   # the same, on a slow network and against refusals
 ```
 
@@ -195,8 +195,10 @@ The first five run in CI on every push. The last five need a browser and
 are run by hand — `check.js` when layout changes, `smoke.js` and
 `feedback.js` after anything that touches a click handler or a write,
 `chaos.js` and `adverse.js` after anything that changes who may be on a
-roster. `chaos.js` catches a change that saves, flips back, and flips
-forward again. All five want the local servers up, and all but `check.js`
+roster or moves money. `chaos.js` catches a change that saves, flips
+back, and flips forward again — the failure mode of a screen whose write
+skips the request queue, which is how it caught the money screen doing
+exactly that a day after the roster screen was fixed. All five want the local servers up, and all but `check.js`
 press destructive controls, so re-run `seed_dev.py` afterwards. See
 [`tests/visual/README.md`](tests/visual/README.md).
 
