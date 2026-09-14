@@ -3,6 +3,7 @@
 from fastapi.testclient import TestClient
 
 from tests.api.factories import auth_headers, create_club, identify, start_season
+from volleyflow.api.invites import invite_token
 
 
 def test_sign_up_charges_the_drop_in_fee(client: TestClient) -> None:
@@ -289,7 +290,9 @@ def test_a_member_cannot_read_the_whole_clubs_balances(client: TestClient) -> No
     season = start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.get(

@@ -83,6 +83,13 @@ def call(
     return response.json() if response.content else None
 
 
+def join(club_id: int, name: str) -> None:
+    """Joins the way a real person does: with the club's invite link. A
+    bare club id stopped being enough on 2026-09-15."""
+    token = call("GET", f"/clubs/{club_id}/invite", ORGANIZER)["token"]
+    call("POST", f"/clubs/{club_id}/join", name, {"invite": token})
+
+
 def sign_in(name: str) -> dict[str, Any]:
     body = {"id_token": f"dev:{quote(name)}", "display_name": name}
     response = httpx.post(API + "/players/identify", json=body, timeout=30)
@@ -189,7 +196,7 @@ def main() -> int:
     # which is the right answer.
     visitor = "阿凱"
     sign_in(visitor)
-    call("POST", f"/clubs/{club_id}/join", visitor)
+    join(club_id, visitor)
     call(
         "POST",
         f"/games/{games[8]['id']}/drop-ins",
@@ -213,7 +220,7 @@ def main() -> int:
     # seed, which is the point of building the data through the API.
     for name in ("林書妤", "詠晴"):
         identity = sign_in(name)
-        call("POST", f"/clubs/{club_id}/join", name)
+        join(club_id, name)
         call(
             "POST",
             f"/clubs/{club_id}/players/{by_name[name]}/link",

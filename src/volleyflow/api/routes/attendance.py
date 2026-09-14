@@ -334,6 +334,13 @@ def sign_up(
     game = _get_game_or_404(db, payload.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
+    # Before anything is written: only a member of this club may sign
+    # anybody up in it. _get_or_create_player creates a player and a club
+    # membership for a name it hasn't seen, and it used to run first — so
+    # an outsider's refused request briefly created somebody inside a club
+    # they had no part in, undone only because the session happened to
+    # roll back. Found 2026-09-15 by tests/api/test_tenant_isolation.py.
+    _require_club_access(db, season.club_id, current_player)
     player = _get_or_create_player(db, season.club_id, payload.player_name)
     _require_may_sign_up(db, season.club_id, current_player, player)
     _require_season_open(season)
@@ -399,6 +406,10 @@ def sign_up_several(
     assert season is not None  # game.season_id is a foreign key, always valid
     _require_season_open(season)
     _require_within_change_deadline(db, game, season, current_player)
+    # Same rule as sign_up, for the same reason: _sign_up_each creates
+    # people as it goes, so who may do this is settled before it starts,
+    # not discovered halfway through and rolled back.
+    _require_club_access(db, season.club_id, current_player)
 
     try:
         results = _sign_up_each(db, game, season, payload.people, current_player)

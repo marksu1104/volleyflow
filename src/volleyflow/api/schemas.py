@@ -26,6 +26,13 @@ class ClubCreate(BaseModel):
     would let anyone make anyone else the organizer of a new club."""
 
 
+class ClubJoin(BaseModel):
+    invite: str
+    """The token from the club's invite link. Required: without it any
+    signed-in caller could join any club by trying ids in order — see
+    routes/clubs.join_club."""
+
+
 class ClubOut(BaseModel):
     id: int
     name: str

@@ -19,6 +19,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from tests.api.factories import auth_headers, identify, start_season
+from volleyflow.api.invites import invite_token
 
 
 def _club_member(
@@ -27,7 +28,9 @@ def _club_member(
     """An identified person who has joined the club but organizes nothing."""
     person = identify(client, name)
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(person["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(person["token"]),
     )
     return person
 

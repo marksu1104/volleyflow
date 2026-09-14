@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from tests.api.factories import auth_headers, create_club, identify
 from tests.api.factories import start_season as _start_season
+from volleyflow.api.invites import invite_token
 from volleyflow.api.routes import reports
 from volleyflow.api.routes._people import _today_in_taiwan
 from volleyflow.db.models import AbsenceRow, DropInRow, PlayerRow
@@ -647,7 +648,11 @@ def test_set_substitute_does_not_overwrite_an_existing_gender(
     # name-only club member (see _get_or_create_player) has no way to
     # authenticate as themselves, only the organizer could act for them.
     dave = identify(client, "Dave")
-    client.post(f"/clubs/{season['club_id']}/join", headers=auth_headers(dave["token"]))
+    client.post(
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(dave["token"]),
+    )
     first_signup = client.post(
         "/drop-ins",
         json={"player_name": "Dave", "game_id": game_id},
@@ -978,7 +983,9 @@ def test_join_pool_lists_club_members_not_on_the_season_roster(
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.get(f"/seasons/{season['id']}/join-pool")
@@ -1010,7 +1017,9 @@ def test_join_pool_excludes_players_already_promoted(client: TestClient) -> None
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
     client.post(f"/seasons/{season['id']}/members", json={"player_name": "Carol"})
 
@@ -1093,7 +1102,11 @@ def test_list_clubs_returns_all_clubs(client: TestClient) -> None:
 def test_list_club_members_shows_roles(client: TestClient) -> None:
     club = create_club(client)
     carol = identify(client, "Carol")
-    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"]))
+    client.post(
+        f"/clubs/{club['id']}/join",
+        json={"invite": invite_token(club["id"])},
+        headers=auth_headers(carol["token"]),
+    )
 
     response = client.get(f"/clubs/{club['id']}/members")
 
@@ -1116,7 +1129,9 @@ def test_join_club_adds_a_member(client: TestClient) -> None:
     carol = identify(client, "Carol")
 
     response = client.post(
-        f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{club['id']}/join",
+        json={"invite": invite_token(club["id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     assert response.status_code == 200
@@ -1126,19 +1141,32 @@ def test_join_club_adds_a_member(client: TestClient) -> None:
 def test_join_club_rejects_a_duplicate(client: TestClient) -> None:
     club = create_club(client)
     carol = identify(client, "Carol")
-    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"]))
+    client.post(
+        f"/clubs/{club['id']}/join",
+        json={"invite": invite_token(club["id"])},
+        headers=auth_headers(carol["token"]),
+    )
 
     response = client.post(
-        f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{club['id']}/join",
+        json={"invite": invite_token(club["id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     assert response.status_code == 400
 
 
 def test_join_unknown_club_returns_404(client: TestClient) -> None:
+    # With a genuine token for that id: a link to a club since deleted.
+    # Without one it is refused before existence is looked at (see
+    # test_invites.py), so a stranger can't learn which ids exist.
     carol = identify(client, "Carol")
 
-    response = client.post("/clubs/999999/join", headers=auth_headers(carol["token"]))
+    response = client.post(
+        "/clubs/999999/join",
+        json={"invite": invite_token(999999)},
+        headers=auth_headers(carol["token"]),
+    )
 
     assert response.status_code == 404
 
@@ -1151,7 +1179,9 @@ def _member_with_login(client: TestClient, season: dict, name: str) -> dict:
     as that member rather than as the club's organizer."""
     player = identify(client, name + " (LINE)")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(player["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(player["token"]),
     )
     roster_id = next(
         m["id"]
@@ -1230,7 +1260,11 @@ def test_sign_up_rejected_past_the_change_deadline(client: TestClient) -> None:
     game_id = season["games"][0]["id"]
 
     bob = identify(client, "Bob")
-    client.post(f"/clubs/{season['club_id']}/join", headers=auth_headers(bob["token"]))
+    client.post(
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(bob["token"]),
+    )
 
     response = client.post(
         "/drop-ins",
@@ -1638,7 +1672,11 @@ def test_unidentified_token_is_rejected(client: TestClient) -> None:
 def test_a_member_cannot_start_a_season(client: TestClient) -> None:
     club = create_club(client)
     carol = identify(client, "Carol")
-    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"]))
+    client.post(
+        f"/clubs/{club['id']}/join",
+        json={"invite": invite_token(club["id"])},
+        headers=auth_headers(carol["token"]),
+    )
 
     response = client.post(
         f"/clubs/{club['id']}/seasons",
@@ -1657,7 +1695,9 @@ def test_a_member_cannot_add_a_season_member(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.post(
@@ -1674,7 +1714,9 @@ def test_a_member_cannot_remove_a_season_member(client: TestClient) -> None:
     bob_id = season["member_ids"][1]
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.delete(
@@ -1689,7 +1731,9 @@ def test_a_member_cannot_update_season_settings(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.patch(
@@ -1706,7 +1750,9 @@ def test_a_member_cannot_cancel_a_game(client: TestClient) -> None:
     game_id = season["games"][0]["id"]
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.post(
@@ -1722,7 +1768,9 @@ def test_a_member_cannot_view_the_join_pool(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.get(
@@ -1736,7 +1784,9 @@ def test_a_member_cannot_view_the_settlement(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.get(
@@ -1750,7 +1800,9 @@ def test_a_member_cannot_settle_the_season(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.post(
@@ -1765,7 +1817,9 @@ def test_a_member_cannot_record_a_payment_for_someone(client: TestClient) -> Non
     alice_id = season["member_ids"][0]
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.post(
@@ -1782,7 +1836,9 @@ def test_a_member_can_record_their_own_absence(client: TestClient) -> None:
     game_id = season["games"][0]["id"]
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
     client.post(
         f"/seasons/{season['id']}/members",
@@ -1803,7 +1859,9 @@ def test_a_member_cannot_record_an_absence_for_someone_else(client: TestClient) 
     game_id = season["games"][0]["id"]
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.post(
@@ -1823,7 +1881,9 @@ def test_a_member_can_sign_up_themselves_as_a_drop_in(client: TestClient) -> Non
     # name to a club member, so without this "Carol" would resolve to a
     # brand new player rather than the one just identified.
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.post(
@@ -1856,7 +1916,9 @@ def test_a_member_can_bring_a_guest_who_has_no_account(client: TestClient) -> No
     game_id = season["games"][0]["id"]
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.post(
@@ -1877,7 +1939,11 @@ def test_a_member_cannot_sign_up_someone_who_has_an_account(client: TestClient) 
     carol = identify(client, "Carol")
     dave = identify(client, "Dave")
     for player in (carol, dave):
-        client.post(f"/clubs/{club_id}/join", headers=auth_headers(player["token"]))
+        client.post(
+            f"/clubs/{club_id}/join",
+            json={"invite": invite_token(club_id)},
+            headers=auth_headers(player["token"]),
+        )
 
     response = client.post(
         "/drop-ins",
@@ -1892,7 +1958,11 @@ def test_the_organizer_can_still_sign_up_anyone(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"], capacity=18)
     game_id = season["games"][0]["id"]
     dave = identify(client, "Dave")
-    client.post(f"/clubs/{season['club_id']}/join", headers=auth_headers(dave["token"]))
+    client.post(
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(dave["token"]),
+    )
 
     # client.headers still carries the organizer's token (see create_club).
     response = client.post(
@@ -1907,7 +1977,9 @@ def test_a_member_can_cancel_their_own_drop_in(client: TestClient) -> None:
     game_id = season["games"][0]["id"]
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
     signup = client.post(
         "/drop-ins",
@@ -1941,7 +2013,9 @@ def test_a_member_can_view_their_own_ledger(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.get(
@@ -1957,7 +2031,9 @@ def test_a_member_cannot_view_someone_elses_ledger(client: TestClient) -> None:
     alice_id = season["member_ids"][0]
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.get(
@@ -1990,7 +2066,9 @@ def test_a_stranger_cannot_join_a_club_as_someone_they_are_not(
 
     response = client.post(
         f"/clubs/{club['id']}/join",
-        json={"player_id": 999999},
+        # An invite, so the request gets past the door; and a player_id,
+        # which the route has no field for and must ignore.
+        json={"invite": invite_token(club["id"]), "player_id": 999999},
         headers=auth_headers(carol["token"]),
     )
 
@@ -2004,9 +2082,17 @@ def test_a_stranger_cannot_join_a_club_as_someone_they_are_not(
 def test_list_player_clubs_spans_multiple_clubs_with_roles(client: TestClient) -> None:
     club_a = create_club(client, name="Club A")
     alice = identify(client, "Alice")
-    client.post(f"/clubs/{club_a['id']}/join", headers=auth_headers(alice["token"]))
+    client.post(
+        f"/clubs/{club_a['id']}/join",
+        json={"invite": invite_token(club_a["id"])},
+        headers=auth_headers(alice["token"]),
+    )
     club_b = create_club(client, name="Club B")
-    client.post(f"/clubs/{club_b['id']}/join", headers=auth_headers(alice["token"]))
+    client.post(
+        f"/clubs/{club_b['id']}/join",
+        json={"invite": invite_token(club_b["id"])},
+        headers=auth_headers(alice["token"]),
+    )
 
     response = client.get(
         f"/players/{alice['id']}/clubs", headers=auth_headers(alice["token"])
@@ -2120,7 +2206,9 @@ def test_a_club_member_can_read_the_club(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.get(
@@ -2130,13 +2218,14 @@ def test_a_club_member_can_read_the_club(client: TestClient) -> None:
     assert response.status_code == 200
 
 
-def test_an_invite_link_can_name_a_club_you_have_not_joined(
+def test_a_club_cannot_be_read_by_somebody_outside_it(
     client: TestClient,
 ) -> None:
-    """The whole point of GET /clubs/{id}: someone holding an invite link
-    needs the club's name to decide whether to join. Nothing else about
-    the club is readable until they do.
-    """
+    """GET /clubs/{id} used to answer anyone signed in, for an invite
+    prompt that needed a name before joining. That prompt reads
+    GET /invites/{token} now — see test_invites.py — and a club's name by
+    its id is for its members, or anybody could list every club by trying
+    ids in order."""
     club = create_club(client, name="晴光館")
     stranger = identify(client, "Stranger")
 
@@ -2144,14 +2233,8 @@ def test_an_invite_link_can_name_a_club_you_have_not_joined(
         f"/clubs/{club['id']}", headers=auth_headers(stranger["token"])
     )
 
-    assert response.status_code == 200
-    # role is null here on purpose: this is the invite-link name lookup,
-    # and the caller has no role in the club by definition.
-    assert response.json() == {
-        "id": club["id"],
-        "name": "晴光館",
-        "role": None,
-    }
+    assert response.status_code == 403
+    assert "晴光館" not in response.text
 
 
 # --- deleting things -----------------------------------------------------
@@ -2197,7 +2280,9 @@ def test_a_member_cannot_delete_a_season(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.delete(
@@ -2230,7 +2315,11 @@ def test_delete_club_keeps_the_players_themselves(client: TestClient) -> None:
     """A Player is global and outlives any one club."""
     club = create_club(client)
     alice = identify(client, "Alice")
-    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(alice["token"]))
+    client.post(
+        f"/clubs/{club['id']}/join",
+        json={"invite": invite_token(club["id"])},
+        headers=auth_headers(alice["token"]),
+    )
 
     client.delete(f"/clubs/{club['id']}")
 
@@ -2245,7 +2334,11 @@ def test_delete_club_keeps_the_players_themselves(client: TestClient) -> None:
 def test_remove_club_member_takes_them_out_of_the_club(client: TestClient) -> None:
     club = create_club(client)
     carol = identify(client, "Carol")
-    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"]))
+    client.post(
+        f"/clubs/{club['id']}/join",
+        json={"invite": invite_token(club["id"])},
+        headers=auth_headers(carol["token"]),
+    )
 
     response = client.delete(f"/clubs/{club['id']}/members/{carol['id']}")
 
@@ -2296,7 +2389,11 @@ def test_an_organizer_cannot_set_gender_for_someone_with_a_line_account(
 ) -> None:
     club = create_club(client)
     carol = identify(client, "Carol")
-    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"]))
+    client.post(
+        f"/clubs/{club['id']}/join",
+        json={"invite": invite_token(club["id"])},
+        headers=auth_headers(carol["token"]),
+    )
 
     response = client.put(f"/players/{carol['id']}/gender", json={"gender": "female"})
 
@@ -2334,7 +2431,9 @@ def test_link_moves_the_line_identity_onto_the_roster_entry(
     typed_in_id = season["member_ids"][0]
     with_line = identify(client, "陳品妍")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(with_line["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(with_line["token"]),
     )
 
     response = client.post(
@@ -2358,7 +2457,9 @@ def test_link_keeps_the_roster_entrys_ledger(client: TestClient) -> None:
     ).json()["balance"]
     with_line = identify(client, "陳品妍")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(with_line["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(with_line["token"]),
     )
 
     client.post(
@@ -2377,7 +2478,9 @@ def test_after_linking_that_person_can_act_as_themselves(client: TestClient) -> 
     typed_in_id = season["member_ids"][0]
     with_line = identify(client, "陳品妍")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(with_line["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(with_line["token"]),
     )
     client.post(
         f"/clubs/{season['club_id']}/players/{typed_in_id}/link",
@@ -2411,7 +2514,9 @@ def test_link_carries_over_the_guests_that_account_signed_up(
     typed_in_id = season["member_ids"][0]
     with_line = identify(client, "陳品妍")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(with_line["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(with_line["token"]),
     )
     client.post(
         f"/games/{season['games'][0]['id']}/drop-ins",
@@ -2443,7 +2548,9 @@ def test_link_refuses_when_the_line_account_has_its_own_history(
     typed_in_id = season["member_ids"][0]
     with_line = identify(client, "陳品妍")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(with_line["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(with_line["token"]),
     )
     client.post(
         "/drop-ins",
@@ -2461,9 +2568,17 @@ def test_link_refuses_when_the_line_account_has_its_own_history(
 def test_link_refuses_an_already_linked_roster_entry(client: TestClient) -> None:
     club = create_club(client)
     alice = identify(client, "Alice")
-    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(alice["token"]))
+    client.post(
+        f"/clubs/{club['id']}/join",
+        json={"invite": invite_token(club["id"])},
+        headers=auth_headers(alice["token"]),
+    )
     bob = identify(client, "Bob")
-    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(bob["token"]))
+    client.post(
+        f"/clubs/{club['id']}/join",
+        json={"invite": invite_token(club["id"])},
+        headers=auth_headers(bob["token"]),
+    )
 
     response = client.post(
         f"/clubs/{club['id']}/players/{alice['id']}/link",
@@ -2478,7 +2593,9 @@ def test_a_member_cannot_link_players(client: TestClient) -> None:
     typed_in_id = season["member_ids"][0]
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.post(
@@ -2501,7 +2618,11 @@ def test_a_member_cannot_link_players(client: TestClient) -> None:
 def test_a_newcomer_starts_with_no_stated_intent(client: TestClient) -> None:
     club = create_club(client)
     carol = identify(client, "Carol")
-    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"]))
+    client.post(
+        f"/clubs/{club['id']}/join",
+        json={"invite": invite_token(club["id"])},
+        headers=auth_headers(carol["token"]),
+    )
 
     body = client.get(
         f"/players/{carol['id']}/clubs", headers=auth_headers(carol["token"])
@@ -2518,7 +2639,9 @@ def test_saying_you_are_a_fixed_member_does_not_put_you_on_a_roster(
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.put(
@@ -2542,7 +2665,9 @@ def test_the_organizer_sees_who_is_waiting(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
     client.put(
         f"/clubs/{season['club_id']}/members/me/intent",
@@ -2559,7 +2684,11 @@ def test_the_organizer_sees_who_is_waiting(client: TestClient) -> None:
 def test_intent_can_be_changed_later(client: TestClient) -> None:
     club = create_club(client)
     carol = identify(client, "Carol")
-    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"]))
+    client.post(
+        f"/clubs/{club['id']}/join",
+        json={"invite": invite_token(club["id"])},
+        headers=auth_headers(carol["token"]),
+    )
 
     for value in (False, True, False):
         response = client.put(
@@ -2591,7 +2720,9 @@ def test_the_join_pool_shows_who_asked_to_be_a_fixed_member(
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
     client.put(
         f"/clubs/{season['club_id']}/members/me/intent",
@@ -2599,7 +2730,11 @@ def test_the_join_pool_shows_who_asked_to_be_a_fixed_member(
         headers=auth_headers(carol["token"]),
     )
     dave = identify(client, "Dave")
-    client.post(f"/clubs/{season['club_id']}/join", headers=auth_headers(dave["token"]))
+    client.post(
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(dave["token"]),
+    )
     client.put(
         f"/clubs/{season['club_id']}/members/me/intent",
         json={"wants_fixed_membership": False},
@@ -2869,7 +3004,9 @@ def test_signing_up_a_group_charges_each_of_them(client: TestClient) -> None:
     game_id = season["games"][0]["id"]
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.post(
@@ -2990,7 +3127,9 @@ def test_a_guest_records_who_brought_them_but_you_dont(
     game_id = season["games"][0]["id"]
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     results = client.post(
@@ -3040,7 +3179,11 @@ def test_the_money_screen_names_who_brought_each_guest(client: TestClient) -> No
     club_id = season["club_id"]
     game_id = season["games"][0]["id"]
     carol = identify(client, "Carol")
-    client.post(f"/clubs/{club_id}/join", headers=auth_headers(carol["token"]))
+    client.post(
+        f"/clubs/{club_id}/join",
+        json={"invite": invite_token(club_id)},
+        headers=auth_headers(carol["token"]),
+    )
 
     results = client.post(
         f"/games/{game_id}/drop-ins",
@@ -3083,7 +3226,9 @@ def test_an_organizer_still_cannot_rename_someone_with_an_account(
     season = _start_season(client, member_names=["Alice"], capacity=18)
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     # client.headers still carries the organizer's token.
@@ -3160,8 +3305,16 @@ def test_the_club_list_says_your_role_in_each(client: TestClient) -> None:
     mine = create_club(client, "我開的")
     other = create_club(client, "別人開的")  # resets client to a new organizer
     carol = identify(client, "Carol")
-    client.post(f"/clubs/{mine['id']}/join", headers=auth_headers(carol["token"]))
-    client.post(f"/clubs/{other['id']}/join", headers=auth_headers(carol["token"]))
+    client.post(
+        f"/clubs/{mine['id']}/join",
+        json={"invite": invite_token(mine["id"])},
+        headers=auth_headers(carol["token"]),
+    )
+    client.post(
+        f"/clubs/{other['id']}/join",
+        json={"invite": invite_token(other["id"])},
+        headers=auth_headers(carol["token"]),
+    )
 
     clubs = client.get("/clubs", headers=auth_headers(carol["token"])).json()
 
@@ -3310,7 +3463,9 @@ def test_a_member_cannot_change_the_air_conditioning(client: TestClient) -> None
     game_id = season["games"][0]["id"]
     carol = identify(client, "Carol")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(carol["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(carol["token"]),
     )
 
     response = client.put(

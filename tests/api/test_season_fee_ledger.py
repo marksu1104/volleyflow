@@ -9,6 +9,7 @@ from decimal import Decimal
 from fastapi.testclient import TestClient
 
 from tests.api.factories import auth_headers, identify, start_season
+from volleyflow.api.invites import invite_token
 
 
 def test_starting_a_season_charges_each_members_season_fee(
@@ -340,7 +341,11 @@ def test_a_member_who_logged_in_is_not_marked_a_guest(client: TestClient) -> Non
     """
     season = start_season(client, member_names=["Alice"])
     bob = identify(client, "Bob")
-    client.post(f"/clubs/{season['club_id']}/join", headers=auth_headers(bob["token"]))
+    client.post(
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(bob["token"]),
+    )
     client.post(f"/seasons/{season['id']}/members", json={"player_name": bob["name"]})
 
     members = client.get(f"/seasons/{season['id']}").json()["members"]

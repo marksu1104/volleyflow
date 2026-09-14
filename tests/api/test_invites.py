@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.api.factories import auth_headers, create_club, identify
+from volleyflow.api.invites import invite_token
 
 
 def test_organizer_can_read_their_clubs_invite_token(client: TestClient) -> None:
@@ -28,7 +29,11 @@ def test_organizer_can_read_their_clubs_invite_token(client: TestClient) -> None
 def test_a_member_cannot_read_the_invite_token(client: TestClient) -> None:
     club = create_club(client)
     member = identify(client, "Carol")
-    client.post(f"/clubs/{club['id']}/join", headers=auth_headers(member["token"]))
+    client.post(
+        f"/clubs/{club['id']}/join",
+        json={"invite": invite_token(club["id"])},
+        headers=auth_headers(member["token"]),
+    )
 
     response = client.get(
         f"/clubs/{club['id']}/invite", headers=auth_headers(member["token"])
@@ -144,3 +149,54 @@ def test_two_clubs_get_different_tokens(client: TestClient) -> None:
     # And each still resolves to its own club, not the other one.
     assert client.get(f"/invites/{token_a}").json()["club_id"] == a["id"]
     assert client.get(f"/invites/{token_b}").json()["club_id"] == b["id"]
+
+
+def test_joining_with_the_clubs_link_works(client: TestClient) -> None:
+    club = create_club(client)
+    token = client.get(f"/clubs/{club['id']}/invite").json()["token"]
+    carol = identify(client, "Carol")
+
+    response = client.post(
+        f"/clubs/{club['id']}/join",
+        json={"invite": token},
+        headers=auth_headers(carol["token"]),
+    )
+
+    assert response.status_code == 200
+
+
+def test_joining_by_id_alone_is_refused(client: TestClient) -> None:
+    """The hole the token existed to close, and didn't until 2026-09-15:
+    the shared link hid the id, but the endpoint took a bare one from
+    anybody signed in."""
+    club = create_club(client)
+    carol = identify(client, "Carol")
+
+    no_body = client.post(
+        f"/clubs/{club['id']}/join", headers=auth_headers(carol["token"])
+    )
+    forged = client.post(
+        f"/clubs/{club['id']}/join",
+        json={"invite": f"{club['id']}.00000000000000000000"},
+        headers=auth_headers(carol["token"]),
+    )
+
+    assert no_body.status_code == 422
+    assert forged.status_code == 403
+
+
+def test_one_clubs_link_does_not_open_another(client: TestClient) -> None:
+    # A token is for the club it was made for, not a key to whichever id
+    # is in the path beside it.
+    mine = create_club(client, "我的球隊")
+    my_token = client.get(f"/clubs/{mine['id']}/invite").json()["token"]
+    theirs = create_club(client, "別人的球隊")
+    carol = identify(client, "Carol")
+
+    response = client.post(
+        f"/clubs/{theirs['id']}/join",
+        json={"invite": my_token},
+        headers=auth_headers(carol["token"]),
+    )
+
+    assert response.status_code == 403

@@ -26,6 +26,7 @@ from volleyflow.api.routes._people import (
 )
 from volleyflow.api.schemas import (
     ClubCreate,
+    ClubJoin,
     ClubMemberOut,
     ClubOut,
     GuestOut,
@@ -103,14 +104,18 @@ def get_club(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> ClubOut:
-    """A club's name, for someone who has its invite link but hasn't
-    joined yet — the "加入「晴光館」?" prompt needs something to name.
-    Deliberately not membership-gated (that's the whole point) and
-    deliberately nothing but id and name; everything richer about a club
-    requires belonging to it. Still requires a verified caller, so this
-    isn't anonymously scrapable.
+    """A club's name — for its members.
+
+    It used to be readable by anyone signed in, for an invite prompt that
+    needed a name before the visitor had joined. That prompt reads
+    GET /invites/{token} now, and nothing in the app calls this for a club
+    it isn't in — so left open, all it still did was let anybody with a
+    LINE account read every club's name by trying ids in order, which is
+    exactly what the invite token was introduced to stop. Found on
+    2026-09-15 by tests/api/test_tenant_isolation.py.
     """
     club = _get_club_or_404(db, club_id)
+    _require_club_access(db, club_id, current_player)
     return ClubOut(id=club.id, name=club.name)
 
 
@@ -288,12 +293,28 @@ def list_club_members(
 @router.post("/clubs/{club_id}/join", response_model=MemberOut)
 def join_club(
     club_id: int,
+    payload: ClubJoin,
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> MemberOut:
     """A player can only join a club as themselves — the verified
-    caller, never an arbitrary player_id someone else could sign up.
+    caller, never an arbitrary player_id someone else could sign up — and
+    only by holding that club's invite link.
+
+    The token used to be optional here. `?invite=` hid the club's id from
+    anyone reading a shared link, but this endpoint went on accepting a
+    bare id from any signed-in caller, so trying small integers still
+    joined every club in turn — and a member can read the whole roster.
+    Left open on purpose while the app ran one club;
+    closed on 2026-09-15, before other clubs were let
+    in, when tests/api/test_tenant_isolation.py sent every route at one
+    club as an outsider and this one let it straight in.
+
+    Checked before anything else, so a club that doesn't exist and a club
+    you have no link to get the same answer.
     """
+    if club_id_from_invite_token(payload.invite) != club_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Invite link not recognised")
     _get_club_or_404(db, club_id)
 
     existing = db.get(

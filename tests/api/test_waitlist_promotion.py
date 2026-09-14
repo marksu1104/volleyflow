@@ -12,6 +12,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from tests.api.factories import auth_headers, identify, start_season
+from volleyflow.api.invites import invite_token
 
 
 def _full_game_with_queue(
@@ -130,7 +131,9 @@ def test_an_ordinary_member_cannot_reorder_the_queue(client: TestClient) -> None
     season, game_id, [carol] = _full_game_with_queue(client, ["Carol"])
     member = identify(client, "Bystander")
     client.post(
-        f"/clubs/{season['club_id']}/join", headers=auth_headers(member["token"])
+        f"/clubs/{season['club_id']}/join",
+        json={"invite": invite_token(season["club_id"])},
+        headers=auth_headers(member["token"]),
     )
 
     response = client.post(

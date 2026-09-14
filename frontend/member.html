@@ -428,6 +428,15 @@
     if (pendingInviteClubId && myClubs.some((c) => String(c.id) === String(pendingInviteClubId))) {
       pendingInviteClubId = null;
     }
+    // The one club that can be listed without being mine: the invite this
+    // load is holding. `allClubs` was always exactly `myClubs.slice()`
+    // above, which meant the club sheet's own "邀請連結・尚未加入" label
+    // (see renderClubRows) could never actually be drawn — there was
+    // never a row it applied to. Found 2026-09-15 by tests/visual/join.js
+    // opening the club sheet mid-invite and finding nothing to tap.
+    if (pendingInviteClubId) {
+      allClubs.push({ id: Number(pendingInviteClubId), name: pendingInviteClubName });
+    }
   }
 
   /** The way into 球隊管理. It lives in the top bar rather than in the
@@ -582,7 +591,7 @@
 
   async function joinFromPrompt() {
     try {
-      await postJson(API_BASE, `/clubs/${currentClubId()}/join`, {});
+      await postJson(API_BASE, `/clubs/${currentClubId()}/join`, { invite: pendingInviteToken });
       await refreshMyClubs();
       pendingInviteClubId = null;
       pendingInviteToken = null;
@@ -637,11 +646,14 @@
       localStorage.setItem(CLUB_STORAGE_KEY, id);
       closeClubSheet();
       // A club that isn't mine yet can only be the invite from this
-      // load. Go back through ?club= so it lands on the join screen
-      // again, rather than a reload that reads it as a stale remembered
-      // club and quietly picks a different one.
+      // load. Go back through ?invite= so it lands on the join screen
+      // again with the link's token in hand — joining needs it. This used
+      // to write ?club=<id>, which nothing on the page ever read.
       const mine = myClubs.some((c) => String(c.id) === String(id));
-      location.href = mine ? location.pathname : `${location.pathname}?club=${id}`;
+      location.href =
+        mine || !pendingInviteToken
+          ? location.pathname
+          : `${location.pathname}?invite=${encodeURIComponent(pendingInviteToken)}`;
     }
   });
 

@@ -113,13 +113,18 @@ multi-tenant model. `Club` is the tenant boundary; everything else
 an existing foreign key rather than carrying a denormalized `club_id` of
 its own.
 
-**A join link carries a token, not a database id.** `/clubs/{id}/join`
-still accepts a plain club id from an already-authenticated caller — a
-deliberate, narrower scope than closing that off entirely would have
-been — but the *shared link* a visitor actually
-clicks now carries an HMAC token instead of a sequential integer, so
-finding a club by guessing small numbers no longer works from the one
-surface a stranger would try it on.
+**Joining a club takes its invite link, not its id.** The shared link
+carries an HMAC token instead of a sequential integer, and
+`POST /clubs/{id}/join` refuses without the token that matches that id.
+For a while only the first half was true: the link hid the id, but the
+endpoint still took a bare one from anybody signed in — so trying small
+integers joined every club in turn, and a member can read the whole
+roster. It was left open deliberately while the app ran one club, and
+closed before it was opened to others, when a test that sends every
+route in the API at one club as an outsider (`test_tenant_isolation.py`)
+was let straight in. The same test found `GET /clubs/{id}` handing any
+signed-in stranger a club's name, and a refused signup writing a person
+into the club before refusing — both closed the same day.
 
 An HMAC is only as secret as its key, and for a while production's key
 was the development fallback written in this public repository — the code
@@ -232,18 +237,19 @@ fetch them, and a screenshot can show a name and a balance.
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
-uv run pytest -q               # 434 tests, including a randomised sweep
+uv run pytest -q               # 440 tests, including a randomised sweep
 uv run lint-imports             # billing logic must not import the database
-node --test tests/frontend/*.test.js   # 192 frontend tests
+node --test tests/frontend/*.test.js   # 194 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
 node tests/visual/smoke.js     # presses every button and reports the dead ones
 node tests/visual/feedback.js  # and how long each one takes to react
 node tests/visual/chaos.js     # tapping faster than the network answers
 node tests/visual/adverse.js   # the same, on a slow network and against refusals
 node tests/visual/firstrun.js   # what a new user meets on an empty database
+node tests/visual/join.js       # opening an invite link and joining, as a stranger does
 ```
 
-The first five run in CI on every push. The last six need a browser and
+The first five run in CI on every push. The last seven need a browser and
 are run by hand — `check.js` when layout changes, `smoke.js` and
 `feedback.js` after anything that touches a click handler or a write,
 `chaos.js` and `adverse.js` after anything that changes who may be on a

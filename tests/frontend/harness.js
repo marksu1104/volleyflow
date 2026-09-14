@@ -123,7 +123,14 @@ function installGlobals() {
     querySelectorAll: () => [],
   };
   globalThis.location = { search: "", pathname: "/member.html", hash: "", href: "" };
-  globalThis.history = { replaceState() {} };
+  // Records rather than ignores, so a test can see what a page did to
+  // the address bar while it was loading.
+  globalThis.history = {
+    calls: [],
+    replaceState(...args) {
+      this.calls.push(args);
+    },
+  };
   globalThis.navigator = { userAgent: "node-test", clipboard: { writeText: async () => {} } };
   globalThis.alert = () => {};
   globalThis.confirm = () => true;
@@ -146,8 +153,12 @@ function inlineScript(page) {
 
 /** Loads shared.js (optionally with a page's script after it) and hands
  * back every function they declare, so tests can call them directly. */
-function load(page) {
+function load(page, options = {}) {
   const knobs = installGlobals();
+  // A page reads its query string while its script is being evaluated
+  // (member.html takes ?invite= that way), so it has to be in place
+  // before the script runs, not set afterwards.
+  if (options.search) globalThis.location.search = options.search;
 
   // Which functions are in scope to return depends on where they were
   // written: shared.js declares its own at no indent, while a page's
