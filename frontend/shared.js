@@ -1515,13 +1515,6 @@ async function whileBusy(el, action) {
 
 /** POST or PUT a JSON body, returning the parsed response or throwing
  * with the API's own error detail. */
-/** Authorization header for the current LIFF session, or {} if there
- * isn't one — every request that might need identity spreads this in,
- * and it's a no-op when LIFF was never initialized (identify_player and
- * every write it gates would then just be rejected server-side, exactly
- * as if the header were simply absent). A fresh token is fetched every
- * call rather than cached: liff.getIDToken() already handles refreshing
- * it, so caching here would just risk holding an expired one. */
 /** Whether this page is being served from a development machine rather
  * than the real site. Not a security boundary by itself — this runs in
  * the visitor's browser — but it means the shipped site never even
@@ -1572,6 +1565,120 @@ function devIdentityName() {
   }
 }
 
+/** How long before a LINE ID token runs out it is already treated as
+ * spent. A request sent with seconds to spare can reach the server after
+ * the token has lapsed, and gets the same refusal as one sent late. */
+const LINE_TOKEN_MARGIN_SECONDS = 120;
+
+/** Whether the LINE ID token this page would send can still be used.
+ *
+ * LINE's LIFF reference says an ID token "is valid for one hour after it
+ * is issued", and says nothing about the SDK replacing it. So a page left
+ * open in LINE for an hour — which on a phone is simply how pages get
+ * left — went on sending a token LINE refuses, and every action failed
+ * as 「操作失敗（LINE rejected this ID token）」. Found 2026-09-15, when
+ * creating a club failed on the production site.
+ *
+ * This file used to say the opposite: that liff.getIDToken() "already
+ * handles refreshing it". Nobody had checked, and the one thing the
+ * documentation does say contradicts it.
+ *
+ * True whenever there is nothing to check — local sign-in, no LIFF, no
+ * decodable token. It only says no when it knows the token is spent.
+ */
+function lineTokenIsFresh(nowMs) {
+  if (devIdentityName()) return true;
+  try {
+    if (typeof liff === "undefined" || !liff.isLoggedIn()) return true;
+    const decoded = liff.getDecodedIDToken();
+    if (!decoded || typeof decoded.exp !== "number") return true;
+    const now = (nowMs === undefined ? Date.now() : nowMs) / 1000;
+    return decoded.exp - LINE_TOKEN_MARGIN_SECONDS > now;
+  } catch (e) {
+    return true;
+  }
+}
+
+const _RESTART_KEY = "vf_line_restart_at";
+const _RESTART_COOLDOWN_MS = 3 * 60 * 1000;
+
+/** Starts the page's LINE session over, which is how it gets a new
+ * identity.
+ *
+ * LINE documents no way to renew an ID token in place. What it does
+ * document is that logging out discards the tokens and that initialising
+ * LIFF signs you in — automatically inside the LINE app, by redirect in a
+ * browser — so logging out and reloading yields a new one either way.
+ *
+ * `signOut` is false when the token is fine and it is *our* record of the
+ * person that has gone (a database reset while the page was open): then
+ * only the cached identity needs forgetting, and the reload re-identifies.
+ *
+ * At most once every few minutes. If the server refuses again straight
+ * after a fresh sign-in, age is not the problem — a misconfigured server,
+ * say — and reloading forever would hide that behind a page that never
+ * stops flashing. Returns whether it restarted.
+ */
+function restartLineSession(signOut = true) {
+  let last = 0;
+  try {
+    last = Number(sessionStorage.getItem(_RESTART_KEY)) || 0;
+  } catch (e) {
+    // No storage: try each time rather than never.
+  }
+  if (Date.now() - last < _RESTART_COOLDOWN_MS) return false;
+  try {
+    sessionStorage.setItem(_RESTART_KEY, String(Date.now()));
+    sessionStorage.removeItem("vf_identity");
+  } catch (e) {
+    // Nothing to clear.
+  }
+  toast("登入已過期，正在重新登入…");
+  if (signOut) {
+    try {
+      if (typeof liff !== "undefined" && liff.isLoggedIn()) liff.logout();
+    } catch (e) {
+      // Reloading still helps if logout itself isn't available.
+    }
+  }
+  location.reload();
+  return true;
+}
+
+/** Whether a refusal means "who you are has lapsed" rather than "no".
+ * Everything else a server says is an answer to show; these three are a
+ * session to renew. */
+function identityLapsed(status, detail) {
+  if (status === 401) {
+    return /^(LINE rejected this ID token|Missing bearer token)$/.test(detail || "");
+  }
+  if (status === 404) return detail === "No player identified for this LINE account yet";
+  return false;
+}
+
+let _watchingLineToken = false;
+
+/** Checks the token whenever the page comes back into view — the moment
+ * a phone user returns to a page they left open, and before they have
+ * tapped anything, which is what makes reloading then harmless. */
+function watchLineToken() {
+  if (_watchingLineToken) return;
+  _watchingLineToken = true;
+  const check = () => {
+    if (document.visibilityState === "hidden") return;
+    if (!lineTokenIsFresh()) restartLineSession();
+  };
+  document.addEventListener("visibilitychange", check);
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("pageshow", check);
+  }
+}
+
+/** Authorization header for the current LIFF session, or {} if there
+ * isn't one — every request that might need identity spreads this in.
+ * Read afresh on every call, but that alone never made it fresh: see
+ * lineTokenIsFresh for why the token can be an hour old, and
+ * restartLineSession for what happens then. */
 function authHeader() {
   const dev = devIdentityName();
   // encodeURIComponent because an Authorization header has to be ASCII:
@@ -1631,6 +1738,10 @@ async function initLiffIdentity(apiBase, liffId) {
       liff.login();
       return null; // page reloads after LINE login redirects back
     }
+    // A session can hand back a token that has already run out — see
+    // lineTokenIsFresh. Identifying with it could only fail.
+    if (!lineTokenIsFresh() && restartLineSession()) return null;
+    watchLineToken();
     // Resolved once per LIFF session rather than on every page load:
     // navigating between the four organizer pages is a full document
     // load each time, and this is a whole network round trip before
@@ -1715,6 +1826,15 @@ function translateApiError(detail) {
 }
 
 const _API_ERROR_PATTERNS = [
+  // Identity. By the time one of these is on screen, restarting the
+  // session has already been tried and couldn't help, so each says what
+  // to do next rather than what went wrong. Before these existed they all
+  // arrived as 「操作失敗（…）」 with the English in brackets — which is
+  // how creating a club "just failed" on the production site.
+  [/^LINE rejected this ID token$/, () => "登入已過期，請關閉頁面後從 LINE 重新開啟"],
+  [/^Missing bearer token$/, () => "尚未登入，請從 LINE 開啟這個頁面"],
+  [/^No player identified for this LINE account yet$/, () => "找不到你的帳號資料，請重新開啟頁面"],
+  [/^Invite links aren't configured on this server$/, () => "邀請連結功能尚未設定，請聯絡開發者"],
   // Membership and permissions.
   [/^Already a member of this (club|season)$/, () => "已經是這裡的成員了"],
   [/^Not a member of this (club|season)$/, () => "不是這裡的成員"],
@@ -1845,6 +1965,13 @@ const _API_ERROR_PATTERNS = [
 ];
 
 async function postJson(apiBase, path, body, method) {
+  // Never send a request already known to fail. The session restarts
+  // instead, and the tap is made again with a token LINE will accept.
+  if (!lineTokenIsFresh() && restartLineSession()) {
+    const error = new Error("登入已過期，正在重新登入…");
+    error.status = 401;
+    throw error;
+  }
   // Whichever control was pressed shows the wait, and stops taking
   // taps, for as long as this takes — see markBusy. Claimed here rather
   // than at the call sites so no write can forget to do it. The page-level
@@ -1867,6 +1994,7 @@ async function postJson(apiBase, path, body, method) {
   }
   if (!res.ok) {
     const raw = data.detail || res.statusText;
+    if (identityLapsed(res.status, raw)) restartLineSession(res.status === 401);
     const error = new Error(translateApiError(raw));
     // Callers that retry need to tell "the server didn't answer" from
     // "the server answered no" — see initLiffIdentity, which must not
@@ -2018,7 +2146,17 @@ async function getJsonSWR(url, onData, options) {
 
   try {
     const res = await fetch(url, options);
-    if (!res.ok) throw new Error(res.statusText);
+    if (!res.ok) {
+      // With a cached copy on hand, a refused read used to be swallowed
+      // below and the old copy kept — so an expired session showed no
+      // error at all, only data that quietly stopped changing. A lapsed
+      // identity restarts the session instead of hiding behind the cache.
+      if (res.status === 401 || res.status === 404) {
+        const data = await res.json().catch(() => ({}));
+        if (identityLapsed(res.status, data.detail)) restartLineSession(res.status === 401);
+      }
+      throw new Error(res.statusText);
+    }
     const fresh = await res.json();
     const changed = JSON.stringify(fresh) !== JSON.stringify(cached);
     writeCache(url, fresh);
@@ -2199,6 +2337,12 @@ function signInFailureHtml(identified) {
  * the mirror of postJson, including clearing the response cache so the
  * next read doesn't paint from a copy of something just deleted. */
 async function deleteJson(apiBase, path) {
+  // Same as postJson: not a request that is already known to fail.
+  if (!lineTokenIsFresh() && restartLineSession()) {
+    const error = new Error("登入已過期，正在重新登入…");
+    error.status = 401;
+    throw error;
+  }
   const done = markBusy(_pressed);
   const settled = beginPendingWrite();
   let res;
@@ -2214,6 +2358,7 @@ async function deleteJson(apiBase, path) {
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     const raw = data.detail || res.statusText;
+    if (identityLapsed(res.status, raw)) restartLineSession(res.status === 401);
     const error = new Error(translateApiError(raw));
     error.status = res.status;
     error.rawMessage = raw;

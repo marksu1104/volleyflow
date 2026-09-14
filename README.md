@@ -30,8 +30,8 @@ waitlist when a game is full, and see their own running balance.
 **An organizer** manages the roster, marks payments received, corrects a
 game's air conditioning setting after the fact, and settles a season.
 Nothing this system sends goes to the group chat: the only push message
-is a private one to the organizer, when a game is short-handed and
-somebody has to go and ask. The club reads the roster in the app.
+is a private one to that club's organizers, when a game is short-handed
+and somebody has to go and ask. The club reads the roster in the app.
 
 **Anyone** can create a club and become its organizer. A club is a full
 tenant: its own roster, seasons, games, and books, invisible to every
@@ -62,6 +62,14 @@ is stateless — all state is in Postgres — so Render's free tier can let
 it sleep between visits without losing anything; a `keep-warm` schedule
 just makes that sleep less noticeable, and doesn't touch the database (a
 `/health` route that never queries it).
+
+That last detail has a consequence worth knowing. Render stays awake,
+but Neon's free tier suspends its compute after a few idle minutes and
+drops every open connection — so the pool used to hand the next request a
+dead one, and the first tap of the evening was a 500. Measured, not
+assumed: seven minutes idle, and the app's engine failed with
+`AdminShutdown` while the same engine with `pool_pre_ping` recovered in
+1.7 seconds. The engine now pings a pooled connection before using it.
 
 ## Design decisions
 
@@ -112,6 +120,15 @@ been — but the *shared link* a visitor actually
 clicks now carries an HMAC token instead of a sequential integer, so
 finding a club by guessing small numbers no longer works from the one
 surface a stranger would try it on.
+
+An HMAC is only as secret as its key, and for a while production's key
+was the development fallback written in this public repository — the code
+fell back to it whenever `INVITE_TOKEN_SECRET` wasn't set, on the stated
+assumption that production set it. Found by signing a token with the
+public key and sending it to the live API, which accepted it. The
+fallback is now allowed under local sign-in only; anywhere else a missing
+key is a 503 and a visibly broken invite screen, which is the right way
+for a security control to fail.
 
 **Settlement closes the books, and the screen stops offering.** Once a
 season is settled every write against it is refused — attendance

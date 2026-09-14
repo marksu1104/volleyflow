@@ -4,6 +4,10 @@ See src/volleyflow/api/invites.py for why a raw club id in the shared
 link was replaced with one of these.
 """
 
+import hashlib
+import hmac
+
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.api.factories import auth_headers, create_club, identify
@@ -71,6 +75,63 @@ def test_a_malformed_token_is_refused_not_500(client: TestClient) -> None:
     for garbage in ["not-a-token", "12345", "", "abc.def", "12.34.56"]:
         response = client.get(f"/invites/{garbage}")
         assert response.status_code == 404, garbage
+
+
+def _signed_with_the_public_fallback(club_id: int) -> str:
+    """A token signed with the key that is written in invites.py, which
+    anybody can read on GitHub."""
+    mac = hmac.new(
+        b"volleyflow-dev-invite-secret", str(club_id).encode(), hashlib.sha256
+    ).hexdigest()[:20]
+    return f"{club_id}.{mac}"
+
+
+def test_a_token_signed_with_the_public_fallback_is_refused(
+    client: TestClient,
+) -> None:
+    """The production finding of 2026-09-15, as a test: a token signed with
+    the fallback in this repository was sent to the live API and accepted,
+    because the real secret had never been set there. With a secret of its
+    own configured, the public one proves nothing."""
+    club = create_club(client)
+
+    response = client.get(f"/invites/{_signed_with_the_public_fallback(club['id'])}")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Invite link not recognised"
+
+
+def test_without_a_secret_invites_refuse_instead_of_using_the_public_one(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Fail closed: a missing secret has to be a visibly broken invite
+    # screen, not a working one that protects nothing.
+    club = create_club(client)
+    monkeypatch.delenv("INVITE_TOKEN_SECRET", raising=False)
+    monkeypatch.delenv("VOLLEYFLOW_DEV_LOGIN", raising=False)
+
+    issued = client.get(f"/clubs/{club['id']}/invite")
+    resolved = client.get(f"/invites/{_signed_with_the_public_fallback(club['id'])}")
+
+    assert issued.status_code == 503
+    assert resolved.status_code == 503, (
+        "and above all, the forged token is not accepted"
+    )
+    assert issued.json()["detail"] == "Invite links aren't configured on this server"
+
+
+def test_local_sign_in_may_use_the_fallback(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A freshly cloned checkout still works without being told a secret —
+    # which is the only thing the fallback was ever for.
+    club = create_club(client)
+    monkeypatch.delenv("INVITE_TOKEN_SECRET", raising=False)
+    monkeypatch.setenv("VOLLEYFLOW_DEV_LOGIN", "1")
+
+    token = client.get(f"/clubs/{club['id']}/invite").json()["token"]
+
+    assert client.get(f"/invites/{token}").status_code == 200
 
 
 def test_two_clubs_get_different_tokens(client: TestClient) -> None:

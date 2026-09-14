@@ -21,15 +21,38 @@ import hashlib
 import hmac
 import os
 
+from fastapi import HTTPException, status
+
+# Local development only. It is in a public repository, so a token signed
+# with it proves nothing to anybody who has read this file.
+_DEV_FALLBACK = "volleyflow-dev-invite-secret"
+
 
 def _secret() -> bytes:
-    # Falls back to a fixed string rather than failing outright, so a
-    # freshly cloned dev environment isn't blocked by a secret nobody
-    # told it about — the token is still unguessable in practice, just
-    # not against someone who has read this file. Production sets
-    # INVITE_TOKEN_SECRET for real.
-    fallback = "volleyflow-dev-invite-secret"
-    return os.environ.get("INVITE_TOKEN_SECRET", fallback).encode()
+    """The key every invite token is signed with.
+
+    Falls back to a fixed string **only** under local sign-in
+    (VOLLEYFLOW_DEV_LOGIN=1, which production never sets), and otherwise
+    refuses with a 503 rather than signing anything.
+
+    It used to fall back everywhere, on the assumption written right here
+    that "production sets INVITE_TOKEN_SECRET for real". Nothing ever
+    checked that, and on 2026-09-15 a token signed with this file's own
+    fallback was sent to the production API and **accepted** — so the
+    whole point of the token, that a club can't be found by anyone who
+    doesn't have its link, had quietly not been true there. Failing
+    closed means a missing secret is a clearly broken invite screen that
+    somebody notices, instead of a working one that protects nothing.
+    """
+    configured = os.environ.get("INVITE_TOKEN_SECRET")
+    if configured:
+        return configured.encode()
+    if os.environ.get("VOLLEYFLOW_DEV_LOGIN") == "1":
+        return _DEV_FALLBACK.encode()
+    raise HTTPException(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "Invite links aren't configured on this server",
+    )
 
 
 def invite_token(club_id: int) -> str:

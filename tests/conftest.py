@@ -48,6 +48,18 @@ def sqlite_engine() -> Iterator[Engine]:
     engine.dispose()
 
 
+@pytest.fixture(autouse=True)
+def _invite_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test gets an invite secret of its own.
+
+    Invite tokens refuse to be signed without one outside local sign-in
+    (see api/invites.py), and that refusal is correct — the fallback key
+    is public. Tests that care about the missing-secret case remove this
+    themselves.
+    """
+    monkeypatch.setenv("INVITE_TOKEN_SECRET", "test-invite-secret")
+
+
 @pytest.fixture
 def db_session(sqlite_engine: Engine) -> Iterator[Session]:
     with Session(sqlite_engine) as session:

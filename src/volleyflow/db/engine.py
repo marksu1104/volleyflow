@@ -45,8 +45,23 @@ def get_engine() -> Engine:
     new TCP+TLS handshake to Neon before a single query could run.
     lru_cache turns this zero-argument function into a lazy singleton —
     still nothing happens at import time, only on the first real call.
+
+    `pool_pre_ping=True` has the pool test each connection with a trivial
+    query before handing it out, and replace it if it has died. Neon's
+    free tier suspends its compute after a few idle minutes and kills
+    every open connection when it does; without the ping the pool handed
+    the next request a dead connection, and the first request after a
+    quiet spell was a 500 — which reached the organizer as 「操作失敗」
+    on the first tap of the evening.
+
+    Measured, not assumed (2026-09-15): after seven idle minutes a query
+    on the old engine failed with `AdminShutdown`, and the same engine
+    with the ping succeeded in 1.7s. Then tests/visual/smoke.js, run
+    against a local API that had sat idle, hit exactly that 500 on its
+    very first request — POST /players/identify. The cost is one small
+    round trip per checkout.
     """
-    return create_engine(database_url())
+    return create_engine(database_url(), pool_pre_ping=True)
 
 
 def get_session() -> Session:
