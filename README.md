@@ -232,7 +232,7 @@ fetch them, and a screenshot can show a name and a balance.
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
-uv run pytest -q               # 433 tests, including a randomised sweep
+uv run pytest -q               # 434 tests, including a randomised sweep
 uv run lint-imports             # billing logic must not import the database
 node --test tests/frontend/*.test.js   # 192 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it

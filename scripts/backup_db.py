@@ -23,6 +23,7 @@ never from here. This only reads; see restore_db.py for writing back.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import sys
 from datetime import date, datetime, time
@@ -47,6 +48,15 @@ def _json_default(value: Any) -> Any:
         return {"__time__": value.isoformat()}
     if isinstance(value, Enum):
         return value.value
+    if isinstance(value, bytes):
+        # A screenshot attached to a problem report — the one binary
+        # column. It went unnoticed until 2026-09-15 because no database
+        # this had ever been pointed at held a screenshot; CI's restore
+        # drill met the first one and the whole backup refused to write.
+        # reset_db.py backs up before it deletes, so on a production
+        # database with a single screenshot in it, emptying it for launch
+        # would have been refused too.
+        return {"__bytes__": base64.b64encode(value).decode("ascii")}
     raise TypeError(f"Don't know how to back up a {type(value).__name__}")
 
 

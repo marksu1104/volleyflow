@@ -14,6 +14,7 @@ See backup_db.py for the dump format this reads.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import sys
 from datetime import date, datetime, time
@@ -37,6 +38,11 @@ def _json_object_hook(obj: dict[str, Any]) -> Any:
         return date.fromisoformat(obj["__date__"])
     if "__time__" in obj:
         return time.fromisoformat(obj["__time__"])
+    # The other half of backup_db's bytes encoding. One without the other
+    # is worse than neither: a backup that writes and then can't be
+    # restored is only discovered on the day it's needed.
+    if "__bytes__" in obj:
+        return base64.b64decode(obj["__bytes__"])
     return obj
 
 

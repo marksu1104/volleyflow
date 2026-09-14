@@ -19,7 +19,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Engine
+from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 import scripts.backup_db as backup_db
@@ -27,13 +27,17 @@ import scripts.restore_db as restore_db
 from volleyflow.db.engine import get_session
 from volleyflow.db.models import (
     AbsenceRow,
+    Base,
     ClubMemberRow,
     ClubRow,
+    DropInRow,
     GameRow,
     LedgerEntryRow,
     PlayerRow,
+    ProblemReportRow,
     SeasonMemberRow,
     SeasonRow,
+    WaitlistEntryRow,
 )
 from volleyflow.ledger import EntryType
 from volleyflow.schedule import GameStatus
@@ -306,3 +310,67 @@ def test_restores_a_real_disaster_on_neon(tmp_path: Path) -> None:
                 synchronize_session=False
             )
             session.commit()
+
+
+def _rows_per_table(engine: Engine) -> dict[str, int]:
+    """Every table the models define, not a hand-picked few. _counts above
+    looks at five — which is exactly how an unseeded table's column type
+    went unchecked until CI found one."""
+    with engine.connect() as conn:
+        return {
+            table.name: conn.execute(select(func.count()).select_from(table)).scalar()
+            or 0
+            for table in Base.metadata.sorted_tables
+        }
+
+
+def test_every_table_survives_a_round_trip_including_binary_data(
+    _use_sqlite: Engine, tmp_path: Path
+) -> None:
+    """Found by CI on 2026-09-15: the backup could not write a database
+    that held a single screenshot. `problem_reports.image` is the one
+    binary column, JSON has no bytes, and nothing encoded them — the dump
+    raised "Don't know how to back up a bytes" and wrote nothing.
+
+    It hid for as long as it did because the round trip above seeds most
+    tables, not all of them, and every database the drill had been run
+    against happened to have no screenshots in it. So this one seeds a row
+    in **every** table and says so: a table added later that nobody gives
+    a row here fails the first assertion, rather than quietly being the
+    next column type nobody checked.
+    """
+    screenshot = bytes(range(256)) * 3  # every byte value, not just ASCII
+    with Session(_use_sqlite) as session:
+        _seed(session)
+        session.add(
+            DropInRow(player_id=1, game_id=1, signed_up_at=datetime(2026, 8, 1))
+        )
+        session.add(
+            WaitlistEntryRow(player_id=1, game_id=1, queued_at=datetime(2026, 8, 2))
+        )
+        session.add(
+            ProblemReportRow(
+                id="shot",
+                message="畫面壞了",
+                image=screenshot,
+                content_type="image/png",
+                created_at=datetime(2026, 9, 15, 1),
+            )
+        )
+        session.commit()
+    before = _rows_per_table(_use_sqlite)
+    empty = [name for name, n in before.items() if n == 0]
+    assert not empty, f"give these tables a row in this test: {empty}"
+
+    dump_path = tmp_path / "backup.json"
+    backup_db.dump(dump_path)
+    with _use_sqlite.begin() as conn:
+        for table in reversed(Base.metadata.sorted_tables):
+            conn.execute(table.delete())
+    restore_db.restore(dump_path)
+
+    assert _rows_per_table(_use_sqlite) == before
+    with Session(_use_sqlite) as session:
+        report = session.get(ProblemReportRow, "shot")
+        assert report is not None
+        assert report.image == screenshot, "the picture comes back byte for byte"
