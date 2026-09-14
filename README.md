@@ -217,15 +217,24 @@ was built to solve a real problem (a 500 nobody could see) and solved it
 by interrupting somebody who could not act on it. The log was the right
 place the whole time.
 
+Problem reports followed three days later, for a sharper reason: each one
+was a push — two with a screenshot — out of the 200 a month the
+short-roster alert depends on, and reports arrive in bursts exactly when
+something is broken. They are stored now and read on a developer-only
+page, `reports.html`, gated by `DEVELOPER_LINE_USER_ID` (unset means
+nobody can read them, never everybody). Screenshots stopped being public
+at the same time: they sat at an open URL only so LINE's servers could
+fetch them, and a screenshot can show a name and a balance.
+
 ## Checks
 
 ```
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
-uv run pytest -q               # 417 tests, including a randomised sweep
+uv run pytest -q               # 433 tests, including a randomised sweep
 uv run lint-imports             # billing logic must not import the database
-node --test tests/frontend/*.test.js   # 175 frontend tests
+node --test tests/frontend/*.test.js   # 192 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
 node tests/visual/smoke.js     # presses every button and reports the dead ones
 node tests/visual/feedback.js  # and how long each one takes to react

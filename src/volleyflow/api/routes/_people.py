@@ -5,6 +5,7 @@ charge. It imports nothing else in this package, which is what keeps
 the dependency one-way.
 """
 
+import os
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import cast
 
@@ -285,3 +286,16 @@ def _today_in_taiwan() -> date:
     would flip the day boundary 8 hours too early every night.
     """
     return datetime.now(UTC).astimezone(_TAIWAN).date()
+
+
+def is_developer(player: PlayerRow) -> bool:
+    """Whether this person may read everybody's problem reports.
+
+    One environment variable, `DEVELOPER_LINE_USER_ID`, rather than a role
+    in the database: the developer need not belong to any club, and a role
+    that can be granted through the app is a role that can be granted by
+    mistake. Unset means nobody — routes/reports.py answers 503 rather than
+    guessing, the same rule the invite secret follows.
+    """
+    developer = os.environ.get("DEVELOPER_LINE_USER_ID")
+    return bool(developer) and player.line_user_id == developer

@@ -2614,22 +2614,35 @@ def test_the_join_pool_shows_who_asked_to_be_a_fixed_member(
 
 
 # --- reporting a problem ---------------------------------------------------
+#
+# Stored for the developer to read, not pushed over LINE (2026-09-15): a
+# push per report, two with a screenshot, came out of the same 200 a month
+# the short-roster alert needs.
+
+_PNG = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
 
 
-def test_a_report_reaches_the_developer_with_its_context(
+def _developer(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """The one person who may read reports — named by an environment
+    variable, not a role anybody could be granted through the app."""
+    dev = identify(client, "Developer")
+    monkeypatch.setenv("DEVELOPER_LINE_USER_ID", dev["token"])
+    return dev
+
+
+def test_a_report_is_kept_with_its_context_for_the_developer(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """What makes a report actionable is who and where, which the page
     attaches rather than asking someone to type."""
-    sent: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        reports.line_client, "push_to_user", lambda uid, text: sent.append((uid, text))
-    )
-    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
+    dev = _developer(client, monkeypatch)
     club = create_club(client, name="晴光館")
     alice = identify(client, "Alice")
 
-    response = client.post(
+    sent = client.post(
         "/reports",
         json={
             "message": "帳務頁的金額不對",
@@ -2639,21 +2652,42 @@ def test_a_report_reaches_the_developer_with_its_context(
         },
         headers=auth_headers(alice["token"]),
     )
+    listed = client.get("/reports", headers=auth_headers(dev["token"])).json()
 
-    assert response.status_code == 204
-    assert len(sent) == 1
-    user_id, text = sent[0]
-    assert user_id == "U-dev"
-    assert "帳務頁的金額不對" in text
-    assert "Alice" in text
-    assert "晴光館" in text
-    assert "organizer-ledger.html" in text
+    assert sent.status_code == 204
+    assert len(listed) == 1
+    report = listed[0]
+    assert report["message"] == "帳務頁的金額不對"
+    assert "Alice" in report["reporter"]
+    assert report["club"] == "晴光館"
+    assert report["page"] == "organizer-ledger.html"
+    assert report["read"] is False
 
 
-def test_an_empty_report_is_refused(
+def test_reporting_sends_nothing_over_line(client: TestClient) -> None:
+    # Not merely "doesn't call it": the module no longer holds the LINE
+    # client at all, so nothing can quietly start pushing again.
+    assert not hasattr(reports, "line_client")
+    assert not hasattr(reports, "push_to_user")
+
+
+def test_a_report_is_accepted_even_when_nobody_can_read_it_yet(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
+    # Sending must not depend on the reading side being configured. A
+    # report kept until somebody sets the variable is better than one
+    # refused and lost.
+    monkeypatch.delenv("DEVELOPER_LINE_USER_ID", raising=False)
+    alice = identify(client, "Alice")
+
+    response = client.post(
+        "/reports", json={"message": "壞掉了"}, headers=auth_headers(alice["token"])
+    )
+
+    assert response.status_code == 204
+
+
+def test_an_empty_report_is_refused(client: TestClient) -> None:
     alice = identify(client, "Alice")
 
     response = client.post(
@@ -2661,26 +2695,6 @@ def test_an_empty_report_is_refused(
     )
 
     assert response.status_code == 400
-
-
-def test_a_report_that_cannot_be_delivered_says_so(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Nothing stores these, so a silent failure would lose the report
-    outright — the reporter has to find out here."""
-
-    def explode(user_id: str, text: str) -> None:
-        raise RuntimeError("LINE quota exhausted")
-
-    monkeypatch.setattr(reports.line_client, "push_to_user", explode)
-    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
-    alice = identify(client, "Alice")
-
-    response = client.post(
-        "/reports", json={"message": "壞掉了"}, headers=auth_headers(alice["token"])
-    )
-
-    assert response.status_code == 502
 
 
 def test_reporting_requires_an_identity(client: TestClient) -> None:
@@ -2691,48 +2705,95 @@ def test_reporting_requires_an_identity(client: TestClient) -> None:
     assert response.status_code == 401
 
 
-def test_a_report_with_a_screenshot_sends_the_picture_too(
+def test_only_the_developer_can_read_reports(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """LINE renders an image by fetching a URL from its own servers, so
-    the picture has to be reachable without any of our credentials."""
-    sent_text: list[str] = []
-    sent_images: list[str] = []
-    monkeypatch.setattr(
-        reports.line_client, "push_to_user", lambda uid, t: sent_text.append(t)
-    )
-    monkeypatch.setattr(
-        reports.line_client,
-        "push_image_to_user",
-        lambda uid, url: sent_images.append(url),
-    )
-    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
+    # Reports name people, clubs and what went wrong for them. An
+    # organizer is not the developer, whatever club they run.
+    _developer(client, monkeypatch)
+    create_club(client)
     alice = identify(client, "Alice")
-    # a 1x1 PNG
-    png = (
-        "data:image/png;base64,"
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+    as_member = client.get("/reports", headers=auth_headers(alice["token"]))
+    as_organizer = client.get("/reports")
+
+    assert as_member.status_code == 403
+    assert as_organizer.status_code == 403
+
+
+def test_reading_reports_fails_closed_when_no_developer_is_set(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Unset means nobody can read them, never that everybody can — the
+    # same rule as the invite secret.
+    monkeypatch.delenv("DEVELOPER_LINE_USER_ID", raising=False)
+    alice = identify(client, "Alice")
+
+    response = client.get("/reports", headers=auth_headers(alice["token"]))
+
+    assert response.status_code == 503
+
+
+def test_reports_can_be_marked_read(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dev = _developer(client, monkeypatch)
+    alice = identify(client, "Alice")
+    client.post(
+        "/reports", json={"message": "一"}, headers=auth_headers(alice["token"])
     )
 
-    response = client.post(
+    marked = client.post("/reports/read", headers=auth_headers(dev["token"]))
+    listed = client.get("/reports", headers=auth_headers(dev["token"])).json()
+
+    assert marked.status_code == 204
+    assert [r["read"] for r in listed] == [True]
+
+
+def test_nobody_but_the_developer_can_mark_reports_read(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _developer(client, monkeypatch)
+    alice = identify(client, "Alice")
+
+    response = client.post("/reports/read", headers=auth_headers(alice["token"]))
+
+    assert response.status_code == 403
+
+
+def test_a_screenshot_is_kept_and_only_the_developer_can_see_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It used to be public, because LINE's servers had to fetch it to draw
+    an image message. Nothing outside the app fetches it now, and a
+    screenshot can show somebody's name and balance."""
+    dev = _developer(client, monkeypatch)
+    alice = identify(client, "Alice")
+    client.post(
         "/reports",
-        json={"message": "畫面壞了", "screenshot": png},
+        json={"message": "畫面壞了", "screenshot": _PNG},
         headers=auth_headers(alice["token"]),
     )
+    report = client.get("/reports", headers=auth_headers(dev["token"])).json()[0]
 
-    assert response.status_code == 204
-    assert len(sent_images) == 1
-    # The image must be readable with no auth at all, the way LINE fetches it.
-    fetched = client.get(sent_images[0].replace("http://testserver", ""))
-    assert fetched.status_code == 200
-    assert fetched.headers["content-type"] == "image/png"
+    as_developer = client.get(
+        f"/reports/{report['id']}/image", headers=auth_headers(dev["token"])
+    )
+    as_reporter = client.get(
+        f"/reports/{report['id']}/image", headers=auth_headers(alice["token"])
+    )
+    anonymous = client.get(
+        f"/reports/{report['id']}/image", headers={"Authorization": ""}
+    )
+
+    assert report["has_screenshot"] is True
+    assert as_developer.status_code == 200
+    assert as_developer.headers["content-type"] == "image/png"
+    assert as_reporter.status_code == 403
+    assert anonymous.status_code == 401
 
 
-def test_a_screenshot_that_is_not_an_image_is_refused(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(reports.line_client, "push_to_user", lambda uid, t: None)
-    monkeypatch.setenv("LINE_ORGANIZER_USER_ID", "U-dev")
+def test_a_screenshot_that_is_not_an_image_is_refused(client: TestClient) -> None:
     alice = identify(client, "Alice")
 
     response = client.post(
@@ -2744,10 +2805,63 @@ def test_a_screenshot_that_is_not_an_image_is_refused(
     assert response.status_code == 400
 
 
-def test_an_unknown_screenshot_token_is_a_404(client: TestClient) -> None:
-    response = client.get("/reports/not-a-real-token/image")
+def test_an_unknown_screenshot_is_a_404(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dev = _developer(client, monkeypatch)
+
+    response = client.get(
+        "/reports/not-a-real-token/image", headers=auth_headers(dev["token"])
+    )
 
     assert response.status_code == 404
+
+
+def test_reports_older_than_ninety_days_are_cleared(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Kept long enough to be read, not forever: a free-tier database
+    # shouldn't quietly fill with screenshots of bugs fixed months ago.
+    from datetime import datetime, timedelta
+
+    from volleyflow.db.models import ProblemReportRow
+
+    dev = _developer(client, monkeypatch)
+    alice = identify(client, "Alice")
+    db_session.add(
+        ProblemReportRow(
+            id="ancient",
+            message="很久以前",
+            reporter="Old",
+            created_at=datetime.now() - timedelta(days=91),
+        )
+    )
+    db_session.commit()
+
+    client.post(
+        "/reports", json={"message": "新的"}, headers=auth_headers(alice["token"])
+    )
+    listed = client.get("/reports", headers=auth_headers(dev["token"])).json()
+
+    assert [r["message"] for r in listed] == ["新的"]
+
+
+def test_identifying_says_whether_you_are_the_developer(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # What the profile page reads to decide whether to show the way in to
+    # the reports at all.
+    dev = identify(client, "Developer")
+    monkeypatch.setenv("DEVELOPER_LINE_USER_ID", dev["token"])
+
+    again = client.post(
+        "/players/identify",
+        json={"id_token": dev["token"], "display_name": "Developer"},
+    ).json()
+    someone = identify(client, "Someone")
+
+    assert again["is_developer"] is True
+    assert someone["is_developer"] is False
 
 
 def test_signing_up_a_group_charges_each_of_them(client: TestClient) -> None:

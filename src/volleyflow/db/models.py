@@ -362,27 +362,35 @@ class WaitlistEntryRow(Base):
 
 
 class ProblemReportRow(Base):
-    """A screenshot attached to a problem report.
+    """A problem report somebody sent, kept for the developer to read.
 
-    Only the image is kept, and only so LINE has somewhere public to
-    fetch it from: an image message has to cite an HTTPS URL, and this
-    project has no file storage. The report's words go straight to the
-    developer's chat and aren't stored — see routes.report_a_problem for
-    why nothing here is a queue anyone has to read.
+    Stored since 2026-09-15. Before that the words went straight to the
+    developer's LINE chat and only a screenshot was kept here, just long
+    enough for LINE's servers to fetch it — a push per report, two with a
+    picture, out of the same 200 a month the short-roster alert needs.
+    See routes/reports.py.
 
-    Rows are deleted after a month by the next report that comes in, so
-    a free-tier database doesn't slowly fill with screenshots nobody
-    will look at again.
+    Who sent it, from which club and screen, are text rather than foreign
+    keys: a report is a snapshot of what somebody saw, and it must neither
+    block deleting the club it mentions nor change if that club is later
+    renamed. Rows go after 90 days.
     """
 
     __tablename__ = "problem_reports"
 
     id: Mapped[str] = mapped_column(primary_key=True)
-    """An unguessable token, because the image endpoint has to be public
-    for LINE's servers to fetch it."""
-    image: Mapped[bytes]
-    content_type: Mapped[str]
+    """Random, so holding one report's id says nothing about any other."""
+    message: Mapped[str | None] = mapped_column(default=None)
+    """NULL only on rows from before reports were stored — screenshots
+    kept for LINE to fetch, with no words attached. Never listed."""
+    reporter: Mapped[str | None] = mapped_column(default=None)
+    club: Mapped[str | None] = mapped_column(default=None)
+    page: Mapped[str | None] = mapped_column(default=None)
+    user_agent: Mapped[str | None] = mapped_column(default=None)
+    image: Mapped[bytes | None] = mapped_column(default=None)
+    content_type: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime]
+    read_at: Mapped[datetime | None] = mapped_column(default=None)
 
 
 class LedgerEntryRow(Base):

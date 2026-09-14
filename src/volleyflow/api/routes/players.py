@@ -16,6 +16,7 @@ from volleyflow.api.routes._people import (
     _may_edit_accountless_player,
     _unique_display_name,
     get_current_player,
+    is_developer,
 )
 from volleyflow.api.schemas import (
     GenderUpdate,
@@ -74,6 +75,7 @@ def identify_player(
             name=player.name,
             avatar_url=player.avatar_url,
             gender=_gender(player.gender),
+            is_developer=is_developer(player),
         )
 
     name = _unique_display_name(db, payload.display_name)
@@ -88,6 +90,7 @@ def identify_player(
         name=new_player.name,
         avatar_url=new_player.avatar_url,
         gender=_gender(new_player.gender),
+        is_developer=is_developer(new_player),
     )
 
 

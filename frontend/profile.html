@@ -73,7 +73,7 @@
       <textarea id="report-text" class="control" rows="4"
         placeholder="哪個畫面、按了什麼、發生什麼事？例如：帳務頁按「已收」之後金額沒有變。"></textarea>
       <p class="hint">
-        身分、頁面與裝置資訊會自動附上，無須自行填寫。送出後將直接傳送給開發者。
+        身分、頁面與裝置資訊會自動附上，無須自行填寫。回報會保存在網站上，由開發者查看。
       </p>
     </div>
     <div class="field">
@@ -82,6 +82,11 @@
       <img id="report-preview" alt="" hidden>
     </div>
     <button type="button" class="btn btn-primary" id="report-btn" onclick="sendReport()">送出回報</button>
+
+    <div id="dev-reports" hidden>
+      <div class="section-label">開發者</div>
+      <a class="btn btn-quiet" href="reports.html" id="dev-reports-link">查看問題回報</a>
+    </div>
   </div>
 
   <div id="no-liff" class="no-liff" hidden></div>
@@ -108,8 +113,30 @@
     identityEl.textContent = `已用 LINE 身分登入：${identified.name}`;
     document.getElementById("content").hidden = false;
     renderProfile();
+    if (me.is_developer) showDeveloperReports();
     await renderClubs();
   })();
+
+  /** The way in to the problem reports, for the developer only — the
+   * server names them in identify, and checks again on every report
+   * request, so this only decides whether a link is drawn.
+   *
+   * The unread count is the whole signal now: reports stopped being
+   * pushed over LINE on 2026-09-15, to keep the free tier's 200 monthly
+   * messages for the short-roster alert. */
+  async function showDeveloperReports() {
+    document.getElementById("dev-reports").hidden = false;
+    try {
+      const res = await fetch(`${API_BASE}/reports`, { headers: authHeader() });
+      if (!res.ok) return;
+      const unread = (await res.json()).filter((r) => !r.read).length;
+      if (unread) {
+        document.getElementById("dev-reports-link").textContent = `查看問題回報（${unread} 則未讀）`;
+      }
+    } catch (e) {
+      // The link still works without a count.
+    }
+  }
 
   function renderProfile() {
     document.getElementById("avatar-lg").textContent = me.name.slice(0, 1);

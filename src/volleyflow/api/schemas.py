@@ -382,6 +382,10 @@ class PlayerIdentifyOut(BaseModel):
     routes._unique_display_name."""
     avatar_url: str | None = None
     gender: Gender | None = None
+    is_developer: bool = False
+    """Whether this person may read everybody's problem reports — what the
+    profile page reads to decide whether to show the way in at all. The
+    server checks again on every report request; this only hides a link."""
 
 
 class GuestOut(BaseModel):
@@ -536,6 +540,22 @@ class ProblemReport(BaseModel):
     """A data URL (`data:image/jpeg;base64,...`). The page shrinks the
     picture before sending — a raw phone screenshot is several megabytes,
     and a bad connection is exactly the situation someone reports from."""
+
+
+class ProblemReportOut(BaseModel):
+    """One stored problem report, as the developer reads it."""
+
+    id: str
+    message: str
+    reporter: str
+    club: str | None
+    page: str | None
+    user_agent: str | None
+    created_at: datetime
+    has_screenshot: bool
+    """Fetched separately, with the developer's credentials — see
+    routes/reports.problem_report_image."""
+    read: bool
 
 
 class PlayerBalanceOut(BaseModel):

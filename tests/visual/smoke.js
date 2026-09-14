@@ -35,6 +35,11 @@ const PAGES = [
   "organizer-ledger.html",
   "organizer-settings.html",
   "profile.html",
+  // The developer's report reader. Without DEVELOPER_LINE_USER_ID set on
+  // the local API it shows its "not configured" state — which is itself
+  // worth pressing: it must load cleanly and offer nothing but the way
+  // back.
+  "reports.html",
   "organizer-members.html",
 ];
 
