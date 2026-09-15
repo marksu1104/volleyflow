@@ -91,7 +91,7 @@ def test_concurrent_signups_never_exceed_capacity(
         },
     )
     client.headers.update({"Authorization": f"Bearer {organizer_token}"})
-    club = client.post("/clubs", json={"name": f"{_TEST_PLAYER_PREFIX}Club"}).json()
+    club = client.post("/clubs", json={"name": "concurrency 1"}).json()
     club_id = club["id"]
 
     create = client.post(
@@ -166,9 +166,7 @@ def test_adding_the_same_member_twice_at_once_is_refused_not_a_crash(
         },
     )
     client.headers.update({"Authorization": f"Bearer {organizer_token}"})
-    club_id = client.post(
-        "/clubs", json={"name": f"{_TEST_PLAYER_PREFIX}Club2"}
-    ).json()["id"]
+    club_id = client.post("/clubs", json={"name": "concurrency 2"}).json()["id"]
     season_id = client.post(
         f"/clubs/{club_id}/seasons",
         json={
