@@ -359,6 +359,12 @@ class WaitlistEntryRow(Base):
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     queued_at: Mapped[datetime]
+    brought_by_player_id: Mapped[int | None] = mapped_column(
+        ForeignKey("players.id"), default=None
+    )
+    """Who queued this person, when it wasn't themselves. Carried onto the
+    drop-in when they're promoted, so the member who brought a guest can
+    still take them off either list."""
 
 
 class ProblemReportRow(Base):

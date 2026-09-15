@@ -379,7 +379,13 @@ def test_get_season_reflects_absences_signups_and_waitlist(
         }
     ]
     assert game["waitlist_entries"] == [
-        {"id": carol_signup.json()["id"], "player_name": "Carol", "gender": None}
+        {
+            "id": carol_signup.json()["id"],
+            "player_name": "Carol",
+            "gender": None,
+            # Queued by the organizer, who may take her back out.
+            "signed_up_by_me": True,
+        }
     ]
 
 

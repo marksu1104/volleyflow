@@ -66,8 +66,9 @@
   </div>
 
   <div id="create-season-form" class="settings-form" hidden>
+    <button type="button" id="cancel-next-season" class="btn btn-quiet" style="margin-bottom:12px" hidden onclick="cancelNextSeason()">‹ 回到本季設定</button>
     <div class="empty-state" style="text-align:left">
-      <h3>建立第一季</h3>
+      <h3 id="create-season-title">建立第一季</h3>
       <p>一季 = 一段時間內的一組場次 + 一筆場地費 + 一份固定成員名單。填完下面幾格，系統會把場地費平均分攤成每人每場的金額，並在開季時就把季費記到每個人的帳上。</p>
     </div>
 
@@ -188,7 +189,12 @@
   </div>
 
   <div id="settings-form" class="settings-form" hidden>
-    <div class="section-label" style="margin-top:0">本季設定</div>
+    <div class="set-row" style="cursor:pointer" onclick="startNextSeason()">
+      <span class="set-label">開新一季<span class="set-sub">沿用這一季的設定和成員，日期接在最後一場之後</span></span>
+      <span class="set-go">›</span>
+    </div>
+
+    <div class="section-label">本季設定</div>
 
     <div class="field">
       <label for="f-cost">場地費總額</label>
@@ -347,7 +353,7 @@
       document.getElementById("no-club-note").hidden = hasClub;
       document.getElementById("club-name-section").hidden = !hasClub;
       if (hasClub) fillClubName();
-      document.getElementById("create-season-form").hidden = !hasClub || !!id;
+      document.getElementById("create-season-form").hidden = (!hasClub || !!id) && !creatingNextSeason;
       // Deliberately not revealed here: loadSettings shows it once the
       // season is in hand. Showing it now put an entirely blank form on
       // screen — every field empty — for as long as the fetch took,
@@ -379,6 +385,9 @@
   let extraNames = [];
   let pickedIds = new Set();
   const wizardAcDates = new Set();
+  // Set while 開新一季 is open: who to tick in step 3, and a flag that keeps a late repaint from hiding the wizard.
+  let nextSeasonMemberIds = null;
+  let creatingNextSeason = false;
   let clubRoster = [];
 
   document.getElementById("create-season-form").addEventListener("click", (e) => {
@@ -405,6 +414,50 @@
     if (step === 3) loadClubRoster();
     renderWizard();
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function startNextSeason() {
+    const s = currentSeason;
+    if (!s) return;
+    const set = (id, value) => (document.getElementById(id).value = value);
+    set("c-cost", s.total_venue_cost);
+    set("c-ac", s.ac_surcharge);
+    set("c-capacity", s.capacity);
+    set("c-min-roster", s.minimum_roster);
+    set("c-start-time", s.game_start_time ? s.game_start_time.slice(0, 5) : "");
+    set("c-end-time", s.game_end_time ? s.game_end_time.slice(0, 5) : "");
+    set("c-location", s.location || "");
+    set("c-deadline", s.change_deadline_days === null ? "" : String(s.change_deadline_days));
+    wizardDates = [];
+    wizardAcDates.clear();
+    extraNames = [];
+    clubRoster = [];
+    nextSeasonMemberIds = new Set(s.members.map((m) => m.id));
+    creatingNextSeason = true;
+    const dates = s.games.map((g) => g.date).sort();
+    if (dates.length) {
+      const next = new Date(dates[dates.length - 1] + "T00:00:00");
+      set("g-weekday", String(next.getDay()));
+      next.setDate(next.getDate() + 1);
+      set("g-start", dateKey(next));
+      set("g-weeks", String(dates.length));
+      generateDates();
+    }
+    document.getElementById("create-season-title").textContent = "開新一季";
+    document.getElementById("cancel-next-season").hidden = false;
+    document.getElementById("settings-form").hidden = true;
+    document.getElementById("create-season-form").hidden = false;
+    showWizardStep(1);
+    window.scrollTo({ top: 0 });
+  }
+
+  function cancelNextSeason() {
+    creatingNextSeason = false;
+    nextSeasonMemberIds = null;
+    document.getElementById("create-season-title").textContent = "建立第一季";
+    document.getElementById("cancel-next-season").hidden = true;
+    document.getElementById("create-season-form").hidden = true;
+    document.getElementById("settings-form").hidden = false;
   }
 
   function generateDates() {
@@ -480,7 +533,9 @@
     clubRoster = await fetchClubMembers(API_BASE, currentClubId());
     // The organizer is nearly always playing too — pre-check everyone
     // so the common case is "confirm", not "tick 18 boxes".
-    pickedIds = new Set(clubRoster.map((m) => m.id));
+    pickedIds = new Set(
+      clubRoster.filter((m) => !nextSeasonMemberIds || nextSeasonMemberIds.has(m.id)).map((m) => m.id)
+    );
     renderWizard();
   }
 
@@ -662,7 +717,7 @@
           fillForm(season);
           renderGames(season);
           document.getElementById("page-state").innerHTML = "";
-          document.getElementById("settings-form").hidden = false;
+          document.getElementById("settings-form").hidden = creatingNextSeason;
         },
         { headers: authHeader() }
       );

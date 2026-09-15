@@ -681,7 +681,13 @@ def get_season(
     ):
         waitlist_by_game[entry.game_id].append(
             DropInSummary(
-                id=entry.id, player_name=player.name, gender=_gender(player.gender)
+                id=entry.id,
+                player_name=player.name,
+                gender=_gender(player.gender),
+                signed_up_by_me=(
+                    entry.player_id == current_player.id
+                    or entry.brought_by_player_id == current_player.id
+                ),
             )
         )
 

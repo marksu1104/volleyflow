@@ -144,3 +144,8 @@ test("deleteJson exposes both the translated and the raw message", async () => {
     }
   );
 });
+
+test("somebody picked from the list who has left the club is named, in Chinese", () => {
+  const out = translateApiError("朋友丙 is no longer in this club");
+  assert.equal(out, "「朋友丙」已經不在這個球隊了，請直接輸入名字報名");
+});

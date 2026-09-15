@@ -1085,7 +1085,7 @@ function renderGameDetail(container, season, game, options) {
           (opts.onPromoteFromWaitlist
             ? `<button type="button" class="mini-action" data-promote-waitlist="${w.id}">遞補</button>`
             : "") +
-          (opts.onLeaveWaitlist
+          (opts.onLeaveWaitlist && (!opts.canLeaveWaitlist || opts.canLeaveWaitlist(w))
             ? `<button type="button" class="mini-action danger" data-remove-waitlist="${w.id}">移除</button>`
             : ""),
       }) + (opts.onPromoteFromWaitlist ? swapOutPicker(w) : "")
@@ -1875,6 +1875,10 @@ const _API_ERROR_PATTERNS = [
   [/^Player is not a member of this club$/, () => "這個人不是球隊成員"],
   [/^Player is not a fixed member of this game's season$/, () => "這個人不是本季的固定成員"],
   [/^You are not a member of this club$/, () => "你不是這個球隊的成員"],
+  [
+    /^(.+?) is no longer in this club$/,
+    (m) => `「${m[1]}」已經不在這個球隊了，請直接輸入名字報名`,
+  ],
   [/^Only this club's organizer can do that$/, () => "只有主揪可以這麼做"],
   [/^This is the club's only organizer$/, () => "這是球隊唯一的主揪，不能移除"],
   [

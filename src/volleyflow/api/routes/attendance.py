@@ -372,7 +372,14 @@ def sign_up(
             status="confirmed", id=drop_in.id, player_id=player.id, game_id=game.id
         )
 
-    entry = WaitlistEntryRow(player_id=player.id, game_id=game.id, queued_at=_now())
+    entry = WaitlistEntryRow(
+        player_id=player.id,
+        game_id=game.id,
+        queued_at=_now(),
+        brought_by_player_id=None
+        if player.id == current_player.id
+        else current_player.id,
+    )
     db.add(entry)
     db.commit()
     db.refresh(entry)
@@ -451,7 +458,15 @@ def _sign_up_each(
             )
         else:
             player = _get_player_or_404(db, entry.player_id)
-            _require_club_access(db, season.club_id, player)
+            membership = db.get(
+                ClubMemberRow, {"club_id": season.club_id, "player_id": player.id}
+            )
+            if membership is None:
+                # The name as sent: an id alone mustn't reveal anyone's name.
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"{entry.player_name.strip()} is no longer in this club",
+                )
             if player.gender is None and entry.gender is not None:
                 player.gender = entry.gender
         _require_may_sign_up(db, season.club_id, current_player, player)
@@ -483,7 +498,10 @@ def _sign_up_each(
             )
         else:
             wait = WaitlistEntryRow(
-                player_id=player.id, game_id=game.id, queued_at=_now()
+                player_id=player.id,
+                game_id=game.id,
+                queued_at=_now(),
+                brought_by_player_id=brought_by,
             )
             db.add(wait)
             db.flush()
@@ -525,7 +543,9 @@ def leave_waitlist(
     game = _get_game_or_404(db, entry.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
-    _require_self_or_organizer(db, season.club_id, current_player, entry.player_id)
+    # Whoever queued a guest may take them back out, the same as a drop-in.
+    if entry.brought_by_player_id != current_player.id:
+        _require_self_or_organizer(db, season.club_id, current_player, entry.player_id)
     _require_season_open(season)
     _require_within_change_deadline(db, game, season, current_player)
 
@@ -592,6 +612,7 @@ def promote_from_waitlist(
                 player_id=replaced.player_id,
                 game_id=game.id,
                 queued_at=replaced.signed_up_at,
+                brought_by_player_id=replaced.brought_by_player_id,
             )
         )
         db.flush()

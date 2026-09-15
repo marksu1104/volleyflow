@@ -900,6 +900,7 @@
       // viewer happens to hold elsewhere in the club. The server
       // enforces the same rule — see _require_self_or_organizer.
       canRemoveDropIn: (d) => d.signed_up_by_me === true,
+      canLeaveWaitlist: (w) => w.signed_up_by_me === true,
     });
   }
 
@@ -1169,7 +1170,7 @@
     const slots = Math.max(0, currentSeason.capacity - playing);
     const confirmed = Math.min(suPeople.length, slots);
     const waiting = suPeople.length - confirmed;
-    const share = Number(currentSeason.share_per_game);
+    const share = Number(suGame.share ?? currentSeason.share_per_game);
 
     // The panel is rebuilt each time so its candidate list excludes
     // whoever has just been added.
@@ -1208,8 +1209,10 @@
       : '<div class="empty" style="padding:14px 0">尚未加入任何人</div>';
 
     document.getElementById("su-amt").textContent = "$" + confirmed * share;
-    document.getElementById("su-breakdown").textContent =
-      `${confirmed} 位 × $${share}` + (waiting ? `（候補 ${waiting} 位不計）` : "");
+    // A queued place costs nothing until it becomes a slot, so say what it will cost then.
+    document.getElementById("su-breakdown").textContent = waiting
+      ? `${confirmed} 位 × $${share}；候補 ${waiting} 位遞補上才收，每位 $${share}`
+      : `${confirmed} 位 × $${share}`;
     const go = document.getElementById("su-go");
     go.textContent = confirmed === 0 ? "加入候補" : "確認報名";
     go.disabled = suPeople.length === 0;
@@ -1277,12 +1280,13 @@
               id: -1,
               player_name: p.player_name,
               gender: p.gender || null,
+              signed_up_by_me: true,
             });
           }
         }
       },
       () => postJson(API_BASE, `/games/${gameId}/drop-ins`, { people }),
-      "報名失敗：",
+      "報名沒有送出：",
       (batch, season) => {
         const game = season.games.find((g) => g.id === gameId);
         if (!game) return;

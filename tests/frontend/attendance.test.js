@@ -499,6 +499,19 @@ test("遞補 and 移除 are separate ids on the same queued person", () => {
   assert.doesNotMatch(el.innerHTML, /data-remove-drop-in="300"/);
 });
 
+test("a queued person gets 移除 only where the viewer may take them out", () => {
+  const { season, game } = fixture();
+  const el = makeElement();
+
+  renderGameDetail(el, season, game, {
+    viewerName: "周安",
+    onLeaveWaitlist() {},
+    canLeaveWaitlist: (w) => w.id !== 300,
+  });
+
+  assert.doesNotMatch(el.innerHTML, /data-remove-waitlist="300"/);
+});
+
 // acPill and isGameFull moved out of member.html so the organizer's
 // sheet reports the same facts about the same game.
 test("the air conditioning surcharge is per person, and only when it ran", () => {

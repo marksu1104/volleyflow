@@ -228,6 +228,12 @@ def list_my_guests(
         .join(DropInRow, DropInRow.player_id == PlayerRow.id)
         .join(GameRow, GameRow.id == DropInRow.game_id)
         .join(SeasonRow, SeasonRow.id == GameRow.season_id)
+        # Only people still in the club: picking a removed one can only fail.
+        .join(
+            ClubMemberRow,
+            (ClubMemberRow.player_id == PlayerRow.id)
+            & (ClubMemberRow.club_id == club_id),
+        )
         .filter(
             SeasonRow.club_id == club_id,
             DropInRow.brought_by_player_id == current_player.id,

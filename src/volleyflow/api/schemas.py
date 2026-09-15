@@ -428,6 +428,8 @@ class DropInSummary(BaseModel):
     """The drop-in or waitlist entry id — pass this to the cancel endpoint."""
     player_name: str
     gender: Gender | None = None
+    signed_up_by_me: bool = False
+    """Themselves, or a guest they queued — whether they may take it back."""
 
 
 class AbsenceDetailOut(BaseModel):

@@ -335,6 +335,7 @@ def _give_back_queue_place(db: Session, drop_in: DropInRow) -> None:
             player_id=drop_in.player_id,
             game_id=drop_in.game_id,
             queued_at=drop_in.from_waitlist_at,
+            brought_by_player_id=drop_in.brought_by_player_id,
         )
     )
     db.flush()
@@ -392,6 +393,7 @@ def _release_whoever_is_covering(
             player_id=releasing.player_id,
             game_id=absence.game_id,
             queued_at=releasing.signed_up_at,
+            brought_by_player_id=releasing.brought_by_player_id,
         )
     )
     db.flush()
@@ -448,6 +450,7 @@ def _make_room_for_substitute(
             player_id=displaced.player_id,
             game_id=game.id,
             queued_at=displaced.signed_up_at,
+            brought_by_player_id=displaced.brought_by_player_id,
         )
     )
     db.flush()
@@ -504,6 +507,7 @@ def _promote_entry(db: Session, entry: WaitlistEntryRow) -> DropInRow:
         # Where they were in the queue, kept so the place can be given
         # back if this slot is taken off them again.
         from_waitlist_at=entry.queued_at,
+        brought_by_player_id=entry.brought_by_player_id,
     )
     db.add(drop_in)
     db.delete(entry)
