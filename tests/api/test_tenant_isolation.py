@@ -83,6 +83,7 @@ def _attempts(a: dict[str, Any], stranger_id: int) -> list[tuple[str, str, Any]]
     c, s, g, m = a["club"], a["season"], a["game"], a["member"]
     return [
         ("GET", f"/clubs/{c}", None),
+        ("PATCH", f"/clubs/{c}", {"name": "外人改名"}),
         ("GET", f"/clubs/{c}/invite", None),
         ("GET", f"/clubs/{c}/my-guests", None),
         ("GET", f"/clubs/{c}/members", None),

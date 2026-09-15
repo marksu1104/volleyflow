@@ -27,7 +27,7 @@
   <div class="app-bar">
     <span class="app-bar-left">
       <button type="button" id="club-chip" class="club-chip">
-        <i class="club-dot" id="club-dot">-</i><span id="club-chip-name">選擇球隊</span><span class="caret">▾</span>
+        <i class="club-dot" id="club-dot">-</i><span id="club-chip-name" class="club-chip-name">選擇球隊</span><span class="caret">▾</span>
       </button>
     </span>
     <button type="button" class="brand" onclick="location.href='member.html'">VolleyFlow</button>
@@ -427,6 +427,8 @@
     await inviteResolved;
     if (pendingInviteClubId && myClubs.some((c) => String(c.id) === String(pendingInviteClubId))) {
       pendingInviteClubId = null;
+      // Already in it: open the club, not an invite screen that could only say 找不到.
+      pendingInviteToken = null;
     }
     // The one club that can be listed without being mine: the invite this
     // load is holding. `allClubs` was always exactly `myClubs.slice()`
@@ -666,6 +668,10 @@
   async function createClub() {
     const name = prompt("球隊名稱？");
     if (!name || !name.trim()) return;
+    if (name.trim().length > CLUB_NAME_MAX) {
+      toast(`球隊名稱最多 ${CLUB_NAME_MAX} 個字`);
+      return;
+    }
     try {
       const club = await postJson(API_BASE, "/clubs", { name: name.trim() });
       localStorage.setItem(CLUB_STORAGE_KEY, String(club.id));
@@ -861,7 +867,7 @@
       document.getElementById("month-cal"),
       currentSeason.games,
       selectGame,
-      { stateOf: calendarState, selectedId: selectedGameId }
+      { stateOf: calendarState, selectedId: selectedGameId, viewKey: currentSeason.id }
     );
   }
 

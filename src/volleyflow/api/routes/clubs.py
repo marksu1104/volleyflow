@@ -29,6 +29,7 @@ from volleyflow.api.schemas import (
     ClubJoin,
     ClubMemberOut,
     ClubOut,
+    ClubUpdate,
     GuestOut,
     InviteOut,
     MemberOut,
@@ -75,6 +76,20 @@ def create_club(
     db.commit()
     db.refresh(club)
     return ClubOut(id=club.id, name=club.name)
+
+
+@router.patch("/clubs/{club_id}", response_model=ClubOut)
+def rename_club(
+    club_id: int,
+    payload: ClubUpdate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> ClubOut:
+    club = _get_club_or_404(db, club_id)
+    _require_organizer(db, club_id, current_player)
+    club.name = payload.name
+    db.commit()
+    return ClubOut(id=club.id, name=club.name, role="organizer")
 
 
 @router.get("/clubs", response_model=list[ClubOut])

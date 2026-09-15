@@ -280,7 +280,7 @@
   function acSwitch(season, game) {
     if (!(Number(season.ac_surcharge) > 0)) return "";
     const on = game.air_conditioned;
-    const each = Math.round(Number(season.ac_surcharge) / season.members.length);
+    const each = acExtraEach(season, game);
     return `
       <div class="ac-switch">
         <span class="lbl">冷氣</span>
@@ -296,7 +296,7 @@
 
   async function toggleAirConditioning(gameId, on) {
     if (on === currentSeason.games.find((g) => g.id === gameId).air_conditioned) return;
-    const each = Math.round(Number(currentSeason.ac_surcharge) / currentSeason.members.length);
+    const each = acExtraEach(currentSeason, currentSeason.games.find((g) => g.id === gameId));
     const wording = on
       ? `要把這場改成「有開冷氣」嗎？每位成員這一場會多 $${each}。`
       : `要把這場改成「沒開冷氣」嗎？每位成員這一場會退 $${each}。`;
@@ -323,7 +323,7 @@
       document.getElementById("month-cal"),
       currentSeason.games,
       selectGame,
-      { stateOf: calendarState, selectedId: selectedGameId, awayLabel: "已取消" }
+      { stateOf: calendarState, selectedId: selectedGameId, awayLabel: "已取消", viewKey: currentSeason.id }
     );
   }
 

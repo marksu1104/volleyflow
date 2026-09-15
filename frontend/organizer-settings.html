@@ -53,6 +53,18 @@
     尚未加入任何球隊——請先到<a href="member.html">會員頁</a>用 LINE 開啟，建立或加入一個球隊。
   </p>
 
+  <div id="club-name-section" class="settings-form" hidden>
+    <div class="section-label" style="margin-top:0">球隊</div>
+    <div class="field">
+      <label for="club-name">球隊名稱</label>
+      <div style="display:flex; gap:8px">
+        <input id="club-name" class="control" style="flex:1" type="text" maxlength="20" autocomplete="off">
+        <button type="button" class="btn btn-quiet" onclick="renameClub(this)">儲存名稱</button>
+      </div>
+      <span class="hint">最多 20 個字，會顯示在每位成員畫面的左上角。</span>
+    </div>
+  </div>
+
   <div id="create-season-form" class="settings-form" hidden>
     <div class="empty-state" style="text-align:left">
       <h3>建立第一季</h3>
@@ -75,7 +87,7 @@
       <div class="field" style="margin-bottom:13px">
         <label for="c-ac">冷氣一場多少錢</label>
         <input id="c-ac" class="control" type="number" step="1" min="0" inputmode="numeric" placeholder="沒有另外收就留 0">
-        <span class="hint">跟場地費總額同一個基準（優惠後）。之後每一場都可以個別改開或關。</span>
+        <span class="hint">跟場地費總額同一個基準（優惠後）。下一步可以勾選哪幾天開冷氣，開季後每一場也都還能個別改。</span>
       </div>
 
       <div class="field-pair" style="margin-bottom:13px">
@@ -189,7 +201,7 @@
       <input id="f-ac" class="control" type="number" step="1" min="0" placeholder="沒有另外收就留 0">
       <span class="hint">
         跟場地費總額同一個基準：場地有給優惠的話，這裡填的也是優惠後的金額。
-        有開冷氣的場次每人會多分攤這筆的 1/人數。
+        有開冷氣的場次每人會多分攤這筆的 1/人數上限。
       </span>
     </div>
 
@@ -333,6 +345,8 @@
       const hasClub = !!currentClubId();
       document.getElementById("club-picker").hidden = !hasClub;
       document.getElementById("no-club-note").hidden = hasClub;
+      document.getElementById("club-name-section").hidden = !hasClub;
+      if (hasClub) fillClubName();
       document.getElementById("create-season-form").hidden = !hasClub || !!id;
       // Deliberately not revealed here: loadSettings shows it once the
       // season is in hand. Showing it now put an entirely blank form on
@@ -364,6 +378,7 @@
   let wizardDates = [];
   let extraNames = [];
   let pickedIds = new Set();
+  const wizardAcDates = new Set();
   let clubRoster = [];
 
   document.getElementById("create-season-form").addEventListener("click", (e) => {
@@ -417,6 +432,19 @@
 
   function removeDate(iso) {
     wizardDates = wizardDates.filter((d) => d !== iso);
+    wizardAcDates.delete(iso);
+    renderWizard();
+  }
+
+  function toggleAcDate(iso) {
+    if (wizardAcDates.has(iso)) wizardAcDates.delete(iso);
+    else wizardAcDates.add(iso);
+    renderWizard();
+  }
+
+  function setAllAc(on) {
+    wizardAcDates.clear();
+    if (on) wizardDates.forEach((d) => wizardAcDates.add(d));
     renderWizard();
   }
 
@@ -462,22 +490,30 @@
 
   function renderWizard() {
     // step 2: date chips + running total
+    const acSurcharge = Number(document.getElementById("c-ac").value) || 0;
+    const acOn = (d) => acSurcharge > 0 && wizardAcDates.has(d);
+    const acToggle = (d) =>
+      acSurcharge > 0
+        ? `<button type="button" class="chip-ac${acOn(d) ? " on" : ""}" aria-pressed="${acOn(d)}" onclick="toggleAcDate('${d}')">冷氣</button>`
+        : "";
+    const anyOff = wizardDates.some((d) => !acOn(d));
+    const acAll =
+      acSurcharge > 0 && wizardDates.length
+        ? `<span class="chip add" onclick="setAllAc(${anyOff})">${anyOff ? "全部開冷氣" : "全部不開"}</span>`
+        : "";
     document.getElementById("date-chips").innerHTML =
       wizardDates
         .map(
-          (d) => `<span class="chip">${describeDate(d).label}<button type="button" aria-label="移除" onclick="removeDate('${d}')">✕</button></span>`
+          (d) => `<span class="chip">${describeDate(d).label}${acToggle(d)}<button type="button" aria-label="移除" onclick="removeDate('${d}')">✕</button></span>`
         )
-        .join("") + '<span class="chip add" onclick="addOneOffDate()">＋ 新增日期</span>';
+        .join("") + '<span class="chip add" onclick="addOneOffDate()">＋ 新增日期</span>' + acAll;
 
     const cost = Number(document.getElementById("c-cost").value) || 0;
     const memberCount = selectedNames().length;
-    // Divided by the capacity, not by how many names are picked — the
-    // price is what one slot costs and doesn't move as the roster fills.
-    // A new season starts with no cooled nights (the organizer flips
-    // them per game), so `plain` is the figure to quote.
+    // Divided by the capacity, not by how many names are picked.
     const capacity = Number(document.getElementById("c-capacity").value) || 0;
-    const acSurcharge = Number(document.getElementById("c-ac").value) || 0;
-    const prices = previewSharePerGame(cost, wizardDates.length, capacity, acSurcharge, 0);
+    const cooledCount = wizardDates.filter(acOn).length;
+    const prices = previewSharePerGame(cost, wizardDates.length, capacity, acSurcharge, cooledCount);
     const share = prices ? prices.plain : null;
 
     const summary = document.getElementById("gen-summary");
@@ -520,15 +556,24 @@
       );
       return;
     }
-    const seasonFee = share * wizardDates.length;
+    if (!prices) {
+      preview.innerHTML = emptyStateHtml(
+        "冷氣費比場地費還多",
+        `勾了 ${cooledCount} 場冷氣、每場 $${acSurcharge}，加起來超過場地費總額 $${cost}。請檢查金額或少勾幾場。`
+      );
+      return;
+    }
+    const seasonFee = prices.plain * (wizardDates.length - cooledCount) + prices.cooled * cooledCount;
     preview.innerHTML = `
       <div class="balance" style="margin-bottom:8px">
         <span class="balance-label">每人季費</span>
         <span class="balance-value">$${seasonFee}</span>
       </div>
       <p class="hint" style="margin-top:0">
-        $${cost} ÷ ${wizardDates.length} 場 ÷ 上限 ${capacity} 人 = 每人每場 $${share}，整季 $${seasonFee}。
-        ${acSurcharge > 0 ? `有開冷氣的那幾場是每人 $${prices.cooled}，開季後逐場切換。` : ""}
+        ${cooledCount
+          ? `沒開冷氣的場次每人 $${prices.plain}、開冷氣的 ${cooledCount} 場每人 $${prices.cooled}，整季 $${seasonFee}。`
+          : `$${cost} ÷ ${wizardDates.length} 場 ÷ 上限 ${capacity} 人 = 每人每場 $${share}，整季 $${seasonFee}。`}
+        ${acSurcharge > 0 ? "開季後每一場的冷氣還是可以個別改。" : ""}
         ${memberCount ? `建立後這筆金額會直接記到 ${memberCount} 個人的帳上，可以在「帳務 · 季費」收款。` : "尚未選擇成員，可於開季後再新增；新增成員不會變動其他人的金額。"}
       </p>
       <p class="hint" style="margin-top:6px">
@@ -546,6 +591,8 @@
 
   // Cost lives on step 1 but drives the numbers shown on 2 and 3.
   document.getElementById("c-cost").addEventListener("input", renderWizard);
+  document.getElementById("c-ac").addEventListener("input", renderWizard);
+  document.getElementById("c-capacity").addEventListener("input", renderWizard);
 
   async function createSeason() {
     const gameDates = wizardDates;
@@ -565,6 +612,10 @@
       total_venue_cost: document.getElementById("c-cost").value.trim() || "0",
       ac_surcharge: document.getElementById("c-ac").value.trim() || "0",
       game_dates: gameDates,
+      air_conditioned_dates:
+        Number(document.getElementById("c-ac").value) > 0
+          ? gameDates.filter((d) => wizardAcDates.has(d))
+          : [],
       member_names: memberNames,
       capacity: Number(document.getElementById("c-capacity").value) || 18,
       minimum_roster: Number(document.getElementById("c-min-roster").value) || 0,
@@ -730,6 +781,46 @@ ${label} 以及已經記在每個人帳上的季費都會一起消失，無法�
       location.reload();
     } catch (e) {
       toast("刪除失敗：" + e.message);
+    }
+  }
+
+  let loadedClubName = "";
+
+  function fillClubName() {
+    getJsonSWR(
+      `${API_BASE}/clubs/${currentClubId()}`,
+      (club) => {
+        loadedClubName = club.name;
+        const input = document.getElementById("club-name");
+        if (document.activeElement !== input) input.value = club.name;
+      },
+      { headers: authHeader() }
+    ).catch(() => {});
+  }
+
+  async function renameClub(btn) {
+    const name = document.getElementById("club-name").value.trim();
+    if (!name) {
+      toast("球隊名稱不能空白");
+      return;
+    }
+    if (name.length > CLUB_NAME_MAX) {
+      toast(`球隊名稱最多 ${CLUB_NAME_MAX} 個字`);
+      return;
+    }
+    const done = markBusy(btn);
+    try {
+      const club = await postJson(API_BASE, `/clubs/${currentClubId()}`, { name }, "PATCH");
+      const picker = document.getElementById("club-picker");
+      const option = picker.options[picker.selectedIndex];
+      if (option && option.textContent === loadedClubName) option.textContent = club.name;
+      loadedClubName = club.name;
+      document.getElementById("club-name").value = club.name;
+      toast("已更新球隊名稱");
+    } catch (e) {
+      toast("改名失敗：" + e.message);
+    } finally {
+      done();
     }
   }
 

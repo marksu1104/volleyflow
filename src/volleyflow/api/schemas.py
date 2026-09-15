@@ -7,23 +7,34 @@ yet; a response doesn't need every internal column).
 
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from volleyflow.ledger import EntryType
 from volleyflow.schedule import GameStatus
 
 Gender = Literal["male", "female"]
 
+CLUB_NAME_MAX = 20
+# Long names wrapped the club chip onto three lines on a phone.
+ClubName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=CLUB_NAME_MAX),
+]
+
 
 class ClubCreate(BaseModel):
-    name: str
+    name: ClubName
     """Whoever creates the club becomes its organizer — see
     routes.create_club. Who "whoever" is comes from the caller's
     verified LINE identity (routes._get_current_player), not a
     client-supplied id: letting the body name an arbitrary player_id
     would let anyone make anyone else the organizer of a new club."""
+
+
+class ClubUpdate(BaseModel):
+    name: ClubName
 
 
 class ClubJoin(BaseModel):
@@ -495,7 +506,7 @@ class SeasonDetailOut(BaseModel):
     in exactly one place (pricing.shares_by_game).
 
     No longer the only figure in play — a cooled game costs
-    `ac_surcharge / member_count` more, and each game carries its own
+    `ac_surcharge / capacity` more, and each game carries its own
     `share` below. This stays as the headline number a season is
     described by."""
     ac_surcharge: Decimal

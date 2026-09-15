@@ -137,6 +137,27 @@ const heroSays = (page) =>
   ]);
   await page.close();
 
+  // 4b. The same link again, now as a member, opens the club. It used to
+  // say 找不到這個球隊: the page dropped the club but kept the token.
+  const again = await open(
+    browser,
+    `${BASE}/member.html?invite=${encodeURIComponent(token)}&as=${encodeURIComponent(stranger)}`
+  );
+  await again.page
+    .waitForFunction(() => document.getElementById("club-chip-name").textContent !== "選擇球隊", null, {
+      timeout: 20000,
+    })
+    .catch(() => {});
+  await again.page.waitForTimeout(1500);
+  const reopened = await heroSays(again.page);
+  const chipName = await again.page.textContent("#club-chip-name");
+  report("opening the link again as a member opens the club", [
+    ...(reopened.includes("找不到這個球隊") ? [`the screen says: ${reopened.slice(0, 80)}`] : []),
+    ...(chipName === CLUB ? [] : [`the club chip says "${chipName}"`]),
+    ...again.errors,
+  ]);
+  await again.page.close();
+
   // 5. A forged link goes nowhere, and says so.
   const forged = await open(
     browser,

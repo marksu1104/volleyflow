@@ -61,6 +61,9 @@ function isGameFull(season, game) {
  * silent before it, a confirmation after, because a mid-season change
  * moves money on somebody's ledger right away. `games` is assumed sorted
  * by date, which is how every season detail response already orders it. */
+// Same limit as the server's ClubName.
+const CLUB_NAME_MAX = 20;
+
 function seasonHasStarted(season) {
   const first = season.games[0];
   return !!first && describeDate(first.date).isPast;
@@ -75,8 +78,19 @@ function seasonHasStarted(season) {
  * the person who gets asked "why is tonight more expensive". */
 function acPill(season, game) {
   if (!game.air_conditioned || !(Number(season.ac_surcharge) > 0)) return "";
-  const each = Math.round(Number(season.ac_surcharge) / season.members.length);
-  return `<span class="meta-pill ac">含冷氣 +$${each}</span>`;
+  return `<span class="meta-pill ac">含冷氣 +$${acExtraEach(season, game)}</span>`;
+}
+
+// The server's own prices where a cooled game has one, so this matches the ledger.
+function acExtraEach(season, game) {
+  const cooled =
+    game && game.air_conditioned && game.share != null
+      ? game
+      : (season.games || []).find((g) => g.air_conditioned && g.share != null);
+  if (cooled && season.share_per_game != null) {
+    return Number(cooled.share) - Number(season.share_per_game);
+  }
+  return Math.ceil(Number(season.ac_surcharge) / season.capacity);
 }
 
 /** How many of the people expected at this game are each gender — for
@@ -350,14 +364,33 @@ async function initClubAndSeasonPickers(
  * colours that day's dot; `opts.selectedId` draws the ring. A dot rather
  * than a label on purpose — a calendar cell on a phone is about 40px
  * across, and anything with words in it is unreadable at that size. */
+// The month each calendar is showing, so a repaint doesn't jump back to the next game's.
+const calendarViews = new WeakMap();
+
 function renderMonthCalendar(container, games, onPick, opts) {
-  const { stateOf = () => "", selectedId = null, awayLabel = "你請假" } = opts || {};
+  const { stateOf = () => "", selectedId = null, awayLabel = "你請假", viewKey = null } = opts || {};
   const gamesByDate = {};
   for (const g of games) gamesByDate[g.date] = g;
 
-  const upcoming = games.find((g) => !describeDate(g.date).isPast) || games[games.length - 1];
-  const viewDate = upcoming ? new Date(upcoming.date + "T00:00:00") : new Date();
-  viewDate.setDate(1);
+  const remembered = calendarViews.get(container);
+  let viewDate;
+  if (remembered && remembered.key === viewKey) {
+    viewDate = new Date(remembered.year, remembered.month, 1);
+  } else {
+    const anchor =
+      games.find((g) => String(g.id) === String(selectedId)) ||
+      games.find((g) => !describeDate(g.date).isPast) ||
+      games[games.length - 1];
+    viewDate = anchor ? new Date(anchor.date + "T00:00:00") : new Date();
+    viewDate.setDate(1);
+  }
+  const remember = () =>
+    calendarViews.set(container, {
+      key: viewKey,
+      year: viewDate.getFullYear(),
+      month: viewDate.getMonth(),
+    });
+  remember();
 
   function draw() {
     const year = viewDate.getFullYear();
@@ -413,6 +446,7 @@ function renderMonthCalendar(container, games, onPick, opts) {
     const navBtn = e.target.closest(".mcal-nav");
     if (navBtn) {
       viewDate.setMonth(viewDate.getMonth() + Number(navBtn.dataset.dir));
+      remember();
       draw();
       return;
     }

@@ -246,26 +246,37 @@ test("an optimistic row's controls carry a usable id once the server answers", (
 const { acPill } = page;
 
 test("a cooled night says what the extra is for", () => {
-  const season = { ac_surcharge: "540", members: new Array(18) };
+  const season = { ac_surcharge: "540", capacity: 18 };
   const html = acPill(season, { air_conditioned: true });
 
   assert.match(html, /含冷氣/);
-  assert.match(html, /\+\$30/, "540 shared between 18 people");
+  assert.match(html, /\+\$30/, "540 shared between 18 slots");
 });
 
-test("the share of the air conditioning follows the roster size", () => {
-  // The venue charges the same whatever the turnout, so a smaller roster
-  // pays more each — a figure hardcoded per person would drift.
-  const html = acPill({ ac_surcharge: "540", members: new Array(12) }, { air_conditioned: true });
-  assert.match(html, /\+\$45/);
+test("the extra is split between the slots, not the names on the roster so far", () => {
+  // Two people on an 18-slot season used to be told +$270 a night.
+  const season = { ac_surcharge: "540", capacity: 18, members: new Array(2) };
+
+  const html = acPill(season, { air_conditioned: true });
+
+  assert.match(html, /\+\$30/);
+});
+
+test("where the server has priced a cooled night, the pill says its difference", () => {
+  // Rounding happens once, in Python; the pill mustn't redo it differently.
+  const season = { ac_surcharge: "540", capacity: 18, share_per_game: "205", games: [] };
+
+  const html = acPill(season, { air_conditioned: true, share: "236" });
+
+  assert.match(html, /\+\$31/);
 });
 
 test("a night with no air conditioning needs no explaining", () => {
-  const season = { ac_surcharge: "540", members: new Array(18) };
+  const season = { ac_surcharge: "540", capacity: 18 };
   assert.equal(acPill(season, { air_conditioned: false }), "");
 });
 
 test("a club whose venue bundles it never sees any of this", () => {
-  const season = { ac_surcharge: "0", members: new Array(18) };
+  const season = { ac_surcharge: "0", capacity: 18 };
   assert.equal(acPill(season, { air_conditioned: true }), "");
 });

@@ -503,12 +503,12 @@ test("遞補 and 移除 are separate ids on the same queued person", () => {
 // sheet reports the same facts about the same game.
 test("the air conditioning surcharge is per person, and only when it ran", () => {
   const { acPill } = load();
-  const season = { ac_surcharge: "540", members: new Array(18) };
+  const season = { ac_surcharge: "540", capacity: 18 };
 
   assert.match(acPill(season, { air_conditioned: true }), /\+\$30/);
   assert.equal(acPill(season, { air_conditioned: false }), "");
   assert.equal(
-    acPill({ ac_surcharge: "0", members: new Array(18) }, { air_conditioned: true }),
+    acPill({ ac_surcharge: "0", capacity: 18 }, { air_conditioned: true }),
     "",
     "a season that doesn't charge for it says nothing"
   );
