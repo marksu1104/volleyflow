@@ -1,14 +1,13 @@
 """Opaque tokens for a club's invite link.
 
 A club's join link used to carry its raw numeric id (`?club=12`), and the
-endpoint behind it — `POST /clubs/{id}/join` — accepts a join from any
-identified caller who supplies a valid id, invited or not. A stranger
+endpoint behind it — `POST /clubs/{id}/join` — accepted a join from any
+identified caller who supplied a valid id, invited or not. A stranger
 trying small integers in order could read a club's name and self-enrol.
 
-The token here fixes the reconnaissance half of that: the id in a shared
-link is now unguessable, so finding a club still requires actually having
-its link. Joining by id alone is still
-allowed; that half is deliberately left open.
+The token here closes both halves of that: the id in a shared link is
+unguessable, so finding a club requires actually having its link, and
+joining requires presenting that same token — an id alone is refused.
 
 No new database column — the token is a deterministic HMAC of the club
 id, verified by recomputing it. That also means it can't be revoked or

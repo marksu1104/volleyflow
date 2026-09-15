@@ -463,9 +463,7 @@ quietly change what someone is charged.
 
 ## What's left
 
-What remains
-are loose ends kept narrow on purpose rather than chased to 100%: the
-join endpoint still accepts a plain club id from an authenticated
-caller, the Chinese error-message table covers what an ordinary tap
-reaches rather than all 41 routes, and the backup script has been
-rehearsed against the dev branch but not production.
+What remains are loose ends kept narrow on purpose rather than chased to
+100%: the Chinese error-message table covers what an ordinary tap reaches
+rather than all 41 routes, and the backup script has been rehearsed
+against the dev branch but not production.
