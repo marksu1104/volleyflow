@@ -3,6 +3,8 @@
 from fastapi import (
     APIRouter,
     Depends,
+    HTTPException,
+    status,
 )
 from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
@@ -257,7 +259,64 @@ def get_player_ledger(
                 recorded_at=row.recorded_at,
                 season_id=row.season_id,
                 note=row.note,
+                reverses_entry_id=row.reverses_entry_id,
             )
             for row in entry_rows
         ],
+    )
+
+
+@router.post("/ledger-entries/{entry_id}/reverse", response_model=LedgerEntryOut)
+def reverse_payment(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> LedgerEntryOut:
+    """Undoes a payment or refund marked by mistake with an opposite entry.
+    The original stays on the books, so the history still says what happened."""
+    entry = db.get(LedgerEntryRow, entry_id)
+    if entry is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such ledger entry")
+    _require_organizer(db, entry.club_id, current_player)
+    if entry.entry_type is not EntryType.PAYMENT or entry.reverses_entry_id is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Only a payment or refund can be undone"
+        )
+    already = (
+        db.query(LedgerEntryRow)
+        .filter(LedgerEntryRow.reverses_entry_id == entry.id)
+        .first()
+    )
+    if already is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "That payment has already been undone"
+        )
+
+    undo = LedgerEntryRow(
+        player_id=entry.player_id,
+        club_id=entry.club_id,
+        entry_type=EntryType.PAYMENT,
+        amount=-entry.amount,
+        recorded_at=_now(),
+        season_id=entry.season_id,
+        reverses_entry_id=entry.id,
+    )
+    db.add(undo)
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two taps on 復原 at once: the unique index caught the second.
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "That payment has already been undone"
+        ) from None
+    db.refresh(undo)
+    return LedgerEntryOut(
+        id=undo.id,
+        entry_type=undo.entry_type,
+        amount=undo.amount,
+        recorded_at=undo.recorded_at,
+        season_id=undo.season_id,
+        note=undo.note,
+        reverses_entry_id=undo.reverses_entry_id,
     )

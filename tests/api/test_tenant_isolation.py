@@ -59,6 +59,9 @@ def _club_a(client: TestClient) -> dict[str, Any]:
     ).json()
     assert drop_in["status"] == "confirmed", drop_in
     assert queued["status"] == "waitlisted", queued
+    payment = client.post(
+        f"/clubs/{club['id']}/players/{member['id']}/payments", json={"amount": "100"}
+    ).json()
     return {
         "club": club["id"],
         "season": season["id"],
@@ -68,6 +71,7 @@ def _club_a(client: TestClient) -> dict[str, Any]:
         "drop_in": drop_in["id"],
         "entry": queued["id"],
         "organizer": club["organizer_token"],
+        "payment": payment["id"],
     }
 
 
@@ -111,6 +115,8 @@ def _attempts(a: dict[str, Any], stranger_id: int) -> list[tuple[str, str, Any]]
         ("POST", f"/waitlist/{a['entry']}/promote", {}),
         ("POST", f"/drop-ins/{a['drop_in']}/cancel", {}),
         ("POST", f"/clubs/{c}/players/{m}/link", {"line_player_id": stranger_id}),
+        ("POST", f"/ledger-entries/{a['payment']}/reverse", {}),
+        ("POST", f"/clubs/{c}/players/{m}/merge", {"duplicate_id": stranger_id}),
         ("PUT", f"/clubs/{c}/members/me/intent", {"wants_fixed_membership": True}),
         ("DELETE", f"/clubs/{c}/members/{m}", None),
         ("POST", f"/games/{g}/cancel", {"refunded": True}),

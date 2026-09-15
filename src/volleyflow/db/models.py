@@ -406,6 +406,14 @@ class LedgerEntryRow(Base):
         Index("ix_ledger_entries_player_id", "player_id"),
         Index("ix_ledger_entries_season_id", "season_id"),
         Index("ix_ledger_entries_club_id", "club_id"),
+        # One undo per payment: a repeated 復原 must not reverse it twice.
+        Index(
+            "uq_ledger_entries_reverses_entry_id",
+            "reverses_entry_id",
+            unique=True,
+            postgresql_where=text("reverses_entry_id IS NOT NULL"),
+            sqlite_where=text("reverses_entry_id IS NOT NULL"),
+        ),
         # Makes recording a payment safe to repeat. A tap that times out
         # on a phone, a double tap, a retry — all send the same
         # client-generated token, and the database refuses the second
@@ -442,6 +450,10 @@ class LedgerEntryRow(Base):
     """Which season this relates to, when there is one — a manual cash
     payment might cover more than one season, so this stays optional."""
     note: Mapped[str | None] = mapped_column(default=None)
+    reverses_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ledger_entries.id"), default=None
+    )
+    """Set on the entry that undoes a mistaken payment; the original stays."""
     client_token: Mapped[str | None] = mapped_column(default=None)
     """A token the caller generates once per intended action, so a
     retried or double-tapped request lands as one entry. See the partial

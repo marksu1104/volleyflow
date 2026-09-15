@@ -3032,11 +3032,11 @@ def test_signing_up_a_group_charges_each_of_them(client: TestClient) -> None:
     assert [r["status"] for r in results] == ["confirmed"] * 3
 
 
-def test_two_guests_with_the_same_name_are_two_different_people(
+def test_the_same_name_twice_in_one_signup_is_one_person_signed_up_twice(
     client: TestClient,
 ) -> None:
-    # Two real people are both called 小明. Matching a typed name to an
-    # existing player would let only the first of them play.
+    # Within a club a name is one person (decided 2026-09-16), so this is
+    # the same 小明 twice, and nobody in the group is signed up.
     season = _start_season(client, member_names=["Alice"], capacity=18)
     game_id = season["games"][0]["id"]
 
@@ -3045,15 +3045,15 @@ def test_two_guests_with_the_same_name_are_two_different_people(
         json={
             "people": [
                 {"player_name": "小明", "gender": "male"},
-                {"player_name": "小明", "gender": "female"},
+                {"player_name": "小明", "gender": "male"},
             ]
         },
     )
 
-    assert response.status_code == 200
-    results = response.json()["results"]
-    assert results[0]["player_id"] != results[1]["player_id"]
-    assert [r["status"] for r in results] == ["confirmed", "confirmed"]
+    assert response.status_code == 400
+    assert "already signed up" in response.json()["detail"]
+    detail = client.get(f"/seasons/{season['id']}").json()
+    assert detail["games"][0]["confirmed_drop_ins"] == []
 
 
 def test_a_group_overflowing_capacity_waitlists_the_last_ones(

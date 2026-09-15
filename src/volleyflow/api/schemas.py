@@ -240,13 +240,10 @@ class DropInOut(BaseModel):
 class DropInBatchEntry(BaseModel):
     """One person in a "+1, and I'm bringing two friends" signup.
 
-    `player_id` is what decides identity, and it is deliberately never
-    inferred from the name. Two real people called 小明 must both be
-    able to play, so a bare name always means *a new person*; reusing an
-    existing one is something the caller has to say explicitly, after
-    the app has offered it. Guessing the other way round would put one
-    person's fee on another person's ledger, which is not recoverable —
-    a duplicate row merely looks untidy.
+    Within a club a name is one person (decided 2026-09-16): a bare name
+    that already exists is that person, and two real people who share a
+    name are told apart by what's typed, e.g. 小明（高）. `player_id`
+    picks somebody from the list explicitly.
     """
 
     player_name: str
@@ -546,6 +543,12 @@ class LedgerEntryOut(BaseModel):
     recorded_at: datetime
     season_id: int | None
     note: str | None
+    reverses_entry_id: int | None = None
+
+
+class PlayerMerge(BaseModel):
+    duplicate_id: int
+    """The typed-in duplicate to fold into the player in the path."""
 
 
 class ProblemReport(BaseModel):

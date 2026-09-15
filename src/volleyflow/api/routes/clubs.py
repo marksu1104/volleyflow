@@ -1,5 +1,7 @@
 """Clubs, their membership, and the invite link into one."""
 
+from typing import Any
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -36,6 +38,7 @@ from volleyflow.api.schemas import (
     MembershipIntent,
     MyClubOut,
     PlayerLink,
+    PlayerMerge,
 )
 from volleyflow.db.models import (
     AbsenceRow,
@@ -460,6 +463,124 @@ def link_player(
         gender=_gender(target.gender),
         avatar_url=target.avatar_url,
         linked=True,
+    )
+
+
+def _games_touched(
+    db: Session, player_id: int, season_ids: list[int], game_ids: list[int]
+) -> set[int]:
+    """Every game in the club this person is down for, in any role."""
+    rostered = [
+        season_id
+        for (season_id,) in db.query(SeasonMemberRow.season_id).filter(
+            SeasonMemberRow.player_id == player_id,
+            SeasonMemberRow.season_id.in_(season_ids),
+        )
+    ]
+    touched = {
+        game_id
+        for (game_id,) in db.query(GameRow.id).filter(GameRow.season_id.in_(rostered))
+    }
+    for table in (AbsenceRow, DropInRow):
+        touched |= {
+            game_id
+            for (game_id,) in db.query(table.game_id).filter(
+                table.player_id == player_id,
+                table.cancelled_at.is_(None),
+                table.game_id.in_(game_ids),
+            )
+        }
+    touched |= {
+        game_id
+        for (game_id,) in db.query(WaitlistEntryRow.game_id).filter(
+            WaitlistEntryRow.player_id == player_id,
+            WaitlistEntryRow.game_id.in_(game_ids),
+        )
+    }
+    return touched
+
+
+@router.post("/clubs/{club_id}/players/{player_id}/merge", response_model=MemberOut)
+def merge_players(
+    club_id: int,
+    player_id: int,
+    payload: PlayerMerge,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> MemberOut:
+    """Folds a typed-in duplicate into the person they really are: every
+    signup, absence and ledger entry in this club moves over, and the
+    duplicate leaves the club. Refused where both are down for the same
+    game, because one person can't be there twice."""
+    _get_club_or_404(db, club_id)
+    _require_organizer(db, club_id, current_player)
+    keep = _get_player_or_404(db, player_id)
+    duplicate = _get_player_or_404(db, payload.duplicate_id)
+    if keep.id == duplicate.id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Pick two different people to merge"
+        )
+    kept_membership = db.get(ClubMemberRow, {"club_id": club_id, "player_id": keep.id})
+    duplicate_membership = db.get(
+        ClubMemberRow, {"club_id": club_id, "player_id": duplicate.id}
+    )
+    if kept_membership is None or duplicate_membership is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not a member of this club")
+    if duplicate.line_user_id is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Only a name typed in by hand can be merged into someone else",
+        )
+
+    season_ids = [
+        s for (s,) in db.query(SeasonRow.id).filter(SeasonRow.club_id == club_id)
+    ]
+    game_ids = [
+        g for (g,) in db.query(GameRow.id).filter(GameRow.season_id.in_(season_ids))
+    ]
+    if _games_touched(db, keep.id, season_ids, game_ids) & _games_touched(
+        db, duplicate.id, season_ids, game_ids
+    ):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Both are down for the same game — sort that game out first",
+        )
+
+    moves: list[tuple[Any, Any, Any]] = [
+        (
+            SeasonMemberRow,
+            SeasonMemberRow.player_id,
+            SeasonMemberRow.season_id.in_(season_ids),
+        ),
+        (AbsenceRow, AbsenceRow.player_id, AbsenceRow.game_id.in_(game_ids)),
+        (DropInRow, DropInRow.player_id, DropInRow.game_id.in_(game_ids)),
+        (DropInRow, DropInRow.brought_by_player_id, DropInRow.game_id.in_(game_ids)),
+        (
+            WaitlistEntryRow,
+            WaitlistEntryRow.player_id,
+            WaitlistEntryRow.game_id.in_(game_ids),
+        ),
+        (
+            WaitlistEntryRow,
+            WaitlistEntryRow.brought_by_player_id,
+            WaitlistEntryRow.game_id.in_(game_ids),
+        ),
+        (LedgerEntryRow, LedgerEntryRow.player_id, LedgerEntryRow.club_id == club_id),
+    ]
+    for table, column, in_this_club in moves:
+        db.query(table).filter(column == duplicate.id, in_this_club).update(
+            {column: keep.id}, synchronize_session=False
+        )
+    db.delete(duplicate_membership)
+    if keep.gender is None:
+        keep.gender = duplicate.gender
+    db.commit()
+    return MemberOut(
+        id=keep.id,
+        name=keep.name,
+        gender=_gender(keep.gender),
+        avatar_url=keep.avatar_url,
+        linked=keep.line_user_id is not None,
     )
 
 

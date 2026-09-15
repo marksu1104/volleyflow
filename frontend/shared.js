@@ -1875,6 +1875,15 @@ const _API_ERROR_PATTERNS = [
   [/^Player is not a member of this club$/, () => "這個人不是球隊成員"],
   [/^Player is not a fixed member of this game's season$/, () => "這個人不是本季的固定成員"],
   [/^You are not a member of this club$/, () => "你不是這個球隊的成員"],
+  [/^Only a payment or refund can be undone$/, () => "只有收款或退款可以復原"],
+  [/^That payment has already been undone$/, () => "這筆已經復原過了"],
+  [/^No such ledger entry$/, () => "找不到這筆帳"],
+  [/^Pick two different people to merge$/, () => "請選兩個不同的人合併"],
+  [
+    /^Only a name typed in by hand can be merged into someone else$/,
+    () => "有 LINE 帳號的人不能被合併掉，只能合併手動輸入的名字",
+  ],
+  [/^Both are down for the same game/, () => "這兩個人在同一場都有紀錄，請先處理那一場再合併"],
   [
     /^(.+?) is no longer in this club$/,
     (m) => `「${m[1]}」已經不在這個球隊了，請直接輸入名字報名`,
@@ -2492,7 +2501,7 @@ function localRevision() {
  * "are you sure you want to remove this member" genuinely must be
  * answered before anything proceeds.
  */
-function toast(message, kind) {
+function toast(message, kind, action) {
   let host = document.getElementById("vf-toasts");
   if (!host) {
     host = document.createElement("div");
@@ -2503,12 +2512,23 @@ function toast(message, kind) {
   const el = document.createElement("div");
   el.className = "toast" + (kind ? " " + kind : "");
   el.textContent = message;
+  if (action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "toast-action";
+    button.textContent = action.label;
+    button.onclick = () => {
+      el.remove();
+      action.onClick();
+    };
+    el.appendChild(button);
+  }
   host.appendChild(el);
-  // Long enough to read a failure reason, short enough not to stack up.
+  // Long enough to read a failure reason, short enough not to stack up; longer when there's something to tap.
   setTimeout(() => {
     el.classList.add("out");
     setTimeout(() => el.remove(), 220);
-  }, kind === "good" ? 1800 : 3600);
+  }, action ? 6000 : kind === "good" ? 1800 : 3600);
 }
 
 /** Reloads the page once when its markup is older than its scripts.

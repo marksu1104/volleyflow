@@ -93,6 +93,14 @@
     <div id="member-list" class="member-list"></div>
   </div>
 
+  <div id="dup-section" hidden>
+    <div class="section-label">重複的名字</div>
+    <p class="hint" style="margin-top:0">
+      同一個人被輸入了不只一次。合併後，報名、請假和帳務都會算在同一個人身上。
+    </p>
+    <div id="dup-list" class="member-list"></div>
+  </div>
+
   <div id="waiting-section" hidden>
     <div class="section-label">等待加入本季</div>
     <p class="hint" style="margin-top:0">
@@ -252,9 +260,10 @@
     try {
       // The roster and the join pool don't depend on each other, so they
       // go out together rather than one after the other.
-      const [res, pool] = await Promise.all([
+      const [res, pool, club] = await Promise.all([
         fetch(`${API_BASE}/seasons/${seasonId}`, { headers: authHeader() }),
         fetch(`${API_BASE}/seasons/${seasonId}/join-pool`, { headers: authHeader() }),
+        fetch(`${API_BASE}/clubs/${currentClubId()}/members`, { headers: authHeader() }),
       ]);
       if (!membersLoad.current(ticket)) return;
       if (!res.ok) {
@@ -269,8 +278,10 @@
       if (currentSeason && currentSeason.id === season.id && localRevision() !== askedAt) return;
       currentSeason = season;
       currentPool = pool.ok ? await pool.json() : [];
+      allClubMembers = club.ok ? await club.json() : [];
       renderMembers(currentSeason);
       renderJoinPool();
+      renderDuplicates();
       document.getElementById("no-season").innerHTML = "";
       document.getElementById("roster-section").hidden = false;
       document.getElementById("guest-section").hidden = false;
@@ -282,6 +293,64 @@
   }
 
   let currentPool = [];
+  let allClubMembers = [];
+
+  function renderDuplicates() {
+    const byName = new Map();
+    for (const m of allClubMembers) {
+      const key = m.name.trim();
+      byName.set(key, [...(byName.get(key) || []), m]);
+    }
+    const groups = [...byName.values()].filter((g) => g.length > 1);
+    const section = document.getElementById("dup-section");
+    section.hidden = groups.length === 0;
+    if (section.hidden) return;
+    document.getElementById("dup-list").innerHTML = groups
+      .map((g) => {
+        const keep = keeperOf(g);
+        const mergeable = g.filter((m) => m !== keep && !m.linked);
+        const action =
+          mergeable.length === g.length - 1
+            ? `<button type="button" class="mini-action" onclick="mergeDuplicates(${keep.id}, [${mergeable.map((m) => m.id).join(",")}])">合併</button>`
+            : '<span class="hint">不只一個有 LINE 帳號，無法合併</span>';
+        return `
+          <div class="pool-row">
+            <span class="pool-who">
+              <span class="avatar sm">${escapeHtml(g[0].name.slice(0, 1))}</span>
+              <span>${escapeHtml(g[0].name)} ×${g.length}</span>
+            </span>
+            ${action}
+          </div>`;
+      })
+      .join("");
+  }
+
+  // Kept: whoever has LINE, else whoever is on this season's roster, else the oldest.
+  function keeperOf(group) {
+    const onRoster = new Set(currentSeason.members.map((m) => m.id));
+    return (
+      group.find((m) => m.linked) ||
+      group.find((m) => onRoster.has(m.id)) ||
+      group.reduce((a, b) => (a.id < b.id ? a : b))
+    );
+  }
+
+  async function mergeDuplicates(keepId, duplicateIds) {
+    const keep = allClubMembers.find((m) => m.id === keepId);
+    const question = `把 ${duplicateIds.length + 1} 個「${keep.name}」合併成一個人嗎？\n\n報名、請假和帳務都會算在同一個人身上，合併後無法分開。`;
+    if (!confirm(question)) return;
+    try {
+      for (const id of duplicateIds) {
+        await postJson(API_BASE, `/clubs/${currentClubId()}/players/${keepId}/merge`, {
+          duplicate_id: id,
+        });
+      }
+      toast("已合併", "good");
+    } catch (e) {
+      toast("合併失敗：" + e.message);
+    }
+    loadMembers(currentSeason.id);
+  }
 
 
   // avatar_url is a plain <img src>, not interpolated as markup, so it

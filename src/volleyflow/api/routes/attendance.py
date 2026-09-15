@@ -444,18 +444,12 @@ def _sign_up_each(
     results: list[DropInOut] = []
     for entry in people:
         if entry.player_id is None:
-            # A bare name is always a new person; see DropInBatchEntry.
-            player = PlayerRow(name=entry.player_name.strip(), gender=entry.gender)
-            db.add(player)
-            db.flush()  # assigns player.id without ending the transaction
-            db.add(
-                ClubMemberRow(
-                    club_id=season.club_id,
-                    player_id=player.id,
-                    role="member",
-                    joined_at=_now(),
-                )
+            # One name, one person in a club; see DropInBatchEntry.
+            player = _get_or_create_player(
+                db, season.club_id, entry.player_name.strip()
             )
+            if player.gender is None and entry.gender is not None:
+                player.gender = entry.gender
         else:
             player = _get_player_or_404(db, entry.player_id)
             membership = db.get(

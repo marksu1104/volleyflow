@@ -88,6 +88,15 @@
   </div>
 </div>
 
+<div id="history-backdrop" class="gsheet-backdrop" hidden>
+  <div class="gsheet">
+    <button class="gsheet-close" aria-label="關閉" onclick="closeHistory()">✕</button>
+    <h3 id="history-title">明細</h3>
+    <div id="history-list"></div>
+    <p class="hint">收款或退款按錯了，按「復原」會補一筆相反的紀錄；原本那筆會留著，標示已復原。</p>
+  </div>
+</div>
+
 <script src="shared.js"></script>
 <script>
   // localhost -> the local API, anywhere else -> production. See apiBase.
@@ -379,6 +388,7 @@
           <span class="avatar sm">${escapeHtml((name || "?").slice(0, 1))}</span>
           <span class="m-name">${escapeHtml(name)}${genderTag(gender)}${broughtTag}</span>
           <span class="m-net ${netCls}">${netText}</span>
+          <button type="button" class="mini-action" onclick="openHistory(${playerId})">明細</button>
         </div>
         ${breakParts.length ? `<div class="m-break">${breakParts.join("")}</div>` : ""}
         ${actionHtml}
@@ -415,6 +425,79 @@
     }
     await submitPayment(playerId, amount);
   }
+
+  // Undoing adds an opposite entry; the original stays, marked 已復原.
+  async function undoEntry(entryId) {
+    try {
+      await enqueueRequest(() => postJson(API_BASE, `/ledger-entries/${entryId}/reverse`, {}));
+      bumpLocalRevision();
+      refreshBalancesQuietly();
+      toast("已復原", "good");
+      if (!document.getElementById("history-backdrop").hidden) openHistory(historyPlayerId);
+    } catch (e) {
+      toast("復原失敗：" + e.message);
+    }
+  }
+
+  let historyPlayerId = null;
+  const ENTRY_LABELS = {
+    season_fee_charged: "季費",
+    drop_in_fee_charged: "臨打費",
+    absence_refund: "請假退款",
+    carried_over: "結轉",
+  };
+
+  async function openHistory(playerId) {
+    historyPlayerId = playerId;
+    const list = document.getElementById("history-list");
+    list.innerHTML = '<div class="empty">載入中…</div>';
+    document.getElementById("history-backdrop").hidden = false;
+    try {
+      const res = await fetch(`${API_BASE}/clubs/${currentClubId()}/players/${playerId}/ledger`, {
+        headers: authHeader(),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const ledger = await res.json();
+      if (historyPlayerId !== playerId) return;
+      document.getElementById("history-title").textContent = `${ledger.player_name} 的明細`;
+      list.innerHTML = historyHtml(ledger.entries);
+    } catch (e) {
+      list.innerHTML = `<div class="empty">讀取失敗：${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function closeHistory() {
+    document.getElementById("history-backdrop").hidden = true;
+  }
+
+  function historyHtml(entries) {
+    if (!entries.length) return '<div class="empty">還沒有任何紀錄</div>';
+    const undone = new Set(entries.filter((e) => e.reverses_entry_id).map((e) => e.reverses_entry_id));
+    return entries
+      .slice()
+      .reverse()
+      .map((e) => {
+        const amount = Number(e.amount);
+        const label = e.reverses_entry_id
+          ? "復原"
+          : e.entry_type === "payment"
+            ? amount > 0 ? "收款" : "退款"
+            : ENTRY_LABELS[e.entry_type] || e.entry_type;
+        const canUndo = e.entry_type === "payment" && !e.reverses_entry_id && !undone.has(e.id);
+        const d = describeDate(e.recorded_at.slice(0, 10));
+        return `
+          <div class="set-row" data-entry="${e.id}">
+            <span class="set-label">${label}${undone.has(e.id) ? " · 已復原" : ""}<span class="set-sub">${d.month}/${d.day}</span></span>
+            <span>${amount > 0 ? "+" : "−"}$${Math.abs(amount)}</span>
+            ${canUndo ? `<button type="button" class="mini-action" onclick="undoEntry(${e.id})">復原</button>` : ""}
+          </div>`;
+      })
+      .join("");
+  }
+
+  document.getElementById("history-backdrop").addEventListener("click", (e) => {
+    if (e.target.id === "history-backdrop") closeHistory();
+  });
 
   async function recordCashRefund(playerId, amount) {
     if (!confirm(`確定要記錄退款 $${amount} 嗎？`)) return;
@@ -456,7 +539,7 @@
       // second before they settled — the same 「切回原來的狀態又切回來」
       // as 請假, from the same cause, on a screen that had never been
       // given the fix.
-      await enqueueRequest(() =>
+      const entry = await enqueueRequest(() =>
         postJson(API_BASE, `/clubs/${currentClubId()}/players/${playerId}/payments`, {
           amount: String(amount),
           season_id: currentSeason.id,
@@ -465,6 +548,8 @@
         })
       );
       refreshBalancesQuietly();
+      const what = Number(amount) > 0 ? `已記錄收款 $${amount}` : `已記錄退款 $${Math.abs(amount)}`;
+      toast(what, "good", { label: "復原", onClick: () => undoEntry(entry.id) });
     } catch (e) {
       balances[playerId] = before;
       bumpLocalRevision();
