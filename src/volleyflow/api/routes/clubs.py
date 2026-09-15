@@ -8,6 +8,7 @@ from fastapi import (
     HTTPException,
     status,
 )
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from volleyflow.api.dependencies import get_db
@@ -34,6 +35,7 @@ from volleyflow.api.schemas import (
     ClubUpdate,
     GuestOut,
     InviteOut,
+    JoinApproval,
     MemberOut,
     MembershipIntent,
     MyClubOut,
@@ -193,12 +195,22 @@ def list_player_clubs(
         .order_by(ClubRow.id)
         .all()
     )
+    organized = [club.id for club, m in rows if m.role == "organizer"]
+    waiting = {
+        club_id: count
+        for club_id, count in db.query(ClubMemberRow.club_id, func.count())
+        .filter(ClubMemberRow.club_id.in_(organized), ClubMemberRow.status == "pending")
+        .group_by(ClubMemberRow.club_id)
+        .all()
+    }
     return [
         MyClubOut(
             id=club.id,
             name=club.name,
             role=membership.role,
             wants_fixed_membership=membership.wants_fixed_membership,
+            status=membership.status,
+            pending_count=waiting.get(club.id, 0),
         )
         for club, membership in rows
     ]
@@ -296,7 +308,7 @@ def list_club_members(
     rows = (
         db.query(PlayerRow, ClubMemberRow)
         .join(ClubMemberRow, ClubMemberRow.player_id == PlayerRow.id)
-        .filter(ClubMemberRow.club_id == club_id)
+        .filter(ClubMemberRow.club_id == club_id, ClubMemberRow.status == "active")
         .order_by(PlayerRow.id)
         .all()
     )
@@ -346,15 +358,21 @@ def join_club(
     )
     if existing is not None:
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, "Already a member of this club"
+            status.HTTP_400_BAD_REQUEST,
+            "Already asked to join — waiting for the organizer"
+            if existing.status == "pending"
+            else "Already a member of this club",
         )
 
+    # The link only gets you into the queue; the organizer lets you in.
     db.add(
         ClubMemberRow(
             club_id=club_id,
             player_id=current_player.id,
             role="member",
             joined_at=_now(),
+            status="pending",
+            wants_fixed_membership=payload.wants_fixed_membership,
         )
     )
     db.commit()
@@ -364,6 +382,67 @@ def join_club(
         gender=_gender(current_player.gender),
         avatar_url=current_player.avatar_url,
         linked=current_player.line_user_id is not None,
+    )
+
+
+@router.get("/clubs/{club_id}/join-requests", response_model=list[ClubMemberOut])
+def list_join_requests(
+    club_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> list[ClubMemberOut]:
+    """Who asked to join through the link and is waiting for the organizer."""
+    _get_club_or_404(db, club_id)
+    _require_organizer(db, club_id, current_player)
+    rows = (
+        db.query(PlayerRow, ClubMemberRow)
+        .join(ClubMemberRow, ClubMemberRow.player_id == PlayerRow.id)
+        .filter(ClubMemberRow.club_id == club_id, ClubMemberRow.status == "pending")
+        .order_by(ClubMemberRow.joined_at)
+        .all()
+    )
+    return [
+        ClubMemberOut(
+            id=player.id,
+            name=player.name,
+            gender=_gender(player.gender),
+            avatar_url=player.avatar_url,
+            linked=player.line_user_id is not None,
+            role=membership.role,
+            wants_fixed_membership=membership.wants_fixed_membership,
+        )
+        for player, membership in rows
+    ]
+
+
+@router.post("/clubs/{club_id}/members/{player_id}/approve", response_model=MemberOut)
+def approve_member(
+    club_id: int,
+    player_id: int,
+    payload: JoinApproval,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> MemberOut:
+    """Lets somebody who asked to join into the club. Putting a fixed member
+    on a season's roster is the next request, the one the roster screen uses,
+    so the money is worked out in one place only."""
+    _get_club_or_404(db, club_id)
+    _require_organizer(db, club_id, current_player)
+    membership = db.get(ClubMemberRow, {"club_id": club_id, "player_id": player_id})
+    if membership is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not a member of this club")
+    if membership.status != "pending":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Not waiting to be approved")
+    membership.status = "active"
+    membership.wants_fixed_membership = payload.as_fixed
+    db.commit()
+    player = _get_player_or_404(db, player_id)
+    return MemberOut(
+        id=player.id,
+        name=player.name,
+        gender=_gender(player.gender),
+        avatar_url=player.avatar_url,
+        linked=player.line_user_id is not None,
     )
 
 
@@ -606,7 +685,7 @@ def set_membership_intent(
     membership = db.get(
         ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}
     )
-    if membership is None:
+    if membership is None or membership.status != "active":
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "You are not a member of this club"
         )

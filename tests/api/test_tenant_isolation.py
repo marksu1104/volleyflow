@@ -21,6 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.api.factories import auth_headers, create_club, identify, start_season
+from volleyflow.api.invites import invite_token
 
 # Words that exist only inside club A. None may appear in anything an
 # outsider is sent back.
@@ -91,6 +92,8 @@ def _attempts(a: dict[str, Any], stranger_id: int) -> list[tuple[str, str, Any]]
         ("GET", f"/clubs/{c}/invite", None),
         ("GET", f"/clubs/{c}/my-guests", None),
         ("GET", f"/clubs/{c}/members", None),
+        ("GET", f"/clubs/{c}/join-requests", None),
+        ("POST", f"/clubs/{c}/members/{m}/approve", {"as_fixed": True}),
         ("GET", f"/clubs/{c}/seasons", None),
         ("GET", f"/clubs/{c}/balances?season_id={s}", None),
         ("GET", f"/clubs/{c}/players/{m}/ledger", None),
@@ -226,6 +229,27 @@ def test_the_developer_gets_no_way_into_a_club(
     before = _snapshot(client, a)
 
     problems = _let_through(client, a, auth_headers(dev["token"]), dev["id"])
+
+    assert not problems, "let through:\n  " + "\n  ".join(problems)
+    assert _snapshot(client, a) == before
+
+
+def test_somebody_waiting_to_be_let_in_can_neither_read_nor_change_it(
+    client: TestClient,
+) -> None:
+    # They hold the real link and have asked to join; the organizer hasn't
+    # said yes. Until then they are an outsider in everything but name.
+    a = _club_a(client)
+    waiting = identify(client, "等核准")
+    headers = auth_headers(waiting["token"])
+    client.post(
+        f"/clubs/{a['club']}/join",
+        json={"invite": invite_token(a["club"])},
+        headers=headers,
+    )
+    before = _snapshot(client, a)
+
+    problems = _let_through(client, a, headers, waiting["id"])
 
     assert not problems, "let through:\n  " + "\n  ".join(problems)
     assert _snapshot(client, a) == before

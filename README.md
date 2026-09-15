@@ -237,9 +237,9 @@ fetch them, and a screenshot can show a name and a balance.
 uv run ruff check .            # style
 uv run ruff format .           # formatting
 uv run mypy src scripts        # types
-uv run pytest -q               # 462 tests, including a randomised sweep
+uv run pytest -q               # 472 tests, including a randomised sweep
 uv run lint-imports             # billing logic must not import the database
-node --test tests/frontend/*.test.js   # 200 frontend tests
+node --test tests/frontend/*.test.js   # 195 frontend tests
 node tests/visual/check.js     # renders in a real browser and measures it
 node tests/visual/smoke.js     # presses every button and reports the dead ones
 node tests/visual/feedback.js  # and how long each one takes to react

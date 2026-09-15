@@ -38,7 +38,7 @@
 
   <nav class="context-switch" id="context-switch" hidden>
     <a href="member.html" class="on">會員</a>
-    <a href="organizer.html">管理</a>
+    <a href="organizer.html" id="manage-link">管理<span class="nav-badge" id="manage-badge" hidden></span></a>
   </nav>
   <div id="identity" class="identity"></div>
 
@@ -52,7 +52,6 @@
   </div>
   <div id="error"></div>
 
-  <div id="intent-ask" hidden></div>
 
   <div id="hero-wrap"></div>
 
@@ -245,57 +244,56 @@
       renderInviteScreen();
       return;
     }
+    // Asked to join and not let in yet: that club is all there is to show.
+    const active = myClubs.filter((c) => c.status !== "pending");
+    const current = myClubs.find((c) => String(c.id) === String(currentClubId()));
+    if ((current && current.status === "pending") || (!active.length && myClubs.length)) {
+      if (!current || current.status !== "pending") {
+        localStorage.setItem(CLUB_STORAGE_KEY, String(myClubs[0].id));
+      }
+      renderPendingScreen();
+      return;
+    }
     startPickers();
   });
 
-  /** An invite link for a club you're not in yet. Nothing else on this
-   * page means anything until you join — the roster, the seasons and
-   * the games are all 403 to a non-member — and letting the season
-   * picker run would silently switch the page to a club you *are* in,
-   * which is exactly how you end up unsure whether you joined at all.
-   * So the invite is the whole screen until it's answered. */
+  /** An invite link for a club you're not in yet: the whole screen until
+   * it's answered, and answering is asking to join as one or the other. */
   function renderInviteScreen() {
     stopLoadingEscalation();
     document.getElementById("season-picker").hidden = true;
-    document.getElementById("hero-wrap").innerHTML = emptyStateHtml(
-      pendingInviteClubId ? `加入「${pendingInviteClubName}」？` : "找不到這個球隊",
-      pendingInviteClubId
-        ? "這是主揪分享的邀請連結。加入之後就能看到本季場次、請假和帳務。"
-        : "這個邀請連結可能已經失效，或球隊已經被刪除。請向主揪確認。",
-      pendingInviteClubId
-        ? { label: "加入球隊", onclick: "joinFromPrompt()" }
-        : { label: "回到我的球隊", onclick: "forgetInvite()" }
-    );
-  }
-
-  /** Step two of joining, and still the whole screen.
-   *
-   * This used to be asked *after* dropping you into the app, which put
-   * the question on screen with a ＋1 報名 button live underneath it —
-   * you were being asked what kind of member you are while already able
-   * to act as one. Joining and saying which you are is one decision, so
-   * it's one flow, finished before anything else is reachable. */
-  function renderInviteIntent() {
-    const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
-    if (!mine || mine.wants_fixed_membership !== null) {
-      enterApp();
+    const wrap = document.getElementById("hero-wrap");
+    if (!pendingInviteClubId) {
+      wrap.innerHTML = emptyStateHtml(
+        "找不到這個球隊",
+        "這個邀請連結可能已經失效，或球隊已經被刪除。請向主揪確認。",
+        { label: "回到我的球隊", onclick: "forgetInvite()" }
+      );
       return;
     }
-    document.getElementById("hero-wrap").innerHTML = `
+    wrap.innerHTML = `
       <div class="empty-state" style="text-align:left">
-        <h3>已加入「${escapeHtml(mine.name)}」</h3>
-        <p>請問你是這一季的固定成員嗎？主揪確認後才會加入名單。</p>
+        <h3>加入「${escapeHtml(pendingInviteClubName)}」？</h3>
+        <p>選一個送出申請。主揪核准之後，就能看到場次、請假和帳務。</p>
         <div class="btn-row" style="margin-top:12px">
-          <button type="button" class="btn btn-primary" onclick="answerIntent(true, true)">我是固定成員</button>
-          <button type="button" class="btn btn-quiet" onclick="answerIntent(false, true)">我只是臨打</button>
+          <button type="button" class="btn btn-primary" onclick="joinFromPrompt(true, this)">申請當固定成員</button>
+          <button type="button" class="btn btn-quiet" onclick="joinFromPrompt(false, this)">申請臨打</button>
         </div>
       </div>
     `;
   }
 
-  function enterApp() {
-    showPageLoading(document.getElementById("hero-wrap"));
-    startPickers();
+  /** Asked to join, not let in yet. Nothing in the club is readable until
+   * then, so this is the whole screen rather than a page of refusals. */
+  function renderPendingScreen() {
+    stopLoadingEscalation();
+    const club = myClubs.find((c) => String(c.id) === String(currentClubId()));
+    document.getElementById("season-picker").hidden = true;
+    document.getElementById("hero-wrap").innerHTML = emptyStateHtml(
+      `已送出申請：${club ? club.name : ""}`,
+      "主揪核准之後，這裡就會出現本季的場次。可以先關掉，之後從同一個連結再打開。",
+      { label: "重新整理", onclick: "location.reload()" }
+    );
   }
 
   /** The invite went nowhere. Drop it and boot normally, rather than
@@ -333,7 +331,7 @@
     // endpoint that also says whether each membership has answered the
     // fixed-member question. Handed over rather than fetched again —
     // see initClubAndSeasonPickers.
-    { list: myClubs, fresh: myClubsAreCurrent }
+    { list: myClubs.filter((c) => c.status !== "pending"), fresh: myClubsAreCurrent }
   );
   }
 
@@ -374,10 +372,6 @@
     }
     document.getElementById("hero-wrap").innerHTML = html;
     document.getElementById("hero-wrap").onclick = null;
-    // Now that we know there's no season, "are you a fixed member?" is
-    // answerable — and safe to show, because nothing else is still
-    // loading behind it.
-    renderIntentAsk();
   }
 
   /** GET /clubs is scoped to the caller now, so "every club" and "my
@@ -449,7 +443,14 @@
   function renderManageButton() {
     const clubId = currentClubId();
     const mine = myClubs.find((c) => String(c.id) === String(clubId));
-    document.getElementById("context-switch").hidden = !(mine && mine.role === "organizer");
+    const organizes = !!(mine && mine.role === "organizer");
+    document.getElementById("context-switch").hidden = !organizes;
+    // People waiting to be let in: a count on the way in, and the way in leads to them.
+    const waiting = organizes ? mine.pending_count || 0 : 0;
+    const badge = document.getElementById("manage-badge");
+    badge.hidden = waiting === 0;
+    badge.textContent = String(waiting);
+    document.getElementById("manage-link").href = waiting ? "organizer-members.html" : "organizer.html";
   }
 
   function renderClubChip() {
@@ -459,93 +460,6 @@
     document.getElementById("club-dot").textContent = club ? club.name.slice(0, 1) : "-";
   }
 
-  /** Asked once, right after joining. A fixed member's season fee is a
-   * real obligation, so saying you are one queues you for the organizer
-   * rather than signing you up; saying you aren't opens drop-in signups
-   * straight away. Until they answer, they get neither — an unanswered
-   * question is not a reason to let someone commit to money. */
-  /** Whether to put the question on screen at all.
-   *
-   * `loaded` is the half that was missing and got reported from a real
-   * phone: called before the season arrives, this asked over the top of
-   * a hero that still said 載入中, and asked people who were *already*
-   * fixed members — because onRoster can't be true when there's no
-   * roster yet to check against. Everything here is an argument so the
-   * rule can be tested directly; renderIntentAsk below just supplies
-   * the page's current values.
-   *
-   * Named `loaded`, not `settled`: it once was, and in an app where
-   * `settled_at` means "this season's books are closed" that is a
-   * genuinely dangerous name to reuse for "the page finished loading".
-   */
-  function shouldAskIntent(loaded, membership, onRoster) {
-    if (!loaded) return false;
-    if (!membership) return false; // not in this club — the join prompt's job
-    // The organizer decides the roster; asking them to apply to
-    // themselves and wait for their own approval is incoherent, and it
-    // is what the screen did — "主揪確認後才會加入名單", shown to the
-    // 主揪. They put themselves on the roster from the members page like
-    // anyone else, and they are legitimately allowed not to be on it.
-    if (membership.role === "organizer") return false;
-    if (onRoster) return false; // already a fixed member; nothing to ask
-    return membership.wants_fixed_membership === null;
-  }
-
-  function renderIntentAsk() {
-    const el = document.getElementById("intent-ask");
-    const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
-    const onRoster = !!(
-      currentSeason && currentSeason.members.some((m) => m.name === playerName())
-    );
-
-    if (!shouldAskIntent(seasonLoaded, mine, onRoster)) {
-      el.hidden = true;
-      return;
-    }
-    el.hidden = false;
-    // Worded so it doesn't contradict the live ＋報名 button below it.
-    // The old copy — "主揪確認後才會加入名單" — read as "you are blocked
-    // until approved" while single-game signup was working the whole
-    // time, and that contradiction got reported as a bug. Answering this
-    // is about the whole season; one night is a separate decision and
-    // stays open either way. (Not answering deliberately blocks nothing:
-    // see viewingOnlyReason.)
-    el.innerHTML = `
-      <div class="empty-state" style="text-align:left">
-        <h3>已加入「${escapeHtml(mine.name)}」</h3>
-        <p>你想固定打這一季嗎？這只關係到整季，單場報名兩種都可以用。</p>
-        <div class="btn-row" style="margin-top:12px">
-          <button type="button" class="btn btn-primary" onclick="answerIntent(true)">我要固定打整季</button>
-          <button type="button" class="btn btn-quiet" onclick="answerIntent(false)">我只想單場報名</button>
-        </div>
-        <p class="hint" style="margin-top:10px">
-          選「固定打整季」會送出申請，主揪把你加進名單後就會收整季的季費。
-        </p>
-      </div>
-    `;
-  }
-
-  async function answerIntent(wantsFixed, thenEnterApp) {
-    try {
-      const updated = await postJson(
-        API_BASE,
-        `/clubs/${currentClubId()}/members/me/intent`,
-        { wants_fixed_membership: wantsFixed },
-        "PUT"
-      );
-      const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
-      if (mine) mine.wants_fixed_membership = updated.wants_fixed_membership;
-      if (thenEnterApp) {
-        enterApp();
-        return;
-      }
-      renderIntentAsk();
-      if (currentSeasonId) loadSeason(currentSeasonId);
-      else renderNoSeason();
-    } catch (e) {
-      toast("送出失敗：" + e.message);
-    }
-  }
 
   /** Why this viewer may look but not act, or null if they may act.
    *
@@ -591,19 +505,27 @@
     return viewingOnlyReason(mine, onRoster);
   }
 
-  async function joinFromPrompt() {
+  async function joinFromPrompt(wantsFixed, btn) {
+    const done = btn ? markBusy(btn) : () => {};
     try {
-      await postJson(API_BASE, `/clubs/${currentClubId()}/join`, { invite: pendingInviteToken });
-      await refreshMyClubs();
-      pendingInviteClubId = null;
-      pendingInviteToken = null;
-      renderManageButton();
-      renderClubChip();
-      // Not into the app yet — ask which kind of member they are first.
-      renderInviteIntent();
+      await postJson(API_BASE, `/clubs/${currentClubId()}/join`, {
+        invite: pendingInviteToken,
+        wants_fixed_membership: wantsFixed,
+      });
     } catch (e) {
-      toast("加入失敗：" + e.message);
+      // A second tap, or a second phone: the request is already in, which is the point.
+      if (!/^Already asked to join/.test(e.rawMessage || "")) {
+        done();
+        toast("申請沒有送出：" + e.message);
+        return;
+      }
     }
+    pendingInviteClubId = null;
+    pendingInviteToken = null;
+    await refreshMyClubs();
+    renderClubChip();
+    renderPendingScreen();
+    done();
   }
 
   function openClubSheet() {
@@ -626,7 +548,13 @@
       return `
         <button type="button" class="club-row${String(c.id) === String(clubId) ? " on" : ""}" data-pick-club="${c.id}">
           <i class="club-dot">${escapeHtml(c.name.slice(0, 1))}</i>
-          <span class="cr-name">${escapeHtml(c.name)}${mine ? "" : '<span class="cr-sub">邀請連結・尚未加入</span>'}</span>
+          <span class="cr-name">${escapeHtml(c.name)}${
+            !mine
+              ? '<span class="cr-sub">邀請連結・尚未加入</span>'
+              : mine.status === "pending"
+                ? '<span class="cr-sub">等待主揪核准</span>'
+                : ""
+          }</span>
           ${roleTag}${manageLink}
         </button>
       `;
@@ -757,7 +685,6 @@
       document.getElementById("season-picker").hidden = false;
       document.getElementById("cal-label").hidden = false;
       document.getElementById("month-cal").hidden = false;
-      renderIntentAsk();
       renderHero(season);
       renderCalendar();
       renderSelectedGameDetail();

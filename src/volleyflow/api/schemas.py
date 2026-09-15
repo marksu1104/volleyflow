@@ -37,11 +37,18 @@ class ClubUpdate(BaseModel):
     name: ClubName
 
 
+class JoinApproval(BaseModel):
+    as_fixed: bool
+    """Let in as a fixed member (put on a season's roster next) or for single games."""
+
+
 class ClubJoin(BaseModel):
     invite: str
     """The token from the club's invite link. Required: without it any
     signed-in caller could join any club by trying ids in order — see
     routes/clubs.join_club."""
+    wants_fixed_membership: bool | None = None
+    """What they ask to be: a fixed member, or here for single games."""
 
 
 class ClubOut(BaseModel):
@@ -81,6 +88,10 @@ class MyClubOut(BaseModel):
     """See ClubMemberRow.wants_fixed_membership — null means this person
     was never asked, which is what the member page uses to decide whether
     to ask them."""
+    status: str = "active"
+    """'pending' until the organizer approves them; see ClubMemberRow.status."""
+    pending_count: int = 0
+    """For an organizer: how many people are waiting to be approved."""
 
 
 class MembershipIntent(BaseModel):

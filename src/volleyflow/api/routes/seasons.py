@@ -560,6 +560,7 @@ def list_join_pool(
         .join(ClubMemberRow, ClubMemberRow.player_id == PlayerRow.id)
         .filter(
             ClubMemberRow.club_id == season.club_id,
+            ClubMemberRow.status == "active",
             ~PlayerRow.id.in_(season_member_ids),
         )
         .order_by(PlayerRow.id)

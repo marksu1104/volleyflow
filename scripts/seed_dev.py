@@ -87,7 +87,13 @@ def join(club_id: int, name: str) -> None:
     """Joins the way a real person does: with the club's invite link. A
     bare club id stopped being enough on 2026-09-15."""
     token = call("GET", f"/clubs/{club_id}/invite", ORGANIZER)["token"]
-    call("POST", f"/clubs/{club_id}/join", name, {"invite": token})
+    member = call("POST", f"/clubs/{club_id}/join", name, {"invite": token})
+    call(
+        "POST",
+        f"/clubs/{club_id}/members/{member['id']}/approve",
+        ORGANIZER,
+        {"as_fixed": False},
+    )
 
 
 def sign_in(name: str) -> dict[str, Any]:

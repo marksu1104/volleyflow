@@ -5,9 +5,31 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from volleyflow.api.invites import invite_token
+
 
 def auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def join_club(
+    client: TestClient, club_id: int, headers: Any, approve_as: Any = None
+) -> Any:
+    """Joins by the club's invite link and has the organizer let them in,
+    which is what "a member" means since 2026-09-16. `approve_as` defaults
+    to the organizer token create_club left on the client."""
+    response = client.post(
+        f"/clubs/{club_id}/join",
+        json={"invite": invite_token(club_id)},
+        headers=headers,
+    )
+    if response.status_code == 200:
+        client.post(
+            f"/clubs/{club_id}/members/{response.json()['id']}/approve",
+            json={"as_fixed": False},
+            headers=approve_as,
+        )
+    return response
 
 
 def create_club(client: TestClient, name: str = "Test Club") -> dict[str, Any]:

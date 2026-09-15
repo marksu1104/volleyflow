@@ -108,6 +108,10 @@ body {
   font-weight: 600; color: var(--ink-soft); text-decoration: none;
 }
 .context-switch a.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); font-weight: 700; }
+.nav-badge {
+  display: inline-block; min-width: 18px; margin-left: 5px; padding: 0 5px; border-radius: 9px;
+  background: var(--bad); color: var(--surface); font-size: .7rem; line-height: 18px; font-weight: 800;
+}
 .wrap.wide { max-width: 760px; }
 
 h1 { font-size: 1.2rem; margin: 0 0 4px; }

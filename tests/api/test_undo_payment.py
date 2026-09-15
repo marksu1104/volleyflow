@@ -4,8 +4,13 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from tests.api.factories import auth_headers, create_club, identify, start_season
-from volleyflow.api.invites import invite_token
+from tests.api.factories import (
+    auth_headers,
+    create_club,
+    identify,
+    join_club,
+    start_season,
+)
 
 
 def _club_with_alice(client: TestClient) -> tuple[int, int, int]:
@@ -98,9 +103,7 @@ def test_a_member_cannot_undo_a_payment(client: TestClient) -> None:
     club_id, _season_id, alice = _club_with_alice(client)
     paid = _pay(client, club_id, alice, "100")
     member = auth_headers(identify(client, "Member")["token"])
-    client.post(
-        f"/clubs/{club_id}/join", json={"invite": invite_token(club_id)}, headers=member
-    )
+    join_club(client, club_id, member)
 
     response = client.post(f"/ledger-entries/{paid}/reverse", headers=member)
 

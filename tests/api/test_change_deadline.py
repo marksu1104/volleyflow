@@ -14,8 +14,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from tests.api.factories import auth_headers, identify, start_season
-from volleyflow.api.invites import invite_token
+from tests.api.factories import auth_headers, identify, join_club, start_season
 
 
 def _season_past_its_deadline(client: TestClient) -> dict[str, Any]:
@@ -34,11 +33,7 @@ def _season_past_its_deadline(client: TestClient) -> dict[str, Any]:
 def _as_alice(client: TestClient, season: dict[str, Any]) -> dict[str, str]:
     """Alice, holding her own LINE account rather than the organizer's."""
     alice = identify(client, "Alice's account")
-    client.post(
-        f"/clubs/{season['club_id']}/join",
-        json={"invite": invite_token(season["club_id"])},
-        headers=auth_headers(alice["token"]),
-    )
+    join_club(client, season["club_id"], auth_headers(alice["token"]))
     client.post(
         f"/clubs/{season['club_id']}/players/{season['member_ids'][0]}/link",
         json={"line_player_id": alice["id"]},
@@ -97,11 +92,7 @@ def test_a_signup_cannot_be_taken_back_past_the_deadline(
     # prove anything about the deadline.
     season = _season_past_its_deadline(client)
     carol = identify(client, "Carol")
-    client.post(
-        f"/clubs/{season['club_id']}/join",
-        json={"invite": invite_token(season["club_id"])},
-        headers=auth_headers(carol["token"]),
-    )
+    join_club(client, season["club_id"], auth_headers(carol["token"]))
     signup = client.post(
         f"/games/{season['games'][0]['id']}/drop-ins",
         json={"people": [{"player_name": carol["name"], "player_id": carol["id"]}]},

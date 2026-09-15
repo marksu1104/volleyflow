@@ -173,6 +173,10 @@ def _require_club_access(db: Session, club_id: int, current_player: PlayerRow) -
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "You are not a member of this club"
         )
+    if membership.status != "active":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Waiting for the organizer to approve you"
+        )
 
 
 def _may_edit_accountless_player(
@@ -255,7 +259,7 @@ def _require_may_sign_up(
     membership = db.get(
         ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}
     )
-    if membership is None:
+    if membership is None or membership.status != "active":
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "You are not a member of this club"
         )

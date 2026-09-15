@@ -7,6 +7,7 @@ notified — never the waitlist."
 import logging
 from datetime import date, timedelta
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from volleyflow.db.engine import get_session
@@ -142,10 +143,41 @@ def send_reminders_for_date(session: Session, target_date: date) -> int:
     return len(games)
 
 
+def send_join_request_digests(session: Session) -> int:
+    """One message per club with people waiting to be let in, from the
+    daily run — never one per person, which would spend a month's pushes
+    in the first week. Returns how many clubs had somebody waiting."""
+    waiting = (
+        session.query(ClubMemberRow.club_id, func.count())
+        .filter(ClubMemberRow.status == "pending")
+        .group_by(ClubMemberRow.club_id)
+        .all()
+    )
+    for club_id, count in waiting:
+        club = session.get(ClubRow, club_id)
+        club_name = club.name if club is not None else ""
+        text = (
+            f"「{club_name}」有 {count} 位新成員等待核准，"
+            "請到 VolleyFlow 的「管理成員」處理。"
+        )
+        for line_user_id in _organizer_line_ids(session, club_id):
+            try:
+                push_to_user(line_user_id, text)
+            except Exception:
+                logger.exception(
+                    "Couldn't tell an organizer of club %s who is waiting", club_id
+                )
+    return len(waiting)
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     with get_session() as db_session:
         sent_count = send_reminders_for_date(
             db_session, date.today() + timedelta(days=1)
         )
-    print(f"Sent reminders for {sent_count} game(s)")
+        waiting_clubs = send_join_request_digests(db_session)
+    print(
+        f"Sent reminders for {sent_count} game(s); "
+        f"{waiting_clubs} club(s) have people waiting to join"
+    )

@@ -55,6 +55,9 @@ class ClubMemberRow(Base):
 
     __table_args__ = (
         CheckConstraint("role IN ('organizer', 'member')", name="ck_club_members_role"),
+        CheckConstraint(
+            "status IN ('pending', 'active')", name="ck_club_members_status"
+        ),
         Index("ix_club_members_player_id", "player_id"),
     )
 
@@ -62,6 +65,9 @@ class ClubMemberRow(Base):
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), primary_key=True)
     role: Mapped[str]
     joined_at: Mapped[datetime]
+    status: Mapped[str] = mapped_column(default="active", server_default="active")
+    """'pending' from joining by link until the organizer approves them, then
+    'active'. Somebody pending can see and do nothing in the club."""
     wants_fixed_membership: Mapped[bool | None] = mapped_column(default=None)
     """What this person said they are when they joined, before anyone
     with authority weighed in. NULL: never asked. True: they say they're

@@ -328,3 +328,47 @@ def test_send_reminders_for_date_only_processes_scheduled_games_that_day(
 
     assert count == 2
     assert len(sent_messages) == 2, "both of that day's games are short-handed"
+
+
+def _waiting_to_join(db_session: Session, season: SeasonRow, name: str) -> None:
+    person = PlayerRow(name=name, line_user_id=f"U-{name}")
+    db_session.add(person)
+    db_session.flush()
+    db_session.add(
+        ClubMemberRow(
+            club_id=season.club_id,
+            player_id=person.id,
+            role="member",
+            joined_at=datetime.now(),
+            status="pending",
+        )
+    )
+    db_session.flush()
+
+
+def test_people_waiting_to_join_are_one_message_to_the_organizer(
+    db_session: Session, sent_messages: SentMessages
+) -> None:
+    season = _season(db_session, club_name="晴光館")
+    _waiting_to_join(db_session, season, "新人一")
+    _waiting_to_join(db_session, season, "新人二")
+
+    clubs = reminders.send_join_request_digests(db_session)
+
+    assert clubs == 1
+    assert len(sent_messages) == 1
+    user_id, text = sent_messages[0]
+    assert user_id == "Uorganizer"
+    assert "晴光館" in text
+    assert "2 位" in text
+
+
+def test_nobody_waiting_to_join_sends_nothing(
+    db_session: Session, sent_messages: SentMessages
+) -> None:
+    _season(db_session)
+
+    clubs = reminders.send_join_request_digests(db_session)
+
+    assert clubs == 0
+    assert sent_messages == []

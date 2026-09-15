@@ -10,8 +10,7 @@ import hmac
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.api.factories import auth_headers, create_club, identify
-from volleyflow.api.invites import invite_token
+from tests.api.factories import auth_headers, create_club, identify, join_club
 
 
 def test_organizer_can_read_their_clubs_invite_token(client: TestClient) -> None:
@@ -29,11 +28,7 @@ def test_organizer_can_read_their_clubs_invite_token(client: TestClient) -> None
 def test_a_member_cannot_read_the_invite_token(client: TestClient) -> None:
     club = create_club(client)
     member = identify(client, "Carol")
-    client.post(
-        f"/clubs/{club['id']}/join",
-        json={"invite": invite_token(club["id"])},
-        headers=auth_headers(member["token"]),
-    )
+    join_club(client, club["id"], auth_headers(member["token"]))
 
     response = client.get(
         f"/clubs/{club['id']}/invite", headers=auth_headers(member["token"])

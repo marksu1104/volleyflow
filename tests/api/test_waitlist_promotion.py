@@ -11,8 +11,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from tests.api.factories import auth_headers, identify, start_season
-from volleyflow.api.invites import invite_token
+from tests.api.factories import auth_headers, identify, join_club, start_season
 
 
 def _full_game_with_queue(
@@ -130,11 +129,7 @@ def test_a_full_game_refuses_a_promotion_that_names_nobody_to_replace(
 def test_an_ordinary_member_cannot_reorder_the_queue(client: TestClient) -> None:
     season, game_id, [carol] = _full_game_with_queue(client, ["Carol"])
     member = identify(client, "Bystander")
-    client.post(
-        f"/clubs/{season['club_id']}/join",
-        json={"invite": invite_token(season["club_id"])},
-        headers=auth_headers(member["token"]),
-    )
+    join_club(client, season["club_id"], auth_headers(member["token"]))
 
     response = client.post(
         f"/waitlist/{carol['id']}/promote",

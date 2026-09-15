@@ -2,8 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-from tests.api.factories import auth_headers, create_club, identify
-from volleyflow.api.invites import invite_token
+from tests.api.factories import auth_headers, create_club, identify, join_club
 
 
 def test_the_organizer_can_rename_their_club(client: TestClient) -> None:
@@ -19,11 +18,7 @@ def test_the_organizer_can_rename_their_club(client: TestClient) -> None:
 def test_a_member_cannot_rename_the_club(client: TestClient) -> None:
     club = create_club(client, name="舊名字")
     member = auth_headers(identify(client, "Member")["token"])
-    client.post(
-        f"/clubs/{club['id']}/join",
-        json={"invite": invite_token(club["id"])},
-        headers=member,
-    )
+    join_club(client, club["id"], member)
 
     response = client.patch(
         f"/clubs/{club['id']}", json={"name": "被改掉"}, headers=member

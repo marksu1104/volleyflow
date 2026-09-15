@@ -5,8 +5,13 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from tests.api.factories import auth_headers, create_club, identify, start_season
-from volleyflow.api.invites import invite_token
+from tests.api.factories import (
+    auth_headers,
+    create_club,
+    identify,
+    join_club,
+    start_season,
+)
 
 
 def _club(client: TestClient, capacity: int) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -24,11 +29,7 @@ def _club(client: TestClient, capacity: int) -> tuple[dict[str, Any], dict[str, 
 
 def _member(client: TestClient, club: dict[str, Any], name: str) -> dict[str, str]:
     headers = auth_headers(identify(client, name)["token"])
-    client.post(
-        f"/clubs/{club['id']}/join",
-        json={"invite": invite_token(club["id"])},
-        headers=headers,
-    )
+    join_club(client, club["id"], headers)
     return headers
 
 

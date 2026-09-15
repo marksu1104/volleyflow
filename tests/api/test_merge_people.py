@@ -5,8 +5,13 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from tests.api.factories import auth_headers, create_club, identify, start_season
-from volleyflow.api.invites import invite_token
+from tests.api.factories import (
+    auth_headers,
+    create_club,
+    identify,
+    join_club,
+    start_season,
+)
 
 
 def _club(client: TestClient) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -95,11 +100,7 @@ def test_someone_with_their_own_account_cannot_be_merged_away(
     club, season = _club(client)
     keep = _bring(client, season["games"][0]["id"], "阿德")["player_id"]
     linked = identify(client, "有帳號的人")
-    client.post(
-        f"/clubs/{club['id']}/join",
-        json={"invite": invite_token(club["id"])},
-        headers=auth_headers(linked["token"]),
-    )
+    join_club(client, club["id"], auth_headers(linked["token"]))
 
     response = client.post(
         f"/clubs/{club['id']}/players/{keep}/merge",
@@ -115,11 +116,7 @@ def test_only_the_organizer_can_merge(client: TestClient) -> None:
     keep = _bring(client, first_game, "阿德")["player_id"]
     duplicate = _bring(client, second_game, "阿德仔")["player_id"]
     member = auth_headers(identify(client, "Member")["token"])
-    client.post(
-        f"/clubs/{club['id']}/join",
-        json={"invite": invite_token(club["id"])},
-        headers=member,
-    )
+    join_club(client, club["id"], member)
 
     response = client.post(
         f"/clubs/{club['id']}/players/{keep}/merge",

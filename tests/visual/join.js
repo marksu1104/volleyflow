@@ -1,21 +1,19 @@
-// Opening an invite link and joining, the way a stranger actually does.
+// Opening an invite link, asking to join, and being let in by the
+// organizer — the way a stranger actually gets into a club.
 //
-// This is the first thing every new user of the app does, and on
-// 2026-09-15 it changed underneath them: joining started requiring the
-// link's token (an id alone had let anybody join every club in turn — see
-// tests/api/test_tenant_isolation.py). The API side is covered there.
-// What only a browser can show is whether the page still gets somebody
-// from a shared link into the club — whether it keeps the token from the
-// URL all the way to the join button, and whether leaving the invite
-// screen and coming back still has it.
+// Joining changed twice: on 2026-09-15 it started requiring the link's
+// token (an id alone let anybody join every club), and on 2026-09-16 it
+// stopped letting people straight in: asking puts them in a queue and the
+// organizer approves. The API side is in tests/api/test_join_approval.py
+// and test_tenant_isolation.py; what only a browser can show is whether a
+// real person can get from a shared link to the club without getting lost.
 //
 //     .\scripts\dev-api.ps1      (in one window)
 //     .\scripts\dev-web.ps1      (in another)
 //     uv run python scripts/seed_dev.py
 //     node tests/visual/join.js
 //
-// Adds a member to the seed club — re-run seed_dev.py afterwards if that
-// matters to whatever runs next.
+// Adds a member to the seed club — re-run seed_dev.py afterwards.
 
 const { chromium } = require("playwright");
 
@@ -36,134 +34,130 @@ function report(name, problems) {
 async function inviteToken() {
   const clubs = await (await fetch(`${API}/clubs`, { headers: bearer(ORGANIZER) })).json();
   const club = clubs.find((c) => c.name === CLUB);
-  if (!club) throw new Error(`the seed club isn't there — run seed_dev.py first`);
-  const invite = await (
-    await fetch(`${API}/clubs/${club.id}/invite`, { headers: bearer(ORGANIZER) })
-  ).json();
+  if (!club) throw new Error("the seed club isn't there — run seed_dev.py first");
+  const invite = await (await fetch(`${API}/clubs/${club.id}/invite`, { headers: bearer(ORGANIZER) })).json();
   return { clubId: club.id, token: invite.token };
 }
 
-async function open(browser, url) {
+async function open(browser, url, clubId) {
   const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(`JS: ${String(e).slice(0, 120)}`));
   page.on("response", (r) => {
     if (r.url().startsWith(API) && r.status() >= 500) errors.push(`${r.status()} ${r.url()}`);
   });
+  page.on("dialog", (d) => d.accept());
+  if (clubId) await page.addInitScript((id) => localStorage.setItem("vf_club", String(id)), clubId);
   await page.goto(url, { waitUntil: "domcontentloaded" });
   return { page, errors };
 }
 
 const heroSays = (page) =>
   page.evaluate(() => document.getElementById("hero-wrap").innerText.replace(/\s+/g, " ").trim());
+const waitForText = (page, pattern) =>
+  page
+    .waitForFunction((src) => new RegExp(src).test(document.body.innerText), pattern.source, { timeout: 20000 })
+    .catch(() => {});
+
+async function statusIn(name, clubId) {
+  const me = await (
+    await fetch(`${API}/players/identify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id_token: `dev:${encodeURIComponent(name)}`, display_name: name }),
+    })
+  ).json();
+  const clubs = await (await fetch(`${API}/players/${me.id}/clubs`, { headers: bearer(name) })).json();
+  const mine = Array.isArray(clubs) ? clubs.find((c) => c.id === clubId) : null;
+  return mine ? mine.status : "none";
+}
 
 (async () => {
   const browser = await chromium.launch({ channel: "msedge" });
   const { clubId, token } = await inviteToken();
   const stranger = "新朋友" + (Date.now() % 100000);
+  const link = `${BASE}/member.html?invite=${encodeURIComponent(token)}&as=${encodeURIComponent(stranger)}`;
 
-  // 1. The link names the club, and offers to join.
-  const { page, errors } = await open(
-    browser,
-    `${BASE}/member.html?invite=${encodeURIComponent(token)}&as=${encodeURIComponent(stranger)}`
-  );
-  await page.waitForFunction(() => /加入「/.test(document.body.innerText), null, { timeout: 20000 }).catch(() => {});
+  // 1. The link names the club and offers the two ways to ask.
+  const { page, errors } = await open(browser, link);
+  await waitForText(page, /加入「/);
   const first = await heroSays(page);
-  report("an invite link names the club and offers to join", [
+  report("an invite link names the club and offers 申請當固定成員 / 申請臨打", [
     ...(first.includes(`加入「${CLUB}」`) ? [] : [`the screen says: ${first.slice(0, 80)}`]),
+    ...(first.includes("申請臨打") && first.includes("申請當固定成員") ? [] : ["the two buttons aren't both there"]),
   ]);
 
-  // 2. Leaving the invite screen through the club list and coming back
-  // still lands on the same invite. This used to navigate to ?club=<id>,
-  // which nothing read — harmless while joining needed no token, fatal
-  // after. It now goes to ?invite=<token>, and the page's own boot logic
-  // strips that from the address bar on arrival (see the comment on
-  // `inviteResolved`) the same way it does on the very first load — so
-  // the address bar being clean here is correct, not a regression, and
-  // the thing actually worth checking is that the invite screen is what
-  // greets the reload.
-  await page.click("#club-chip").catch(() => {});
-  await page.waitForTimeout(400);
-  const tapped = await page.evaluate(() => {
-    const row = [...document.querySelectorAll("[data-pick-club]")].find((r) =>
-      r.textContent.includes("尚未加入")
-    );
-    if (!row) return false;
-    row.click();
-    return true;
-  });
-  await page.waitForTimeout(3500);
-  const back = await heroSays(page);
-  report("coming back to the invite from the club list lands on it again", [
-    ...(tapped ? [] : ["no not-yet-joined club in the club list to tap"]),
-    ...(back.includes(`加入「${CLUB}」`) ? [] : [`the screen says: ${back.slice(0, 80)}`]),
-  ]);
-
-  // 3. Joining works from the page, and then asks which kind of member.
-  await page.evaluate(() => {
-    const b = [...document.querySelectorAll("#hero-wrap button, #hero-wrap a")].find((x) =>
-      x.textContent.includes("加入球隊")
-    );
-    if (b) b.click();
-  });
-  await page.waitForFunction(() => /已加入「/.test(document.body.innerText), null, { timeout: 15000 }).catch(() => {});
-  const joined = await heroSays(page);
-  report("pressing 加入球隊 joins, and asks which kind of member", [
-    ...(joined.includes(`已加入「${CLUB}」`) ? [] : [`the screen says: ${joined.slice(0, 80)}`]),
-  ]);
-
-  // 4. Answering lets them in, and the server agrees they are a member.
-  await page.evaluate(() => {
-    const b = [...document.querySelectorAll("#hero-wrap button")].find((x) =>
-      x.textContent.includes("我只是臨打")
-    );
-    if (b) b.click();
-  });
-  await page.waitForTimeout(4000);
-  const me = await (
-    await fetch(`${API}/players/identify`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id_token: `dev:${encodeURIComponent(stranger)}`, display_name: stranger }),
-    })
-  ).json();
-  const theirClubs = await (
-    await fetch(`${API}/players/${me.id}/clubs`, { headers: bearer(stranger) })
-  ).json();
-  const member = Array.isArray(theirClubs) && theirClubs.some((c) => c.id === clubId);
-  report("afterwards the server has them as a member of that club", [
-    ...(member ? [] : [`their clubs: ${JSON.stringify(theirClubs).slice(0, 100)}`]),
+  // 2. Asking says it's been sent, and the server has them waiting.
+  await page.click("text=申請臨打");
+  await waitForText(page, /已送出申請/);
+  const asked = await heroSays(page);
+  const waiting = await statusIn(stranger, clubId);
+  report("申請臨打 says the request is in, and the server has them waiting", [
+    ...(asked.includes("已送出申請") ? [] : [`the screen says: ${asked.slice(0, 80)}`]),
+    ...(waiting === "pending" ? [] : [`their membership is ${waiting}`]),
     ...errors,
   ]);
   await page.close();
 
-  // 4b. The same link again, now as a member, opens the club. It used to
-  // say 找不到這個球隊: the page dropped the club but kept the token.
-  const again = await open(
-    browser,
-    `${BASE}/member.html?invite=${encodeURIComponent(token)}&as=${encodeURIComponent(stranger)}`
-  );
-  await again.page
-    .waitForFunction(() => document.getElementById("club-chip-name").textContent !== "選擇球隊", null, {
-      timeout: 20000,
-    })
-    .catch(() => {});
-  await again.page.waitForTimeout(1500);
+  // 3. Opening the link again while waiting says so — not 找不到, not an app of refusals.
+  const again = await open(browser, link);
+  await waitForText(again.page, /已送出申請|找不到|加入「/);
   const reopened = await heroSays(again.page);
-  const chipName = await again.page.textContent("#club-chip-name");
-  report("opening the link again as a member opens the club", [
-    ...(reopened.includes("找不到這個球隊") ? [`the screen says: ${reopened.slice(0, 80)}`] : []),
-    ...(chipName === CLUB ? [] : [`the club chip says "${chipName}"`]),
+  report("opening the link again while waiting shows the request, not an error", [
+    ...(reopened.includes("已送出申請") ? [] : [`the screen says: ${reopened.slice(0, 80)}`]),
     ...again.errors,
   ]);
   await again.page.close();
 
-  // 5. A forged link goes nowhere, and says so.
+  // 4. The organizer sees a count on 管理, and approves from 管理成員.
+  const home = await open(browser, `${BASE}/member.html?as=${encodeURIComponent(ORGANIZER)}`, clubId);
+  await home.page.waitForSelector("#manage-badge:not([hidden])", { timeout: 20000 }).catch(() => {});
+  const badge = await home.page.evaluate(() => {
+    const el = document.getElementById("manage-badge");
+    return { hidden: el.hidden, text: el.textContent, href: document.getElementById("manage-link").getAttribute("href") };
+  });
+  report("the organizer's 管理 carries a count and leads to 管理成員", [
+    ...(!badge.hidden && Number(badge.text) >= 1 ? [] : [`badge: ${JSON.stringify(badge)}`]),
+    ...(badge.href === "organizer-members.html" ? [] : [`管理 goes to ${badge.href}`]),
+    ...home.errors,
+  ]);
+  await home.page.close();
+
+  const members = await open(browser, `${BASE}/organizer-members.html?as=${encodeURIComponent(ORGANIZER)}`, clubId);
+  await members.page.waitForSelector("#requests-section:not([hidden])", { timeout: 20000 }).catch(() => {});
+  const row = members.page.locator("#requests-list .pool-row", { hasText: stranger });
+  await row
+    .locator("button", { hasText: "核准臨打" })
+    .click()
+    .catch((e) => members.errors.push(`couldn't press 核准臨打 on ${stranger}: ${String(e).slice(0, 100)}`));
+  await members.page.waitForTimeout(2500);
+  const approved = await statusIn(stranger, clubId);
+  report("pressing 核准臨打 in 待核准 lets them in", [
+    ...(approved === "active" ? [] : [`their membership is ${approved}`]),
+    ...members.errors,
+  ]);
+  await members.page.close();
+
+  // 5. Now the same person opening the app is in the club.
+  const inside = await open(browser, `${BASE}/member.html?as=${encodeURIComponent(stranger)}`, clubId);
+  await inside.page
+    .waitForFunction((n) => document.getElementById("club-chip-name").textContent === n, CLUB, { timeout: 20000 })
+    .catch(() => {});
+  await inside.page.waitForTimeout(1500);
+  const now = await heroSays(inside.page);
+  report("once approved, opening the app lands in the club", [
+    ...(/已送出申請|找不到/.test(now) ? [`the screen says: ${now.slice(0, 80)}`] : []),
+    ...((await inside.page.textContent("#club-chip-name")) === CLUB ? [] : ["the club chip doesn't name the club"]),
+    ...inside.errors,
+  ]);
+  await inside.page.close();
+
+  // 6. A forged link goes nowhere, and says so.
   const forged = await open(
     browser,
     `${BASE}/member.html?invite=${clubId}.00000000000000000000&as=${encodeURIComponent(stranger + "乙")}`
   );
-  await forged.page.waitForFunction(() => /找不到這個球隊|加入「/.test(document.body.innerText), null, { timeout: 20000 }).catch(() => {});
+  await waitForText(forged.page, /找不到這個球隊|加入「/);
   const says = await heroSays(forged.page);
   report("a forged link is refused, with a way back", [
     ...(says.includes("找不到這個球隊") ? [] : [`the screen says: ${says.slice(0, 80)}`]),
@@ -171,6 +165,6 @@ const heroSays = (page) =>
   ]);
 
   await browser.close();
-  console.log(failed ? `\n${failed} 項有問題。` : "\n從邀請連結加入球隊的每一步都正常。");
+  console.log(failed ? `\n${failed} 項有問題。` : "\n從邀請連結申請、被核准、進到球隊，每一步都正常。");
   process.exit(failed ? 1 : 0);
 })();

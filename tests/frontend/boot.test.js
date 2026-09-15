@@ -115,45 +115,6 @@ test("LINE being unavailable is not retried either", async () => {
   assert.equal(identifyCalls, 0);
 });
 
-// 「請問你是這一季的固定成員嗎？」 — asked once, and only when the answer
-// isn't already on file. It kept appearing at the wrong moment.
-const { shouldAskIntent } = load("member.html");
-const unanswered = { id: 1, wants_fixed_membership: null };
-
-test("the intent question waits until the season is known", () => {
-  // The bug: it was asked as soon as identity resolved, so it sat above
-  // a hero that still read 載入中.
-  assert.equal(shouldAskIntent(false, unanswered, false), false);
-  assert.equal(shouldAskIntent(true, unanswered, false), true);
-});
-
-test("someone already on the roster is never asked", () => {
-  // The same bug's worse half: with no season loaded, onRoster is false
-  // for everyone, so existing fixed members got asked whether they were
-  // fixed members.
-  assert.equal(shouldAskIntent(true, unanswered, true), false);
-});
-
-test("an answer already on file isn't asked for again", () => {
-  assert.equal(shouldAskIntent(true, { id: 1, wants_fixed_membership: true }, false), false);
-  assert.equal(shouldAskIntent(true, { id: 1, wants_fixed_membership: false }, false), false);
-});
-
-test("someone not in the club is not asked — that's the join prompt's job", () => {
-  assert.equal(shouldAskIntent(true, undefined, false), false);
-});
-
-test("the organizer is never asked to apply to themselves", () => {
-  // Seen on a real phone: the 主揪 was shown "請問你是這一季的固定成員
-  // 嗎？主揪確認後才會加入名單" — a request for their own approval. They
-  // put themselves on the roster from the members page, and are allowed
-  // not to be on it at all.
-  const organizer = { role: "organizer", wants_fixed_membership: null };
-
-  assert.equal(shouldAskIntent(true, organizer, false), false);
-  assert.equal(shouldAskIntent(true, organizer, true), false);
-});
-
 test("an empty state can offer an action that isn't a link", () => {
   // 重新載入 has nowhere to navigate to — it's the same page.
   const { emptyStateHtml } = load();
