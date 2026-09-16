@@ -60,6 +60,27 @@ const seasonOf = async (id) => (await fetch(`${API}/seasons/${id}`, { headers: a
     await page.waitForSelector("#settings-form:not([hidden])", { timeout: 20000 });
     await page.waitForTimeout(900);
 
+    // The club-name field, checked here because this is the only
+    // permanent check that opens the settings page. It was once a row
+    // that collapsed into itself — `.btn { width: 100% }` — so its shape
+    // is worth measuring, not just its presence.
+    const nameField = await page.evaluate(() => {
+      const input = document.getElementById("club-name");
+      const save = document.getElementById("club-name-save");
+      return {
+        value: input.value,
+        inputWidth: Math.round(input.getBoundingClientRect().width),
+        saveWidth: Math.round(save.getBoundingClientRect().width),
+        saveDisabled: save.disabled,
+      };
+    });
+    report("球隊名稱是一個完整寬度的欄位，旁邊一顆小的儲存", [
+      ...(nameField.value === CLUB ? [] : [`欄位裡是「${nameField.value}」`]),
+      ...(nameField.inputWidth >= 240 ? [] : [`輸入框只有 ${nameField.inputWidth}px 寬`]),
+      ...(nameField.saveWidth <= 110 ? [] : [`儲存鍵有 ${nameField.saveWidth}px 寬`]),
+      ...(nameField.saveDisabled ? [] : ["還沒改就可以按儲存"]),
+    ]);
+
     const offered = await page.evaluate(() => {
       const rows = [...document.querySelectorAll("#upcoming-games .set-row")];
       return {

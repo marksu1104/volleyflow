@@ -110,14 +110,41 @@ function inDays(days) {
       ...(waiting.includes(GUEST) ? [] : [`候補那一頁寫的是: ${waiting.slice(0, 80)}`]),
     ]);
 
+    // What the signup sheet quotes on a full game. $0 is a price, and it
+    // reads as "this is free" on a night that charges a share a head —
+    // reported from real use on 2026-09-16.
+    await page.click("#game-sheet-backdrop .gsheet-close");
+    await page.waitForSelector("#game-sheet-backdrop", { state: "hidden", timeout: 10000 });
+    await page.evaluate((id) => openSignup(id), game.id);
+    await page.waitForSelector("#signup-backdrop:not([hidden])", { timeout: 10000 });
+    const quote = await page.evaluate(() => ({
+      label: document.getElementById("su-total-label").textContent,
+      amount: document.getElementById("su-amt").textContent,
+      breakdown: document.getElementById("su-breakdown").textContent,
+      go: document.getElementById("su-go").textContent,
+    }));
+    // This member is already playing, so the sheet does not put them in
+    // the list — it opens empty, which is the state the screenshot on
+    // 2026-09-16 was of. Either honest answer is fine here (「—・先新增
+    // 報名對象」 with nobody chosen, 「候補 N 位」 once somebody is); what
+    // must never appear is $0, which reads as "this is free" on a night
+    // that charges a share a head.
+    report("額滿時的報名單不會用 $0 回答", [
+      ...(quote.amount.includes("$0") ? ["金額寫著 $0"] : []),
+      ...(quote.go.includes("候補") ? [] : [`按鈕寫的是「${quote.go}」`]),
+      ...(quote.breakdown.includes("先新增") || quote.amount.includes("候補")
+        ? []
+        : [`寫的是「${quote.label} ${quote.amount}・${quote.breakdown}」`]),
+    ]);
+    await page.click("#signup-backdrop .gsheet-close");
+    await page.waitForSelector("#signup-backdrop", { state: "hidden", timeout: 10000 });
+
     // Somebody drops out: the queue moves up without anyone asking.
     await post("/absences", { player_name: ORGANIZER, game_id: game.id });
     const afterLeave = await get(`/seasons/${season.id}`);
     const nowPlaying = afterLeave.games[0].confirmed_drop_ins.map((d) => d.player_name);
     const stillQueued = afterLeave.games[0].waitlist_entries.map((w) => w.player_name);
 
-    await page.click("#game-sheet-backdrop .gsheet-close");
-    await page.waitForSelector("#game-sheet-backdrop", { state: "hidden", timeout: 10000 });
     await page.reload();
     // Wait for the thing being asserted, not for the page to have *a*
     // season: reads are cache-then-network, and the cached copy predates
