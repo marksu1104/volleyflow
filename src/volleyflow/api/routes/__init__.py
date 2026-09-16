@@ -37,6 +37,7 @@ from fastapi import APIRouter
 from volleyflow.api.routes import (
     attendance,
     clubs,
+    developer,
     games,
     money,
     players,
@@ -45,7 +46,10 @@ from volleyflow.api.routes import (
 )
 
 router = APIRouter()
-for _module in (clubs, seasons, games, attendance, players, money, reports):
+# `developer` sits at the end for the same reason the others sit where
+# they do: order only matters where one path could swallow another, and
+# /developer/overview is a literal path no parameterised route reaches.
+for _module in (clubs, seasons, games, attendance, players, money, reports, developer):
     router.include_router(_module.router)
 
 __all__ = ["router"]

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VolleyFlow 後台總覽</title>
+<link rel="preconnect" href="https://volleyflow.onrender.com" crossorigin>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏐</text></svg>">
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* Figures read down a column rather than across cards: there are a
+     dozen of them and none is more important than the others until one
+     of them looks wrong. */
+  .fig-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 9px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; margin-bottom: 5px; }
+  .fig-label { font-size: .84rem; color: var(--ink-soft); }
+  .fig-value { font-family: var(--font-num); font-size: 1.05rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .fig-value.attention { color: var(--warn); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="app-bar">
+    <span class="app-bar-left">
+      <button type="button" class="back-btn" onclick="location.href='profile.html'">‹ 返回</button>
+    </span>
+    <button type="button" class="brand" onclick="location.href='member.html'">VolleyFlow</button>
+    <span class="app-bar-right"></span>
+  </div>
+
+  <h1>後台總覽</h1>
+  <p class="hint" id="overview-sub">讀取中…</p>
+  <div id="overview"></div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+  const API_BASE = apiBase();
+  const LIFF_ID = "2011156233-6CouG6VI";
+
+  /** Counts only, and no money: this screen exists to notice something
+   * odd — a club that never got a season, people stuck waiting to be
+   * approved, reports piling up — and then go and look properly. See
+   * routes/developer.py. */
+  const GROUPS = [
+    {
+      title: "球隊與人",
+      figures: [
+        ["clubs", "球隊"],
+        ["players", "所有人"],
+        ["club_members", "球隊成員"],
+        ["pending_members", "等待核准", true],
+      ],
+    },
+    {
+      title: "季別與場次",
+      figures: [
+        ["seasons", "季別"],
+        ["settled_seasons", "已結算"],
+        ["games", "場次"],
+        ["upcoming_games", "還沒打"],
+      ],
+    },
+    {
+      title: "出席與帳務",
+      figures: [
+        ["drop_ins", "有效臨打"],
+        ["waitlist_entries", "候補中"],
+        ["ledger_entries", "帳本筆數"],
+      ],
+    },
+    {
+      title: "問題回報",
+      figures: [
+        ["reports", "累計回報"],
+        ["unread_reports", "還沒看", true],
+      ],
+    },
+  ];
+
+  function overviewHtml(data) {
+    const groups = GROUPS.map((group) => {
+      const rows = group.figures
+        .map(([key, label, watch]) => {
+          const value = Number(data[key] || 0);
+          const cls = watch && value > 0 ? "fig-value attention" : "fig-value";
+          return `<div class="fig-row"><span class="fig-label">${label}</span><span class="${cls}">${value}</span></div>`;
+        })
+        .join("");
+      return `<div class="section-label">${group.title}</div>${rows}`;
+    }).join("");
+
+    const newest = (data.newest_clubs || []).length
+      ? `<div class="section-label">最新建立的球隊</div><div class="chips">${data.newest_clubs
+          .map((name) => `<span class="chip">${escapeHtml(name)}</span>`)
+          .join("")}</div>`
+      : "";
+
+    return `${groups}${newest}
+      <div class="section-label">其他</div>
+      <a class="btn btn-quiet" href="reports.html">查看問題回報</a>`;
+  }
+
+  (async function init() {
+    const box = document.getElementById("overview");
+    const sub = document.getElementById("overview-sub");
+    const identified = await initLiffIdentity(API_BASE, LIFF_ID);
+    if (!identified) {
+      sub.textContent = "";
+      box.innerHTML = signInFailureHtml(identified);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/developer/overview`, { headers: authHeader() });
+      if (res.status === 403) {
+        sub.textContent = "";
+        box.innerHTML = emptyStateHtml("沒有查看權限", "這個頁面僅供開發者查看。");
+        return;
+      }
+      if (res.status === 503) {
+        sub.textContent = "";
+        box.innerHTML = emptyStateHtml("尚未設定", "伺服器尚未設定開發者身分，暫時無法查看。");
+        return;
+      }
+      if (!res.ok) throw new Error(res.statusText);
+      const data = await res.json();
+      sub.textContent = `於 ${new Date().toLocaleString("zh-TW", { hour12: false })} 讀取`;
+      box.innerHTML = overviewHtml(data);
+    } catch (e) {
+      sub.textContent = "";
+      showPageError(box, e.message);
+    }
+  })();
+</script>
+</body>
+</html>

@@ -40,6 +40,11 @@ const PAGES = [
   // worth pressing: it must load cleanly and offer nothing but the way
   // back.
   "reports.html",
+  // The developer's own figures. Same as reports.html on a local API:
+  // whoever is signed in locally is not the developer, so what gets
+  // pressed is its "no permission" state — which still has to load
+  // cleanly and offer a way back.
+  "developer.html",
   "organizer-members.html",
 ];
 

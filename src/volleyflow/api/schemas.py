@@ -618,6 +618,37 @@ class ProblemReportOut(BaseModel):
     read: bool
 
 
+class DeveloperOverviewOut(BaseModel):
+    """What the whole installation looks like right now, for the one
+    person who maintains it.
+
+    Counts rather than rows, and no money: the job of this screen is to
+    notice something odd — a club with no season, a queue of people
+    waiting to be approved, reports piling up unread — and then go and
+    look at it properly. Anything that would show a particular person's
+    balance belongs to their own club's organizer, not here.
+    """
+
+    clubs: int
+    players: int
+    seasons: int
+    settled_seasons: int
+    games: int
+    upcoming_games: int
+    club_members: int
+    pending_members: int
+    """Asked to join and still waiting — the one number that means
+    somebody is stuck behind an organizer who hasn't noticed."""
+    drop_ins: int
+    waitlist_entries: int
+    ledger_entries: int
+    reports: int
+    unread_reports: int
+    newest_clubs: list[str]
+    """Names only, newest first, so a club created minutes ago is
+    recognisable without opening anybody's books."""
+
+
 class PlayerBalanceOut(BaseModel):
     """One player's money in one club, summed three ways at once.
 
