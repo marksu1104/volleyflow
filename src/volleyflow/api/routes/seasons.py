@@ -53,11 +53,13 @@ from volleyflow.api.schemas import (
     Gender,
     MemberAdd,
     MemberOut,
+    PaidOutMemberOut,
     SeasonCreate,
     SeasonDetailOut,
     SeasonOut,
     SeasonSettleOut,
     SeasonSummaryOut,
+    SeasonUnsettleOut,
     SeasonUpdate,
     SettlementOut,
 )
@@ -904,4 +906,111 @@ def settle_season(
         season_id=season_id,
         settled_at=now,
         members=[_member_settlement_out(ms) for ms in settlements],
+    )
+
+
+@router.post("/seasons/{season_id}/unsettle", response_model=SeasonUnsettleOut)
+def unsettle_season(
+    season_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> SeasonUnsettleOut:
+    """Takes a settlement back, for the tap that shouldn't have happened.
+
+    Asked for on 2026-09-16: 「我覺得不小心按到帳務已結算也要可以復原」.
+    Settling writes one ABSENCE_REFUND per member owed one and locks the
+    season. This writes the opposite entry against each of those and
+    unlocks it again. The originals stay: the ledger is append-only, so
+    the books go on saying a settlement happened and was undone, which
+    is what actually occurred.
+
+    `reverses_entry_id` carries the link between the two, and its unique
+    index means one refund can be reversed exactly once however many
+    times this is tapped.
+
+    Cash already handed over is the one thing this cannot put right. A
+    refund paid out after settling is a PAYMENT entry of its own and
+    stays where it is; reversing the refund leaves that money reading as
+    owed back, which is the truth of it. Those people are named in the
+    answer so the organizer hears it from the app rather than from them.
+    """
+    season = (
+        db.query(SeasonRow).filter(SeasonRow.id == season_id).with_for_update().first()
+    )
+    if season is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    _require_organizer(db, season.club_id, current_player)
+    if season.settled_at is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is not settled")
+
+    refunds = (
+        db.query(LedgerEntryRow)
+        .filter(
+            LedgerEntryRow.season_id == season_id,
+            LedgerEntryRow.entry_type == EntryType.ABSENCE_REFUND,
+            # Not itself an undo of something else.
+            LedgerEntryRow.reverses_entry_id.is_(None),
+        )
+        .all()
+    )
+    reversed_already = {
+        entry_id
+        for (entry_id,) in db.query(LedgerEntryRow.reverses_entry_id).filter(
+            LedgerEntryRow.reverses_entry_id.in_([r.id for r in refunds] or [0])
+        )
+    }
+
+    # Read before the lock comes off: which refunds were handed over in
+    # cash after this season was settled.
+    paid_out = (
+        db.query(LedgerEntryRow, PlayerRow)
+        .join(PlayerRow, LedgerEntryRow.player_id == PlayerRow.id)
+        .filter(
+            LedgerEntryRow.season_id == season_id,
+            LedgerEntryRow.entry_type == EntryType.PAYMENT,
+            # Negative: the organizer paid the member, not the other way.
+            LedgerEntryRow.amount < 0,
+            LedgerEntryRow.recorded_at >= season.settled_at,
+        )
+        .all()
+    )
+
+    now = _now()
+    undone = 0
+    for refund in refunds:
+        if refund.id in reversed_already:
+            continue
+        db.add(
+            LedgerEntryRow(
+                player_id=refund.player_id,
+                club_id=refund.club_id,
+                entry_type=EntryType.ABSENCE_REFUND,
+                amount=-refund.amount,
+                recorded_at=now,
+                season_id=season_id,
+                note=f"Season {season_id} settlement undone",
+                reverses_entry_id=refund.id,
+            )
+        )
+        undone += 1
+
+    season.settled_at = None
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two taps on 復原結算 at once; the unique index caught the loser.
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "This settlement has already been undone"
+        ) from None
+
+    return SeasonUnsettleOut(
+        season_id=season_id,
+        reversed_entries=undone,
+        already_paid_out=[
+            PaidOutMemberOut(
+                player_id=player.id, player_name=player.name, amount=-entry.amount
+            )
+            for entry, player in paid_out
+        ],
     )

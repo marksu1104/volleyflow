@@ -86,6 +86,15 @@
       <div class="section-label">尚未結清的餘額</div>
       <div id="closing-list" class="money"></div>
       <p id="closing-all-clear" class="empty" hidden>所有成員均已結清</p>
+
+      <div class="btn-row" style="margin-top:16px">
+        <button type="button" class="btn btn-quiet" id="unsettle-btn" onclick="unsettleSeason()">復原結算</button>
+        <a class="btn btn-primary" href="organizer-settings.html">開新一季</a>
+      </div>
+      <p class="hint">
+        按錯了可以復原：每一筆退費會用一筆相反的紀錄沖銷掉，原本那筆會留著，帳本仍然說得出發生過什麼。
+        已經用現金退出去的錢不會自動收回，復原後會告訴你是誰。
+      </p>
     </div>
   </div>
 </div>
@@ -690,6 +699,38 @@
         moneyRowHtml(m.id, m.name, m.gender, splitLedger(balanceOf(m.id)), null, null)
       )
       .join("");
+  }
+
+  /** Undo a settlement.
+   *
+   * Every refund it wrote is cancelled by an opposite entry rather than
+   * deleted — the books go on saying a settlement happened and was
+   * undone. The one thing it cannot put right is cash already handed
+   * over, so whoever was paid is named here by name rather than
+   * counted: that money now reads as owed back, and the organizer is
+   * the only one who can sort it out. See routes/seasons.py
+   * unsettle_season.
+   */
+  async function unsettleSeason() {
+    if (!confirm("要復原這次結算嗎？每一筆退費都會用一筆相反的紀錄沖銷掉，原本的紀錄會留著。")) return;
+    try {
+      // postJson marks the pressed control busy and hands back a message
+      // already in Chinese — see saveGameDate on the settings page.
+      const result = await postJson(API_BASE, `/seasons/${currentSeason.id}/unsettle`, {});
+      const paid = (result && result.already_paid_out) || [];
+      loadLedger(currentSeason.id);
+      if (paid.length) {
+        toast(
+          `已復原。${paid
+            .map((p) => `${p.player_name} $${p.amount}`)
+            .join("、")} 已經領過現金，這筆現在算他們欠的`
+        );
+      } else {
+        toast("已復原結算", "good");
+      }
+    } catch (e) {
+      toast(e.message);
+    }
   }
 
   async function settleSeason() {

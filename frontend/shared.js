@@ -2112,6 +2112,8 @@ const _API_ERROR_PATTERNS = [
     () => "這一季已經結算，場地費不能再改了",
   ],
   [/^Season i?s? already settled$/, () => "這一季已經結算了"],
+  [/^Season is not settled$/, () => "這一季還沒結算，沒有東西可以復原"],
+  [/^This settlement has already been undone$/, () => "這次結算已經復原過了"],
   [
     /settled — its books can't be deleted$/,
     () => "有一季已經結算，帳本不能刪除",

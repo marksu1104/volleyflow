@@ -540,6 +540,25 @@ class SeasonSettleOut(BaseModel):
     members: list[MemberSettlementOut]
 
 
+class PaidOutMemberOut(BaseModel):
+    """Somebody whose refund was handed over in cash after the season was
+    settled. Undoing the settlement takes the refund off their ledger, so
+    what they were paid now reads as owed back — correct bookkeeping, and
+    the one thing the organizer has to be told about by name."""
+
+    player_id: int
+    player_name: str
+    amount: Decimal
+    """What was paid out, as a positive figure."""
+
+
+class SeasonUnsettleOut(BaseModel):
+    season_id: int
+    reversed_entries: int
+    """How many absence refunds were undone."""
+    already_paid_out: list[PaidOutMemberOut]
+
+
 class PaymentCreate(BaseModel):
     amount: Decimal
     """Signed from the player's point of view: positive means the player

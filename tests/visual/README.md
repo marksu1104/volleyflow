@@ -25,6 +25,7 @@ right" from "the page is right".
 | `nextseason.js` | 開新一季, from the settings page to 帳務 · 季費 | after changing the season wizard |
 | `tabs.js` | two tabs on two clubs, neither dragging the other | after changing how the club or season is remembered |
 | `gamedates.js` | moving one game to another date, with what was recorded against it | after changing the season's game list |
+| `unsettle.js` | settling a season and undoing it, including cash already paid out | after changing settlement or the ledger |
 
 All of them need a Chromium; they use the Edge already installed on Windows.
 Every one but `check.js` also needs both local servers up
