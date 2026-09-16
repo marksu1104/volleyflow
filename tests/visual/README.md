@@ -20,8 +20,11 @@ right" from "the page is right".
 | `feedback.js` | does every button do it *immediately* — within 200ms, by drawing the change, going busy, or showing 儲存中 | after changing anything that writes |
 | `chaos.js` | two people hammering one game, and a change that must not flip back | after changing who may be on a roster |
 | `adverse.js` | the same on a 2.5-second network, plus a write the server refuses | after changing anything optimistic |
+| `firstrun.js` | what somebody new meets on an empty database | after changing an empty state or the first club |
+| `join.js` | opening an invite link, asking to join, being let in | after changing invites or approval |
+| `nextseason.js` | 開新一季, from the settings page to 帳務 · 季費 | after changing the season wizard |
 
-All five need a Chromium; they use the Edge already installed on Windows.
+All of them need a Chromium; they use the Edge already installed on Windows.
 Every one but `check.js` also needs both local servers up
 and seed data, and they press destructive controls — point them only at a
 local server and re-run `scripts/seed_dev.py` afterwards.

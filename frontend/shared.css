@@ -546,6 +546,12 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 }
 .pick-row.on { border-color: var(--accent); background: var(--accent-soft); }
 .pick-row .pk-name { flex: 1; font-weight: 500; }
+/* What the club owes this person, or they owe it, while the organizer
+   decides whether they are in the new season — leaving somebody out is
+   a decision better made with their balance in view than after it. */
+.pick-row .pk-bal { font-family: var(--font-num); font-size: .72rem; font-variant-numeric: tabular-nums; }
+.pick-row .pk-bal.owe { color: var(--bad); }
+.pick-row .pk-bal.credit { color: var(--good); }
 .radio {
   flex: none; width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--rule-strong);
   background: var(--surface); box-sizing: border-box;

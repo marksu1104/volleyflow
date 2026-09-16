@@ -69,15 +69,16 @@
 
   <div id="create-season-form" class="settings-form" hidden>
     <button type="button" id="cancel-next-season" class="btn btn-quiet" style="margin-bottom:12px" hidden onclick="cancelNextSeason()">‹ 回到本季設定</button>
-    <div class="empty-state" style="text-align:left">
+    <div class="empty-state" id="create-season-blurb" style="text-align:left">
       <h3 id="create-season-title">建立第一季</h3>
       <p>一季 = 一段時間內的一組場次 + 一筆場地費 + 一份固定成員名單。填完下面幾格，系統會把場地費平均分攤成每人每場的金額，並在開季時就把季費記到每個人的帳上。</p>
     </div>
 
     <div class="stepper">
-      <span class="step on" data-step="1"><i>1</i>基本</span><span class="step-line"></span>
+      <span class="step on" data-step="1"><i>1</i>設定</span><span class="step-line"></span>
       <span class="step" data-step="2"><i>2</i>場次</span><span class="step-line"></span>
-      <span class="step" data-step="3"><i>3</i>成員</span>
+      <span class="step" data-step="3"><i>3</i>名單</span><span class="step-line"></span>
+      <span class="step" data-step="4"><i>4</i>確認</span>
     </div>
 
     <!-- 1. 基本 -->
@@ -168,10 +169,49 @@
       </div>
     </div>
 
-    <!-- 3. 成員 -->
+    <!-- 3. 名單 — a line and a sheet, not a page of tick boxes. A club
+         runs to a dozen or more people, and that many rows pushed the
+         price and the buttons off the screen. -->
     <div data-panel="3" hidden>
-      <div class="section-label" style="margin-top:0">從球隊成員挑本季的固定成員</div>
-      <div id="member-picks" class="pick"></div>
+      <div class="set-row" style="cursor:pointer" onclick="openRosterSheet()">
+        <span class="set-label">本季固定成員<span class="set-sub" id="roster-summary">讀取中…</span></span>
+        <span class="set-go">編輯 ›</span>
+      </div>
+      <div id="roster-alert" class="todo-line" hidden onclick="openRosterSheet()">
+        <i class="todo-dot calm"></i>
+        <span class="t-main" id="roster-alert-text"></span>
+        <span class="t-go">›</span>
+      </div>
+      <p class="hint">季費是用<b>人數上限</b>算的，所以名單多一人少一人只動到那個人自己的帳，其他人不受影響。</p>
+
+      <div class="btn-row" style="margin-top:14px">
+        <button type="button" class="btn btn-quiet" data-go="2">上一步</button>
+        <button type="button" class="btn btn-primary" data-go="4">下一步：確認</button>
+      </div>
+    </div>
+
+    <!-- 4. 確認 -->
+    <div data-panel="4" hidden>
+      <div class="section-label" style="margin-top:0">這一季會是這樣</div>
+      <div id="confirm-diff"></div>
+      <div id="create-preview" style="margin-top:12px"></div>
+
+      <div class="btn-row" style="margin-top:14px">
+        <button type="button" class="btn btn-quiet" data-go="3">上一步</button>
+        <button type="button" class="btn btn-primary" onclick="createSeason()">建立這一季</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="roster-backdrop" class="gsheet-backdrop" hidden>
+    <div class="gsheet">
+      <button class="gsheet-close" aria-label="關閉" onclick="closeRosterSheet()">✕</button>
+      <h3>本季固定成員</h3>
+      <div class="chips" style="margin-bottom:10px">
+        <span class="chip add" onclick="pickAll(true)">全選</span>
+        <span class="chip add" onclick="pickAll(false)">全不選</span>
+      </div>
+      <div id="roster-list" class="pick"></div>
 
       <div class="or-line" style="margin:14px 0 8px"><span>不在球隊裡的人</span></div>
       <div class="add-member-row" style="margin:0">
@@ -180,13 +220,7 @@
       </div>
       <div id="extra-names" class="chips"></div>
 
-      <div class="section-label">確認</div>
-      <div id="create-preview"></div>
-
-      <div class="btn-row" style="margin-top:14px">
-        <button type="button" class="btn btn-quiet" data-go="2">上一步</button>
-        <button type="button" class="btn btn-primary" onclick="createSeason()">建立這一季</button>
-      </div>
+      <button type="button" class="btn btn-primary" style="width:100%;margin-top:16px" onclick="closeRosterSheet()">完成</button>
     </div>
   </div>
 
@@ -391,6 +425,9 @@
   let nextSeasonMemberIds = null;
   let creatingNextSeason = false;
   let clubRoster = [];
+  // player_id -> what this club owes them (positive) or they owe it
+  // (negative). Shown beside each name while picking the roster.
+  let rosterBalances = new Map();
 
   document.getElementById("create-season-form").addEventListener("click", (e) => {
     const go = e.target.closest("[data-go]");
@@ -414,6 +451,7 @@
       if (!start.value) start.value = new Date().toISOString().slice(0, 10);
     }
     if (step === 3) loadClubRoster();
+    if (step === 4) renderConfirm();
     renderWizard();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -444,8 +482,25 @@
       set("g-start", dateKey(next));
       set("g-weeks", String(dates.length));
       generateDates();
+      // Whether the air conditioning runs is a forecast for nights
+      // nobody has played yet, so it is carried over only when the last
+      // season was all of one thing — that is the pattern that repeats.
+      // A season that was half cooled says nothing about which of
+      // *these* evenings will be hot, so those start unticked.
+      const cooled = s.games.filter((g) => g.air_conditioned).length;
+      if (cooled > 0 && cooled === s.games.length) setAllAc(true);
     }
     document.getElementById("create-season-title").textContent = "開新一季";
+    // Out of the way: the club's name is not part of this flow, and the
+    // paragraph explaining what a season is was written for somebody
+    // who has never made one. Left in place they pushed the stepper
+    // 650px down the page, so every step opened below the fold.
+    // The whole box, not only its paragraph: hiding just the words
+    // leaves an empty dashed rectangle with a title in it. 開新一季 is
+    // already said by the 回到本季設定 button above and by the stepper
+    // below, so the box has nothing left to do here.
+    document.getElementById("create-season-blurb").hidden = true;
+    document.getElementById("club-name-section").hidden = true;
     document.getElementById("cancel-next-season").hidden = false;
     document.getElementById("settings-form").hidden = true;
     document.getElementById("create-season-form").hidden = false;
@@ -457,6 +512,8 @@
     creatingNextSeason = false;
     nextSeasonMemberIds = null;
     document.getElementById("create-season-title").textContent = "建立第一季";
+    document.getElementById("create-season-blurb").hidden = false;
+    document.getElementById("club-name-section").hidden = false;
     document.getElementById("cancel-next-season").hidden = true;
     document.getElementById("create-season-form").hidden = true;
     document.getElementById("settings-form").hidden = false;
@@ -539,6 +596,33 @@
       clubRoster.filter((m) => !nextSeasonMemberIds || nextSeasonMemberIds.has(m.id)).map((m) => m.id)
     );
     renderWizard();
+    // What each of them is owed or owes, so leaving somebody out is a
+    // decision made with the money in view rather than after it. Late
+    // and non-fatal: the names are what the step is for, and a club
+    // with no books yet answers an empty list.
+    try {
+      const balances = await (
+        await fetch(`${API_BASE}/clubs/${currentClubId()}/balances`, { headers: authHeader() })
+      ).json();
+      rosterBalances = new Map(balances.map((b) => [b.player_id, Number(b.balance)]));
+      renderWizard();
+    } catch {
+      // Leave the rows without a figure rather than block the step.
+    }
+  }
+
+  function pickAll(on) {
+    pickedIds = on ? new Set(clubRoster.map((m) => m.id)) : new Set();
+    renderWizard();
+  }
+
+  function openRosterSheet() {
+    document.getElementById("roster-backdrop").hidden = false;
+  }
+
+  function closeRosterSheet() {
+    document.getElementById("roster-backdrop").hidden = true;
+    renderWizard();
   }
 
   function selectedNames() {
@@ -583,8 +667,17 @@
         (share ? `<span>· 每人每場 $${share}</span>` : "<span>· 挑完成員才算得出金額</span>");
     }
 
-    // step 3: member picks, extra names, and what each person will owe
-    document.getElementById("member-picks").innerHTML = clubRoster.length
+    // step 3: the roster itself lives in a sheet and the step carries one
+    // line. A club runs to a dozen or more people, and that many tick
+    // boxes pushed the price and the buttons off the bottom of a phone.
+    const owedLabel = (id) => {
+      const amount = Number(rosterBalances.get(id) || 0);
+      if (!amount) return "";
+      return amount < 0
+        ? `<span class="pk-bal owe">欠 $${Math.abs(amount)}</span>`
+        : `<span class="pk-bal credit">餘 $${amount}</span>`;
+    };
+    document.getElementById("roster-list").innerHTML = clubRoster.length
       ? clubRoster
           .map(
             (m) => `
@@ -594,10 +687,36 @@
                 <span class="pk-name">${escapeHtml(m.name)}</span>
                 ${m.linked === false ? '<span class="guest-tag">訪客</span>' : ""}
                 ${m.role === "organizer" ? '<span class="role-tag">主揪</span>' : ""}
+                ${owedLabel(m.id)}
               </div>`
           )
           .join("")
-      : '<div class="empty">球隊裡尚無其他對象，請於下方直接輸入姓名</div>';
+      : '<div class="empty">球隊裡尚無其他對象，請在下面直接輸入姓名</div>';
+
+    const picked = selectedNames();
+    const rosterLine = document.getElementById("roster-summary");
+    if (rosterLine) {
+      rosterLine.textContent = picked.length
+        ? `${picked.length} 人・${picked.slice(0, 3).join("、")}${picked.length > 3 ? " 等" : ""}`
+        : "還沒挑人，點這裡開始";
+    }
+
+    // Somebody the club still owes, or who still owes the club, standing
+    // outside the new season. Not wrong — a balance carries in this
+    // club's books whatever happens — but worth seeing before building.
+    const leftOut = clubRoster.filter(
+      (m) => !pickedIds.has(m.id) && Number(rosterBalances.get(m.id) || 0) !== 0
+    );
+    const alertRow = document.getElementById("roster-alert");
+    if (alertRow) {
+      alertRow.hidden = leftOut.length === 0;
+      if (leftOut.length) {
+        document.getElementById("roster-alert-text").textContent =
+          `${leftOut.length} 位有餘額但不在本季名單：` +
+          leftOut.slice(0, 2).map((m) => m.name).join("、") +
+          (leftOut.length > 2 ? " 等" : "");
+      }
+    }
 
     document.getElementById("extra-names").innerHTML = extraNames
       .map(
@@ -646,6 +765,63 @@
     renderWizard();
   }
 
+  /** Step 4: what is about to be created, said against what it is
+   * continuing from. Building a season charges every member on the
+   * spot, so the last screen before that is a read, not another form —
+   * and when it carries a previous season forward, the only things
+   * worth reading are what *changed*. */
+  function renderConfirm() {
+    const value = (id) => document.getElementById(id).value.trim();
+    const last = creatingNextSeason ? currentSeason : null;
+    const cost = Number(value("c-cost")) || 0;
+    const capacity = Number(value("c-capacity")) || 0;
+    const minRoster = Number(value("c-min-roster")) || 0;
+    const acSurcharge = Number(value("c-ac")) || 0;
+    const cooled = acSurcharge > 0 ? wizardDates.filter((d) => wizardAcDates.has(d)).length : 0;
+    const picked = selectedNames();
+
+    const rows = [];
+    const row = (label, shown, note) =>
+      rows.push(
+        `<div class="set-row"><span class="set-label">${label}` +
+          (note ? `<span class="set-sub">${note}</span>` : "") +
+          `</span><b>${shown}</b></div>`
+      );
+    const changed = (now, before, unit = "") =>
+      last && String(now) !== String(before) ? `上一季 ${before}${unit}` : last ? "沿用上一季" : "";
+
+    row("場地費總額", `$${cost}`, changed(cost, Number(last ? last.total_venue_cost : 0), ""));
+    if (wizardDates.length) {
+      const span = `${describeDate(wizardDates[0]).label} – ${describeDate(wizardDates[wizardDates.length - 1]).label}`;
+      row("場次", `${wizardDates.length} 場`, span);
+    } else {
+      row("場次", "尚未排", "回上一步產生日期");
+    }
+    if (acSurcharge > 0) row("開冷氣", `${cooled} 場`, `每場 $${acSurcharge}`);
+    row("人數上限", `${capacity} 人`, changed(capacity, last ? last.capacity : 0, " 人"));
+    row("最低人數", `${minRoster} 人`, changed(minRoster, last ? last.minimum_roster : 0, " 人"));
+    const where = [value("c-start-time") && `${value("c-start-time")}–${value("c-end-time")}`, value("c-location")]
+      .filter(Boolean)
+      .join(" · ");
+    if (where) row("時間地點", escapeHtml(where), "");
+
+    if (last) {
+      const before = last.members.map((m) => m.name);
+      const added = picked.filter((n) => !before.includes(n));
+      const gone = before.filter((n) => !picked.includes(n));
+      const note = added.length || gone.length
+        ? [added.length ? `新增 ${added.join("、")}` : "", gone.length ? `少了 ${gone.join("、")}` : ""]
+            .filter(Boolean)
+            .join("；")
+        : "跟上一季同一批人";
+      row("固定成員", `${picked.length} 人`, escapeHtml(note));
+    } else {
+      row("固定成員", `${picked.length} 人`, picked.slice(0, 4).join("、"));
+    }
+
+    document.getElementById("confirm-diff").innerHTML = rows.join("");
+  }
+
   // Cost lives on step 1 but drives the numbers shown on 2 and 3.
   document.getElementById("c-cost").addEventListener("input", renderWizard);
   document.getElementById("c-ac").addEventListener("input", renderWizard);
@@ -684,12 +860,13 @@
 
     try {
       const season = await postJson(API_BASE, `/clubs/${currentClubId()}/seasons`, payload);
-      // Reloading re-runs initClubAndSeasonPickers, which will now find
-      // this season and remember it — simpler than hand-updating the
-      // <select> and every piece of state loadSettings depends on.
       localStorage.setItem("vf_org_season", String(season.id));
-      toast("已建立這一季");
-      location.reload();
+      // Straight to the money. Building a season charges every member
+      // their season fee on the spot, so collecting it is what the
+      // organizer does next — and this page reloading itself to show a
+      // settings form nobody asked for was the 卡頓 in the old flow.
+      toast("已建立這一季，接下來收季費");
+      location.href = "organizer-ledger.html";
     } catch (e) {
       toast("建立失敗：" + e.message);
     }
