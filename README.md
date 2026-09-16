@@ -251,6 +251,9 @@ node tests/visual/nextseason.js # carrying a club into its next season, step by 
 node tests/visual/tabs.js       # two clubs open in two tabs, each staying put
 node tests/visual/gamedates.js  # moving a game to another date, records and all
 node tests/visual/unsettle.js   # settling a season, and taking it back
+node tests/visual/memberweek.js # a member's week: leave, a stand-in, and their ledger
+node tests/visual/waitlist.js   # queueing for a full game, moving up, paying on the night
+node tests/visual/organizerday.js # the 待辦 line worked down to an undone payment
 ```
 
 The first five run in CI on every push. The last seven need a browser and

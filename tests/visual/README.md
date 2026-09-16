@@ -26,6 +26,9 @@ right" from "the page is right".
 | `tabs.js` | two tabs on two clubs, neither dragging the other | after changing how the club or season is remembered |
 | `gamedates.js` | moving one game to another date, with what was recorded against it | after changing the season's game list |
 | `unsettle.js` | settling a season and undoing it, including cash already paid out | after changing settlement or the ledger |
+| `memberweek.js` | 請假 → 指定代打 → 收回 → 取消請假 → 我的帳務, as a member | after changing the hero card or the game sheet |
+| `waitlist.js` | a full game, a queued guest, an absence, the promotion, the money | after changing capacity, the queue or drop-in billing |
+| `organizerday.js` | 待辦 → 核准 → 指定代打 → 收季費 → 復原收款 | after changing the overview, approvals or payments |
 
 All of them need a Chromium; they use the Edge already installed on Windows.
 Every one but `check.js` also needs both local servers up
