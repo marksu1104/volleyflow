@@ -109,7 +109,10 @@
     <button type="button" class="su-add" id="su-add">＋ 新增報名對象</button>
 
     <div class="su-total">
-      <span>合計 <span class="su-breakdown" id="su-breakdown"></span></span>
+      <span class="su-total-text">
+        <span id="su-total-label">合計</span>
+        <span class="su-breakdown" id="su-breakdown"></span>
+      </span>
       <span class="su-amt" id="su-amt"></span>
     </div>
 
@@ -1135,11 +1138,24 @@
           .join("")
       : '<div class="empty" style="padding:14px 0">尚未加入任何人</div>';
 
-    document.getElementById("su-amt").textContent = "$" + confirmed * share;
-    // A queued place costs nothing until it becomes a slot, so say what it will cost then.
-    document.getElementById("su-breakdown").textContent = waiting
-      ? `${confirmed} 位 × $${share}；候補 ${waiting} 位遞補上才收，每位 $${share}`
-      : `${confirmed} 位 × $${share}`;
+    const amount = document.getElementById("su-amt");
+    const label = document.getElementById("su-total-label");
+    const breakdown = document.getElementById("su-breakdown");
+    if (confirmed === 0 && waiting > 0) {
+      // Everybody is queued, so "what do I owe now" is always $0 — which is
+      // not the question the tap asked. Answer the one it did.
+      label.textContent = "這次報名";
+      amount.textContent = `候補 ${waiting} 位`;
+      amount.classList.add("waiting");
+      breakdown.textContent = `遞補上才收，每位 $${share}・現在不收費`;
+    } else {
+      label.textContent = "合計";
+      amount.textContent = "$" + confirmed * share;
+      amount.classList.remove("waiting");
+      breakdown.textContent = waiting
+        ? `${confirmed} 位 × $${share}；候補 ${waiting} 位遞補上才收`
+        : `${confirmed} 位 × $${share}`;
+    }
     const go = document.getElementById("su-go");
     go.textContent = confirmed === 0 ? "加入候補" : "確認報名";
     go.disabled = suPeople.length === 0;

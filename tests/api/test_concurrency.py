@@ -194,3 +194,86 @@ def test_adding_the_same_member_twice_at_once_is_refused_not_a_crash(
         assert [m["name"] for m in roster].count(newcomer) == 1
     finally:
         _cleanup(club_id, season_id)
+
+
+def test_two_removals_at_once_promote_two_different_people(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 500 tests/visual/smoke.js hit on 2026-09-16, without a browser.
+
+    Every path that frees a slot offers it to the queue, and the offer
+    reads "who is first in line" and writes a drop-in for them. Two of
+    those overlapping both read the same first name, and both write it:
+    one person, two slots at one game, which
+    uq_drop_ins_active_player_game refuses outright.
+
+    Every other path that frees a slot goes through `_get_game_or_404`,
+    which locks the game row, so two of those wait for each other.
+    Taking somebody off the roster is the one that doesn't — and the
+    roster screen produces the overlap by itself, the same way adding
+    somebody does: the tap reloads the list, the reload redraws the
+    buttons, and a second tap lands while the first request is still in
+    the air. Two people coming off at once frees two places, and the
+    queue is supposed to move up by two, not to hand the same place out
+    twice.
+
+    Postgres-only, like the rest of this file: the SQLite session the
+    other API tests share has nothing to race against.
+    """
+    monkeypatch.setattr(auth, "verify_id_token", lambda token: token)
+
+    client = TestClient(app)
+    organizer_token = f"{_TEST_PLAYER_PREFIX}organizer"
+    client.post(
+        "/players/identify",
+        json={
+            "id_token": organizer_token,
+            "display_name": f"{_TEST_PLAYER_PREFIX}Organizer",
+        },
+    )
+    client.headers.update({"Authorization": f"Bearer {organizer_token}"})
+    club_id = client.post("/clubs", json={"name": "concurrency 3"}).json()["id"]
+    members = [f"{_TEST_PLAYER_PREFIX}M{i}" for i in range(3)]
+    created = client.post(
+        f"/clubs/{club_id}/seasons",
+        json={
+            "total_venue_cost": "900",
+            "game_dates": ["2031-01-21"],
+            "member_names": members,
+            "capacity": 3,
+        },
+    ).json()
+    season_id = created["id"]
+    game_id = created["games"][0]["id"]
+
+    try:
+        # The court is full of fixed members, so both of these queue.
+        waiting = [f"{_TEST_PLAYER_PREFIX}W{i}" for i in range(2)]
+        for name in waiting:
+            queued = client.post(
+                "/drop-ins", json={"player_name": name, "game_id": game_id}
+            )
+            assert queued.json()["status"] == "waitlisted", queued.text
+
+        roster = {
+            m["name"]: m["id"]
+            for m in client.get(f"/seasons/{season_id}").json()["members"]
+        }
+
+        def leave_roster(name: str) -> object:
+            return client.delete(f"/seasons/{season_id}/members/{roster[name]}")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            answers = list(pool.map(leave_roster, members[:2]))
+
+        assert [a.status_code for a in answers] == [204, 204], [a.text for a in answers]
+
+        playing = client.get(f"/seasons/{season_id}").json()["games"][0][
+            "confirmed_drop_ins"
+        ]
+        names = sorted(p["player_name"] for p in playing)
+        assert names == sorted(waiting), (
+            "two slots opened, so the queue moves up by two"
+        )
+    finally:
+        _cleanup(club_id, season_id)

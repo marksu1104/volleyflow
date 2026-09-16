@@ -22,11 +22,6 @@
     </span>
   </div>
 
-  <nav class="context-switch">
-    <a href="member.html">會員</a>
-    <a href="organizer.html" class="on">管理</a>
-  </nav>
-
   <nav class="org-nav">
     <a href="organizer.html" class="org-nav-link active">總覽</a>
     <a href="organizer-members.html" class="org-nav-link">名單</a>
@@ -34,15 +29,32 @@
     <a href="organizer-settings.html" class="org-nav-link">設定</a>
   </nav>
 
-  <select id="club-picker" class="season-picker club-picker" hidden></select>
-  <select id="season-picker" class="season-picker" hidden></select>
+  <div class="picker-row">
+    <select id="club-picker" class="season-picker club-picker" hidden></select>
+    <select id="season-picker" class="season-picker" hidden></select>
+  </div>
   <div id="error"></div>
-  <div id="season-meta"></div>
+  <button type="button" class="todo-line" id="todo-line" hidden onclick="openTodos()">
+    <i class="todo-dot" id="todo-dot"></i>
+    <span class="t-main" id="todo-main"></span>
+    <span class="t-more" id="todo-more"></span>
+    <span class="t-go">›</span>
+  </button>
 
   <div id="hero-wrap" style="margin-top: 14px"></div>
 
-  <div class="section-label" id="cal-label" hidden>本季場次</div>
-  <div id="month-cal" class="mcal" hidden></div>
+  <div id="month-cal" class="mcal" hidden style="margin-top: 12px"></div>
+
+  <div class="section-label" id="meta-label" hidden>本季設定</div>
+  <div id="season-meta"></div>
+</div>
+
+<div id="todo-backdrop" class="gsheet-backdrop" hidden>
+  <div class="gsheet">
+    <button class="gsheet-close" aria-label="關閉" onclick="closeTodos()">✕</button>
+    <h3>待辦</h3>
+    <div id="todo-list"></div>
+  </div>
 </div>
 
 <div id="game-sheet-backdrop" class="gsheet-backdrop" hidden>
@@ -114,7 +126,7 @@
   function renderNoSeason() {
     currentSeason = null;
     document.getElementById("season-meta").innerHTML = "";
-    document.getElementById("cal-label").hidden = true;
+    document.getElementById("meta-label").hidden = true;
     document.getElementById("month-cal").hidden = true;
     document.getElementById("season-picker").hidden = true;
     document.getElementById("hero-wrap").innerHTML = currentClubId()
@@ -167,9 +179,9 @@
       }
 
       document.getElementById("season-picker").hidden = false;
-      document.getElementById("cal-label").hidden = false;
+      document.getElementById("meta-label").hidden = false;
       document.getElementById("month-cal").hidden = false;
-        renderMeta(season);
+      renderMeta(season);
       renderHero(season);
       renderCalendar();
       renderSelectedGameDetail();
@@ -189,8 +201,74 @@
         clubMembers = m;
         renderSelectedGameDetail();
       });
+      loadTodos();
     }
   }
+
+  let todos = [];
+
+  async function loadTodos() {
+    const clubId = currentClubId();
+    if (!clubId || !currentSeason) return;
+    const ask = (path) =>
+      fetch(`${API_BASE}${path}`, { headers: authHeader() })
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []);
+    const [requests, balances] = await Promise.all([
+      ask(`/clubs/${clubId}/join-requests`),
+      ask(`/clubs/${clubId}/balances?season_id=${currentSeason.id}`),
+    ]);
+    const next = buildTodos(currentSeason, requests, balances);
+    // Same list, same pixels: repainting an unchanged row is the flicker.
+    if (JSON.stringify(next) === JSON.stringify(todos)) return;
+    todos = next;
+    renderTodos();
+  }
+
+  function renderTodos() {
+    const line = document.getElementById("todo-line");
+    line.hidden = todos.length === 0;
+    if (line.hidden) return;
+    document.getElementById("todo-dot").className = `todo-dot ${todos[0].kind}`;
+    document.getElementById("todo-main").textContent = todos[0].label;
+    document.getElementById("todo-more").textContent =
+      todos.length > 1 ? `還有 ${todos.length - 1} 件` : "";
+  }
+
+  function openTodos() {
+    document.getElementById("todo-list").innerHTML = todos
+      .map(
+        (t, i) => `
+          <div class="todo-row">
+            <i class="todo-dot ${t.kind}"></i>
+            <span class="ts-label">${escapeHtml(t.label)}<span class="ts-sub">${escapeHtml(t.sub)}</span></span>
+            <button type="button" class="mini-action" data-todo="${i}">${escapeHtml(t.action)}</button>
+          </div>`
+      )
+      .join("");
+    document.getElementById("todo-backdrop").hidden = false;
+  }
+
+  function closeTodos() {
+    document.getElementById("todo-backdrop").hidden = true;
+  }
+
+  document.getElementById("todo-list").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-todo]");
+    if (!btn) return;
+    const todo = todos[Number(btn.dataset.todo)];
+    closeTodos();
+    if (todo.href) {
+      location.href = todo.href;
+      return;
+    }
+    selectGame(todo.gameId);
+    openGameSheet();
+  });
+
+  document.getElementById("todo-backdrop").addEventListener("click", (e) => {
+    if (e.target.id === "todo-backdrop") closeTodos();
+  });
 
   /** This season's terms, as figures rather than a row of small pills.
    *

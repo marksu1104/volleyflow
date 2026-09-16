@@ -161,6 +161,28 @@ button:disabled { opacity: .6; cursor: default; }
 .btn-row { display: flex; gap: 8px; }
 .btn-row .btn { margin-top: 0; }
 
+/* 待辦: one line above the game card. A row of coloured chips read as a
+   wall of warnings and needed a scrollbar; colour now lives in the dot. */
+.todo-line {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  padding: 11px 12px; margin-bottom: 10px; font-size: .84rem; font-family: var(--font-cjk);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 11px;
+  box-shadow: var(--shadow); color: var(--ink); cursor: pointer;
+}
+.todo-line[hidden] { display: none; }
+.todo-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--ink-faint); }
+.todo-dot.urgent { background: var(--bad); }
+.todo-dot.warn { background: var(--warn); }
+.todo-line .t-main { flex: 1; font-weight: 600; }
+.todo-line .t-more { font-size: .74rem; color: var(--ink-faint); white-space: nowrap; }
+.todo-line .t-go { color: var(--ink-faint); }
+.todo-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 6px;
+  background: var(--surface-2); border-radius: 10px; font-size: .84rem;
+}
+.todo-row .ts-label { flex: 1; }
+.todo-row .ts-sub { display: block; font-size: .73rem; color: var(--ink-faint); margin-top: 1px; }
+
 /* generic small pill action (a game-detail row's own action, a payment
    quick-action, etc.) — distinct from the full-width .btn above */
 button.action {
@@ -189,11 +211,22 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .org-nav-link.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); font-weight: 700; }
 
 /* season/club picker */
+/* The caret is drawn in, because appearance: none takes the platform's
+   away — without it these read as boxes of text nobody thinks to tap. */
 .season-picker {
-  width: 100%; padding: 11px 12px; border: 1px solid var(--rule); border-radius: 10px;
-  font-size: .95rem; background: var(--surface); color: var(--ink); appearance: none;
+  width: 100%; padding: 11px 30px 11px 12px; border: 1px solid var(--rule); border-radius: 10px;
+  font-size: .95rem; color: var(--ink); appearance: none; text-overflow: ellipsis;
+  background: var(--surface)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.6 6 6.4 11 1.6' fill='none' stroke='%238a97a3' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    no-repeat right 11px center / 11px 8px;
 }
 .club-picker { margin-bottom: 8px; font-weight: 700; }
+/* Club and season on one row. Stacked, the two of them plus the
+   management tabs pushed the game card and the calendar off the
+   bottom of a phone screen, and the overview's whole point is
+   seeing both at once. */
+.picker-row { display: flex; gap: 8px; }
+.picker-row .season-picker { flex: 1 1 0; min-width: 0; margin-bottom: 0; }
 .identity { font-size: .8rem; color: var(--ink-soft); margin-bottom: 14px; min-height: 1.2em; }
 #error { color: var(--bad); font-size: .85rem; margin: 6px 0 0; min-height: 1em; }
 
@@ -472,6 +505,11 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   padding: 9px 3px; margin: -9px -3px;
 }
 .mini-action.danger { color: var(--bad); }
+.mini-action:disabled { color: var(--ink-faint); text-decoration: none; cursor: default; }
+/* A hint on the left, a small action on the right. The save button used to
+   sit in a flex row beside the input, where .btn's width:100% ate the row. */
+.under-field { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.under-field .hint { flex: 1; margin: 0; }
 .sub-form {
   display: flex; flex-direction: column; gap: 8px; padding: 10px 9px 12px; margin: 2px 0 4px;
   background: var(--surface-2); border-radius: 10px;
@@ -803,7 +841,9 @@ textarea {
   display: flex; justify-content: space-between; align-items: baseline;
   margin: 15px 0 11px; padding-top: 12px; border-top: 1px solid var(--rule); font-size: .82rem;
 }
+.su-total-text { display: flex; flex-direction: column; gap: 2px; }
 .su-amt { font-family: var(--font-num); font-size: 1.2rem; font-weight: 800; }
+.su-amt.waiting { font-size: 1rem; color: var(--warn); }
 .su-breakdown { color: var(--ink-faint); font-size: .72rem; }
 
 /* Tapping a date changes the card above the calendar, and without a cue

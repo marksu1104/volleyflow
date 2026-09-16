@@ -44,11 +44,6 @@
     </span>
   </div>
 
-  <nav class="context-switch">
-    <a href="member.html">會員</a>
-    <a href="organizer.html" class="on">管理</a>
-  </nav>
-
   <nav class="org-nav">
     <a href="organizer.html" class="org-nav-link">總覽</a>
     <a href="organizer-members.html" class="org-nav-link active">名單</a>
@@ -56,8 +51,10 @@
     <a href="organizer-settings.html" class="org-nav-link">設定</a>
   </nav>
 
-  <select id="club-picker" class="season-picker club-picker" hidden></select>
-  <select id="season-picker" class="season-picker" hidden></select>
+  <div class="picker-row">
+    <select id="club-picker" class="season-picker club-picker" hidden></select>
+    <select id="season-picker" class="season-picker" hidden></select>
+  </div>
   <div id="error"></div>
 
   <div id="join-link-section" hidden>

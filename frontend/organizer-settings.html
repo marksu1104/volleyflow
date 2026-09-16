@@ -31,11 +31,6 @@
     </span>
   </div>
 
-  <nav class="context-switch">
-    <a href="member.html">會員</a>
-    <a href="organizer.html" class="on">管理</a>
-  </nav>
-
   <nav class="org-nav">
     <a href="organizer.html" class="org-nav-link">總覽</a>
     <a href="organizer-members.html" class="org-nav-link">名單</a>
@@ -43,8 +38,10 @@
     <a href="organizer-settings.html" class="org-nav-link active">設定</a>
   </nav>
 
-  <select id="club-picker" class="season-picker club-picker" hidden></select>
-  <select id="season-picker" class="season-picker" hidden></select>
+  <div class="picker-row">
+    <select id="club-picker" class="season-picker club-picker" hidden></select>
+    <select id="season-picker" class="season-picker" hidden></select>
+  </div>
   <div id="error"></div>
 
   <div id="page-state"></div>
@@ -57,11 +54,11 @@
     <div class="section-label" style="margin-top:0">球隊</div>
     <div class="field">
       <label for="club-name">球隊名稱</label>
-      <div style="display:flex; gap:8px">
-        <input id="club-name" class="control" style="flex:1" type="text" maxlength="20" autocomplete="off">
-        <button type="button" class="btn btn-quiet" onclick="renameClub(this)">儲存名稱</button>
+      <input id="club-name" class="control" type="text" maxlength="20" autocomplete="off">
+      <div class="under-field">
+        <span class="hint" id="club-name-hint">會顯示在每位成員畫面的左上角，最多 20 個字。</span>
+        <button type="button" class="mini-action" id="club-name-save" onclick="renameClub(this)" disabled>儲存</button>
       </div>
-      <span class="hint">最多 20 個字，會顯示在每位成員畫面的左上角。</span>
     </div>
   </div>
 
@@ -848,9 +845,23 @@ ${label} 以及已經記在每個人帳上的季費都會一起消失，無法�
         loadedClubName = club.name;
         const input = document.getElementById("club-name");
         if (document.activeElement !== input) input.value = club.name;
+        updateClubNameRow();
       },
       { headers: authHeader() }
     ).catch(() => {});
+  }
+
+  const clubNameInput = document.getElementById("club-name");
+  clubNameInput.addEventListener("input", updateClubNameRow);
+
+  // 儲存只在名字真的改過時才亮起來，剩餘字數也只在那時候才值得說。
+  function updateClubNameRow() {
+    const value = clubNameInput.value.trim();
+    const changed = value.length > 0 && value !== loadedClubName;
+    document.getElementById("club-name-save").disabled = !changed;
+    document.getElementById("club-name-hint").textContent = changed
+      ? `還可以打 ${CLUB_NAME_MAX - clubNameInput.value.length} 個字`
+      : "會顯示在每位成員畫面的左上角，最多 20 個字。";
   }
 
   async function renameClub(btn) {
@@ -871,6 +882,7 @@ ${label} 以及已經記在每個人帳上的季費都會一起消失，無法�
       if (option && option.textContent === loadedClubName) option.textContent = club.name;
       loadedClubName = club.name;
       document.getElementById("club-name").value = club.name;
+      updateClubNameRow();
       toast("已更新球隊名稱");
     } catch (e) {
       toast("改名失敗：" + e.message);

@@ -61,6 +61,75 @@ function isGameFull(season, game) {
  * silent before it, a confirmation after, because a mid-season change
  * moves money on somebody's ledger right away. `games` is assumed sorted
  * by date, which is how every season detail response already orders it. */
+/** Everything still waiting for the organizer, most urgent first.
+ *
+ * A pure function of what the page already has, so the rule is testable
+ * without a browser — see tests/frontend/todos.test.js. */
+function buildTodos(season, requests, balances) {
+  const owing = new Set(
+    balances.filter((b) => Number(b.balance) < 0).map((b) => b.player_id)
+  );
+  const upcoming = season.games.filter(
+    (g) => g.status === "scheduled" && !describeDate(g.date).isPast
+  );
+  const list = [];
+  if (requests.length) {
+    list.push({
+      kind: "urgent",
+      label: `${requests.length} 位新成員等待核准`,
+      sub: "用邀請連結申請加入",
+      href: "organizer-members.html",
+      action: "核准",
+    });
+  }
+  for (const game of upcoming) {
+    const uncovered = game.absences.filter((a) => !a.filled_by);
+    if (!uncovered.length) continue;
+    list.push({
+      kind: "urgent",
+      label: `${describeDate(game.date).label} ${uncovered.map((a) => a.player_name).join("、")}請假，沒人代打`,
+      sub: "這一場會少人",
+      gameId: game.id,
+      action: "指定代打",
+    });
+  }
+  for (const game of upcoming) {
+    const playing = expectedAttendance(season, game);
+    if (playing >= season.minimum_roster) continue;
+    list.push({
+      kind: "warn",
+      label: `${describeDate(game.date).label} 只有 ${playing} 人`,
+      sub: `低於門檻 ${season.minimum_roster} 人`,
+      gameId: game.id,
+      action: "看名單",
+    });
+  }
+  const unpaid = season.members.filter((m) => owing.has(m.id)).length;
+  if (unpaid) {
+    list.push({
+      kind: "calm",
+      label: `季費未收 ${unpaid} 人`,
+      sub: "季費在開季前收齊",
+      href: "organizer-ledger.html",
+      action: "收款",
+    });
+  }
+  const todayGame = season.games.find((g) => g.date === dateKey(new Date()));
+  const unpaidToday = todayGame
+    ? todayGame.confirmed_drop_ins.filter((d) => owing.has(d.player_id)).length
+    : 0;
+  if (unpaidToday) {
+    list.push({
+      kind: "calm",
+      label: `今天臨打未收 ${unpaidToday} 人`,
+      sub: "當天現場收",
+      href: "organizer-ledger.html",
+      action: "收款",
+    });
+  }
+  return list;
+}
+
 // Same limit as the server's ClubName.
 const CLUB_NAME_MAX = 20;
 
@@ -325,8 +394,12 @@ async function initClubAndSeasonPickers(
 
     seasonEl.innerHTML = seasons
       .map((s) => {
+        // Just enough to tell one season from another. The picker shares a
+        // row with the club now, so half a phone's width — the count of
+        // games and people used to ride along here and got cut off
+        // mid-character, and the page says both a few lines further down.
         const settledTag = s.settled ? " · 已結算" : "";
-        return `<option value="${s.id}">${formatSeasonLabel(s)}（${s.total_games} 場・${s.member_count} 人）${settledTag}</option>`;
+        return `<option value="${s.id}">${formatSeasonLabel(s)}${settledTag}</option>`;
       })
       .join("");
 

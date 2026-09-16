@@ -566,6 +566,14 @@ def _offer_freed_slots_to_the_queue(db: Session, season: SeasonRow) -> list[int]
     """
     promoted: list[int] = []
     today = _today_in_taiwan()
+    # Locked, in date order, exactly as _get_game_or_404 locks the one
+    # game every other path through here holds. This is the only caller
+    # that reaches a game without going through that, so without the
+    # lock a removal and a cancellation could each read the same first
+    # name off the queue and each write it in. Date order so two
+    # removals take the games in the same sequence and queue up behind
+    # one another rather than deadlocking. SQLite ignores the clause;
+    # only the postgres-marked tests exercise it.
     games = (
         db.query(GameRow)
         .filter(
@@ -574,6 +582,7 @@ def _offer_freed_slots_to_the_queue(db: Session, season: SeasonRow) -> list[int]
             GameRow.date >= today,
         )
         .order_by(GameRow.date)
+        .with_for_update()
         .all()
     )
     for game in games:
@@ -775,11 +784,35 @@ def _restore_retired_absences(db: Session, season: SeasonRow, player_id: int) ->
     two people and it was genuinely dropped when the
     member left; the FIFO rule that decides which absence gets refunded
     is billing, works off the counts, and needs no such link.
+
+    Leave is not put back on a night they have since signed up for
+    themselves. Their signup is the later word, exactly as the absence
+    was the later word when they left the roster — and restoring it
+    anyway quietly erased a night they had really booked: the signup is
+    absorbed into the membership, then skipped on the way out again
+    because the player counts as away. Found on 2026-09-16, one step
+    along from the 500 that tests/visual/smoke.js hit.
     """
+    game_ids = [
+        row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id)
+    ]
+    signed_up_for = {
+        int(game_id)
+        for (game_id,) in db.query(DropInRow.game_id).filter(
+            DropInRow.player_id == player_id,
+            DropInRow.game_id.in_(game_ids),
+            DropInRow.cancelled_at.is_(None),
+        )
+    }
     absences = _retired_absences(db, season, player_id)
     for absence in absences:
-        absence.cancelled_at = None
+        # The mark comes off either way: it means "a removal closed
+        # this", and that is no longer true once the player is back on
+        # the roster, whether or not the leave itself comes back.
         absence.retired_at = None
+        if int(absence.game_id) in signed_up_for:
+            continue
+        absence.cancelled_at = None
     if absences:
         db.flush()
 
@@ -812,9 +845,7 @@ def _restore_absorbed_drop_ins(
     already happened, not admitting somebody new.
     """
     game_ids = [
-        row.id
-        for row in db.query(GameRow).filter(GameRow.season_id == season.id).all()
-        if row.id not in (away_from or set())
+        row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id).all()
     ]
     if not game_ids:
         return
@@ -826,13 +857,39 @@ def _restore_absorbed_drop_ins(
             DropInRow.game_id.in_(game_ids),
             DropInRow.absorbed_at.is_not(None),
         )
+        .order_by(DropInRow.signed_up_at)
         .all()
     )
+    skip = set(away_from or set())
+    # One person can hold one slot at a game, and the database enforces
+    # it (uq_drop_ins_active_player_game). Restoring blind could break
+    # that two ways: a row for a game they are already signed up for,
+    # and two marked rows for the same game left over from earlier
+    # round trips. tests/visual/smoke.js hit the second on 2026-09-16 —
+    # removing a member answered 500.
+    taken = {
+        int(game_id)
+        for (game_id,) in db.query(DropInRow.game_id).filter(
+            DropInRow.player_id == player_id,
+            DropInRow.game_id.in_(game_ids),
+            DropInRow.cancelled_at.is_(None),
+        )
+    }
+    restored = False
     for drop_in in absorbed:
-        drop_in.cancelled_at = None
+        # Cleared whether or not this row comes back, so a row this
+        # removal decided against can never be restored by a later one:
+        # the mark says "cancelled only because they joined the roster",
+        # and that reason is spent once it has been ruled on.
         drop_in.absorbed_at = None
+        game_id = int(drop_in.game_id)
+        if game_id in skip or game_id in taken:
+            continue
+        drop_in.cancelled_at = None
+        taken.add(game_id)
+        restored = True
         _record_drop_in_charge(db, drop_in, season, reverse=False)
-    if absorbed:
+    if absorbed or restored:
         db.flush()
 
 

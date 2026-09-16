@@ -97,6 +97,37 @@ def test_a_member_is_not_billed_twice_for_a_night_they_signed_up_for(
     assert playing == [], "she attends as a member now, not as a drop-in"
 
 
+def test_a_signup_an_absence_left_cancelled_is_never_restored_later(
+    client: TestClient,
+) -> None:
+    # Found by the browser sweep on 2026-09-16: removing a member
+    # answered 500. A game the member took leave from is skipped by the
+    # restore — the absence is the later word on that night — but the
+    # marker stayed on the row, so the next round trip marked a second
+    # row for the same game and the restore put both of them back: the
+    # same person twice on one slot.
+    season = start_season(client, member_names=["Alice"], capacity=18)
+    game = season["games"][0]
+    carol = client.post(
+        "/drop-ins", json={"player_name": "Carol", "game_id": game["id"]}
+    ).json()
+    client.post(f"/seasons/{season['id']}/members", json={"player_name": "Carol"})
+    client.post("/absences", json={"player_name": "Carol", "game_id": game["id"]})
+    client.delete(f"/seasons/{season['id']}/members/{carol['player_id']}")
+    client.post("/drop-ins", json={"player_name": "Carol", "game_id": game["id"]})
+    client.post(f"/seasons/{season['id']}/members", json={"player_name": "Carol"})
+
+    removed = client.delete(f"/seasons/{season['id']}/members/{carol['player_id']}")
+
+    assert removed.status_code == 204, removed.text
+    playing = client.get(f"/seasons/{season['id']}").json()["games"][0][
+        "confirmed_drop_ins"
+    ]
+    assert [p["player_name"] for p in playing] == ["Carol"], (
+        "she signed up for that night once, so she stands in one slot"
+    )
+
+
 def test_going_on_and_off_the_roster_twice_lands_in_the_same_place(
     client: TestClient,
 ) -> None:

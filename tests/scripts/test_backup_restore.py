@@ -264,15 +264,33 @@ def test_restores_a_real_disaster_on_neon(tmp_path: Path) -> None:
             )
         )
         session.commit()
+    with get_session() as session:
+        # An undone payment: the one row shape that points back into its
+        # own table, and so the one whose restore depends on the order
+        # rows are inserted in rather than the order tables are.
+        session.add(
+            LedgerEntryRow(
+                id=club_id + 1,
+                player_id=club_id,
+                club_id=club_id,
+                entry_type=EntryType.PAYMENT,
+                amount=Decimal("100"),
+                recorded_at=datetime(2026, 1, 1),
+                reverses_entry_id=club_id,
+            )
+        )
+        session.commit()
 
     dump_path = tmp_path / "neon_backup.json"
     try:
         backup_db.dump(dump_path)
 
         with get_session() as session:
-            entry = session.get(LedgerEntryRow, club_id)
-            assert entry is not None
-            session.delete(entry)
+            # The reversal first: it points at the other one.
+            for entry_id in (club_id + 1, club_id):
+                entry = session.get(LedgerEntryRow, entry_id)
+                assert entry is not None
+                session.delete(entry)
             session.commit()
             assert session.get(LedgerEntryRow, club_id) is None
 
@@ -282,6 +300,10 @@ def test_restores_a_real_disaster_on_neon(tmp_path: Path) -> None:
             restored = session.get(LedgerEntryRow, club_id)
             assert restored is not None
             assert restored.amount == Decimal("-100")
+            undone = session.get(LedgerEntryRow, club_id + 1)
+            assert undone is not None and undone.reverses_entry_id == club_id, (
+                "the row pointing back into its own table came back, link intact"
+            )
 
             # The sequence-reset half: a fresh row with no explicit id
             # must not collide with the one just restored.

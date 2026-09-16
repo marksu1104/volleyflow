@@ -68,6 +68,38 @@ def _restore_enums(table: Any, rows: list[dict[str, Any]]) -> None:
                 row[column.name] = enum_class(value)
 
 
+def _defer_self_references(table: Any, rows: list[dict[str, Any]]) -> list[Any]:
+    """Empties the columns that point back into this same table, and
+    returns the updates that fill them in again after the insert.
+
+    `sorted_tables` orders the tables against each other; nothing orders
+    the rows *within* one. So a ledger entry that reverses another one
+    can be handed to Postgres before the entry it reverses exists, and
+    the foreign key refuses it. Found on 2026-09-16 by the restore
+    drill, against a dev branch that had an undone payment in it: the
+    backup wrote perfectly well and could not be read back, which is
+    precisely the failure a backup exists to prevent.
+
+    Nulled and refilled rather than sorted into a safe order: an order
+    only exists while the references form no cycle, and nothing about a
+    self-reference promises that.
+    """
+    columns = [fk.parent.name for fk in table.foreign_keys if fk.column.table is table]
+    if not columns:
+        return []
+
+    key = list(table.primary_key.columns)[0]
+    updates: list[Any] = []
+    for row in rows:
+        pointing = {name: row[name] for name in columns if row.get(name) is not None}
+        if not pointing:
+            continue
+        for name in pointing:
+            row[name] = None
+        updates.append(table.update().where(key == row[key.name]).values(**pointing))
+    return updates
+
+
 def restore(dump_path: Path) -> None:
     data: dict[str, list[dict[str, Any]]] = json.loads(
         dump_path.read_text(encoding="utf-8"), object_hook=_json_object_hook
@@ -86,7 +118,10 @@ def restore(dump_path: Path) -> None:
             rows = data.get(table.name, [])
             _restore_enums(table, rows)
             if rows:
+                deferred = _defer_self_references(table, rows)
                 conn.execute(table.insert(), rows)
+                for update in deferred:
+                    conn.execute(update)
             print(f"  {table.name}: restored {len(rows)} rows")
 
             # An IDENTITY column's own counter doesn't know rows were just

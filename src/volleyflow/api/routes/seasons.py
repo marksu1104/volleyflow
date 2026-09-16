@@ -500,7 +500,19 @@ def remove_member(
     and without putting those back an add-then-remove erased a night
     they had actually played, and the fee owed for it with it.
     """
-    season = db.get(SeasonRow, season_id)
+    # Locked for the same reason add_member locks it, and found the same
+    # way: tests/visual/smoke.js pressing every button on the roster page
+    # (2026-09-16) answered 500 here. Taking somebody off frees their
+    # place at every future game and offers it to the queue, and two of
+    # those overlapping both read "who is first in line" and both wrote
+    # that person in — one person, two slots at one game, which
+    # uq_drop_ins_active_player_game refuses. The roster screen produces
+    # the overlap by itself: a tap reloads the list, the reload redraws
+    # the buttons, and the next tap lands while the first request is
+    # still in the air.
+    season = (
+        db.query(SeasonRow).filter(SeasonRow.id == season_id).with_for_update().first()
+    )
     if season is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
     _require_organizer(db, season.club_id, current_player)
