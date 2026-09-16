@@ -102,7 +102,7 @@ body {
 /* 會員 / 管理 — where you are, and the way to the other one. Only shown
    to a club's organizer; everyone else never learns it exists, which is
    also honest, since there's nothing there for them. */
-.context-switch { display: flex; gap: 3px; background: var(--surface-2); padding: 3px; border-radius: 10px; margin-bottom: 14px; }
+.context-switch { display: flex; gap: 3px; background: var(--surface-2); padding: 3px; border-radius: 10px; margin-bottom: 8px; }
 .context-switch a {
   flex: 1; text-align: center; padding: 7px 4px; border-radius: 8px; font-size: .82rem;
   font-weight: 600; color: var(--ink-soft); text-decoration: none;
@@ -201,7 +201,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
    pages sharing one season picker (same localStorage key), styled as a
    segmented control so it reads as one place with tabs, not four links. */
 .org-nav {
-  display: flex; gap: 3px; margin: 4px 0 16px; padding: 3px;
+  display: flex; gap: 3px; margin: 0 0 10px; padding: 3px;
   background: var(--surface-2); border-radius: 10px; overflow-x: auto;
 }
 .org-nav-link {
@@ -229,6 +229,10 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .picker-row .season-picker { flex: 1 1 0; min-width: 0; margin-bottom: 0; }
 .identity { font-size: .8rem; color: var(--ink-soft); margin-bottom: 14px; min-height: 1.2em; }
 #error { color: var(--bad); font-size: .85rem; margin: 6px 0 0; min-height: 1em; }
+/* The reserved line is there so an arriving error doesn't shove the page
+   down. While there is no error it is 22px of nothing, and on the
+   overview that is 22px of calendar. */
+#error:empty { min-height: 0; margin: 0; }
 
 /* avatar — initial-letter circle, used on rosters, headers, and the
    profile page (large variant) */
@@ -315,10 +319,19 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   color: var(--ink-soft); cursor: pointer; line-height: 1;
 }
 .mcal-title { font-size: .84rem; font-weight: 700; }
-.mcal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+/* A fixed row height, not an aspect ratio. Under aspect-ratio the cell's
+   width was derived from its height and stopped matching the 1fr column
+   it sat in: seven cells came to 355px inside a 332px grid, so Saturday
+   hung 8px past the edge of the card — except in a month that opens on
+   a Sunday, where they fitted and every cell shrank from 49x40 to
+   46x37. Paging between the two reshaped the calendar, reported as
+   「切換月份可能會變形」. min-width: 0 lets a 1fr track shrink to its
+   share rather than stand on its content. */
+.mcal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; grid-auto-rows: 34px; }
+.mcal-grid.mcal-weekdays { grid-auto-rows: auto; }
 .mcal-weekdays div { text-align: center; font-size: .64rem; color: var(--ink-faint); padding-bottom: 4px; font-weight: 600; }
 .mcal-cell {
-  aspect-ratio: 1 / .82; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   border-radius: 8px; font-size: .78rem; font-variant-numeric: tabular-nums; color: var(--ink-soft);
 }
 .mcal-cell.empty { visibility: hidden; }

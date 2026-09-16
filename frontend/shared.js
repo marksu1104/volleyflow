@@ -485,6 +485,14 @@ function renderMonthCalendar(container, games, onPick, opts) {
         <span>${d}</span>${game ? `<div class="mcal-dot ${stateOf(game)}"></div>` : ""}
       </div>`;
     }
+    // Six rows every month, padded at the end as well as the start. A
+    // month needs five or six depending on which weekday it opens on,
+    // so without this the card was 288px in September and 330px in
+    // January: paging a month resized it and shoved everything under it
+    // up or down. Reported as 「切換月份可能會變形」.
+    for (let i = firstWeekday + daysInMonth; i < 42; i++) {
+      cells += `<div class="mcal-cell empty"></div>`;
+    }
 
     container.innerHTML = `
       <div class="mcal-head">

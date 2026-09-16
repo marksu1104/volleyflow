@@ -94,6 +94,18 @@ check("相鄰按鈕的感應區沒有重疊（不會誤觸）", (m) => {
   return clashes.length ? `感應區重疊: ${[...new Set(clashes)].join(", ")}` : null;
 });
 
+check("月曆換月份不會變形", (m) => {
+  if (!m.calendar) return "沒有量到";
+  const problems = [];
+  const spilling = m.calendar.filter((s) => s.overflow > 0);
+  if (spilling.length) {
+    problems.push(`欄位擠出容器: ${spilling.map((s) => `${s.title} +${s.overflow}px`).join(", ")}`);
+  }
+  const shapes = [...new Set(m.calendar.map((s) => `${s.height}px ${s.cell}`))];
+  if (shapes.length > 1) problems.push(`月份之間大小不一: ${shapes.join(" / ")}`);
+  return problems.length ? problems.join("；") : null;
+});
+
 (async () => {
   let measured;
   const browser = await chromium.launch({ channel: "msedge" });
@@ -231,6 +243,40 @@ check("相鄰按鈕的感應區沒有重疊（不會誤觸）", (m) => {
       ),
     };
   });
+
+    // The calendar, paged across a year. Its cells used to take their
+    // width from an aspect ratio rather than from the column they sat
+    // in, so seven of them came to 355px inside a 332px grid and
+    // Saturday hung off the card — except in a month opening on a
+    // Sunday, where everything fitted and shrank instead. Paging
+    // between the two reshaped it: 「切換月份可能會變形」, 2026-09-16.
+    measured.calendar = await page.evaluate(() => {
+      const games = Array.from({ length: 13 }, (_, i) => {
+        const d = new Date(2026, 8, 1 + i * 7);
+        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        return { id: i + 1, date: iso, status: "scheduled" };
+      });
+      const box = document.createElement("div");
+      box.className = "mcal";
+      document.querySelector(".wrap").appendChild(box);
+      renderMonthCalendar(box, games, () => {}, { viewKey: "check" });
+
+      const round = (n) => Math.round(n);
+      const shapes = [];
+      for (let i = 0; i < 12; i += 1) {
+        const grid = box.querySelectorAll(".mcal-grid")[1];
+        const day = grid.querySelector(".mcal-cell:not(.empty)").getBoundingClientRect();
+        shapes.push({
+          title: box.querySelector(".mcal-title").textContent,
+          height: round(box.getBoundingClientRect().height),
+          cell: `${round(day.width)}x${round(day.height)}`,
+          overflow: grid.scrollWidth - grid.clientWidth,
+        });
+        box.querySelector('.mcal-nav[data-dir="1"]').click();
+      }
+      box.remove();
+      return shapes;
+    });
 
     fs.mkdirSync(OUT, { recursive: true });
     await page.screenshot({ path: path.join(OUT, "game-detail.png"), fullPage: true });
