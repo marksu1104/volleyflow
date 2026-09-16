@@ -242,7 +242,15 @@
       <span class="set-go">›</span>
     </div>
 
-    <div class="section-label">本季設定</div>
+    <!-- 場次 first: it is what an organizer comes back here to do — move
+         a date, call a night off — and it used to sit 1,294px down,
+         under seven fields that are set once and rarely touched. -->
+    <div class="section-label">場次</div>
+    <div id="upcoming-games"></div>
+    <button type="button" class="fold" id="past-games-toggle" hidden></button>
+    <div id="past-games" hidden></div>
+
+    <div class="section-label">本季設定 · 金額</div>
 
     <div class="field">
       <label for="f-cost">場地費總額</label>
@@ -254,11 +262,10 @@
     <div class="field">
       <label for="f-ac">冷氣一場多少錢</label>
       <input id="f-ac" class="control" type="number" step="1" min="0" placeholder="沒有另外收就留 0">
-      <span class="hint">
-        跟場地費總額同一個基準：場地有給優惠的話，這裡填的也是優惠後的金額。
-        有開冷氣的場次每人會多分攤這筆的 1/人數上限。
-      </span>
+      <span class="hint">有開冷氣的場次，每人會多分攤這筆的 1/人數上限。</span>
     </div>
+
+    <div class="section-label">本季設定 · 場地與規則</div>
 
     <div class="field-pair">
       <div class="field">
@@ -301,11 +308,6 @@
     </div>
 
     <button type="button" class="save-btn" onclick="saveSettings()">儲存</button>
-
-    <div class="section-label">場次</div>
-    <div id="upcoming-games"></div>
-    <button type="button" class="fold" id="past-games-toggle" hidden></button>
-    <div id="past-games" hidden></div>
 
     <div id="settle-section" hidden>
       <div class="section-label">季末</div>
@@ -913,6 +915,16 @@
     document.getElementById("confirm-diff").innerHTML = rows.join("");
   }
 
+  // What re-pricing a season costs everybody is worth saying at the
+  // moment the figure actually changes, and not before: sitting there on
+  // every visit, it is small print above the save button about something
+  // you are probably not doing.
+  document.getElementById("f-cost").addEventListener("input", () => {
+    const field = document.getElementById("f-cost");
+    document.getElementById("cost-warn-note").hidden =
+      field.disabled || field.value.trim() === String(originalVenueCost);
+  });
+
   // Cost lives on step 1 but drives the numbers shown on 2 and 3.
   document.getElementById("c-cost").addEventListener("input", renderWizard);
   document.getElementById("c-ac").addEventListener("input", renderWizard);
@@ -1007,7 +1019,8 @@
     document.getElementById("f-ac").value = season.ac_surcharge;
     costInput.disabled = settled;
     document.getElementById("cost-locked-note").hidden = !settled;
-    document.getElementById("cost-warn-note").hidden = settled;
+    // Hidden until the figure actually changes — see the f-cost listener.
+    document.getElementById("cost-warn-note").hidden = true;
 
     document.getElementById("f-capacity").value = season.capacity;
     document.getElementById("f-min-roster").value = season.minimum_roster;
