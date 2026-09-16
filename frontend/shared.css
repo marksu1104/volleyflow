@@ -226,6 +226,12 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
    bottom of a phone screen, and the overview's whole point is
    seeing both at once. */
 .picker-row { display: flex; gap: 8px; }
+/* An hour and a minute, side by side. A native time input prints the
+   phone's own clock (下午 06:30 on a Chinese phone) and no attribute
+   moves it, so the app spells 18:30 out itself. */
+.time-pair { display: flex; align-items: center; gap: 5px; }
+.time-pair .control { flex: 1 1 0; min-width: 0; padding-left: 8px; padding-right: 22px; }
+.time-pair span { color: var(--ink-faint); font-weight: 700; }
 .picker-row .season-picker { flex: 1 1 0; min-width: 0; margin-bottom: 0; }
 .identity { font-size: .8rem; color: var(--ink-soft); margin-bottom: 14px; min-height: 1.2em; }
 #error { color: var(--bad); font-size: .85rem; margin: 6px 0 0; min-height: 1em; }

@@ -271,11 +271,40 @@ function formatSeasonLabel(season) {
 
 const CLUB_STORAGE_KEY = "vf_club";
 
-/** The club the pickers currently have selected, or null. Anything that
- * calls a club-scoped endpoint (ledgers, payments) reads it from here
- * rather than threading it through every function. */
+/** Which club and season a page is looking at: remembered per *tab*,
+ * defaulted from the last one this browser used.
+ *
+ * It used to live in localStorage alone, which every tab of a browser
+ * shares. Opening a second club in a second tab rewrote the first tab's
+ * club under it, and the first tab then fetched the *other* club's
+ * roster while still showing this club's season - reported on
+ * 2026-09-17 as "just created a club and it already has 21 members",
+ * and as being shown as not the organizer, because in that other club
+ * they are not.
+ *
+ * sessionStorage is per tab, so the two no longer collide; localStorage
+ * still carries the default, so a new tab opens where you left off.
+ */
+function rememberedId(key) {
+  const thisTab = sessionStorage.getItem(key);
+  if (thisTab !== null) return thisTab;
+  const lastUsed = localStorage.getItem(key);
+  if (lastUsed !== null) sessionStorage.setItem(key, lastUsed);
+  return lastUsed;
+}
+
+function rememberId(key, value) {
+  sessionStorage.setItem(key, value);
+  localStorage.setItem(key, value);
+}
+
+function forgetId(key) {
+  sessionStorage.removeItem(key);
+  localStorage.removeItem(key);
+}
+
 function currentClubId() {
-  return localStorage.getItem(CLUB_STORAGE_KEY);
+  return rememberedId(CLUB_STORAGE_KEY);
 }
 
 /**
@@ -360,8 +389,8 @@ async function initClubAndSeasonPickers(
     // wiped database. Only ever on the network's word: a cached copy
     // that happens to be empty is a guess, and forgetting is not undoable.
     if (!meta || meta.fresh) {
-      localStorage.removeItem(CLUB_STORAGE_KEY);
-      localStorage.removeItem(seasonStorageKey);
+      forgetId(CLUB_STORAGE_KEY);
+      forgetId(seasonStorageKey);
     }
     onSeasonChange(null);
     return;
@@ -371,11 +400,11 @@ async function initClubAndSeasonPickers(
     .map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
     .join("");
 
-  const rememberedClub = localStorage.getItem(CLUB_STORAGE_KEY);
+  const rememberedClub = rememberedId(CLUB_STORAGE_KEY);
   if (rememberedClub && clubs.some((c) => String(c.id) === rememberedClub)) {
     clubEl.value = rememberedClub;
   }
-  localStorage.setItem(CLUB_STORAGE_KEY, clubEl.value);
+  rememberId(CLUB_STORAGE_KEY, clubEl.value);
 
   async function loadSeasons() {
     await getJsonSWR(
@@ -403,7 +432,7 @@ async function initClubAndSeasonPickers(
       })
       .join("");
 
-    const remembered = localStorage.getItem(seasonStorageKey);
+    const remembered = rememberedId(seasonStorageKey);
     if (remembered && seasons.some((s) => String(s.id) === remembered)) {
       seasonEl.value = remembered;
     }
@@ -412,7 +441,7 @@ async function initClubAndSeasonPickers(
     // every club change, and addEventListener would stack one more
     // handler each time.
     seasonEl.onchange = () => {
-      localStorage.setItem(seasonStorageKey, seasonEl.value);
+      rememberId(seasonStorageKey, seasonEl.value);
       onSeasonChange(seasonEl.value);
     };
 
@@ -420,7 +449,7 @@ async function initClubAndSeasonPickers(
   }
 
   clubEl.onchange = () => {
-    localStorage.setItem(CLUB_STORAGE_KEY, clubEl.value);
+    rememberId(CLUB_STORAGE_KEY, clubEl.value);
     loadSeasons();
   };
 

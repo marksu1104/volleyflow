@@ -248,6 +248,7 @@ node tests/visual/adverse.js   # the same, on a slow network and against refusal
 node tests/visual/firstrun.js   # what a new user meets on an empty database
 node tests/visual/join.js       # opening an invite link and joining, as a stranger does
 node tests/visual/nextseason.js # carrying a club into its next season, step by step
+node tests/visual/tabs.js       # two clubs open in two tabs, each staying put
 ```
 
 The first five run in CI on every push. The last seven need a browser and

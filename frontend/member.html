@@ -192,7 +192,7 @@
       const invite = await res.json();
       pendingInviteClubId = String(invite.club_id);
       pendingInviteClubName = invite.club_name;
-      localStorage.setItem(CLUB_STORAGE_KEY, pendingInviteClubId);
+      rememberId(CLUB_STORAGE_KEY, pendingInviteClubId);
     } catch (e) {
       // Same outcome as an invalid token — nothing to join, nothing lost.
     }
@@ -252,7 +252,7 @@
     const current = myClubs.find((c) => String(c.id) === String(currentClubId()));
     if ((current && current.status === "pending") || (!active.length && myClubs.length)) {
       if (!current || current.status !== "pending") {
-        localStorage.setItem(CLUB_STORAGE_KEY, String(myClubs[0].id));
+        rememberId(CLUB_STORAGE_KEY, String(myClubs[0].id));
       }
       renderPendingScreen();
       return;
@@ -303,7 +303,7 @@
    * leaving them looking at a club that doesn't exist with the app
    * apparently broken. */
   function forgetInvite() {
-    localStorage.removeItem(CLUB_STORAGE_KEY);
+    forgetId(CLUB_STORAGE_KEY);
     location.href = location.pathname;
   }
 
@@ -569,14 +569,14 @@
   document.getElementById("club-rows").addEventListener("click", (e) => {
     const manage = e.target.closest("[data-manage]");
     if (manage) {
-      localStorage.setItem(CLUB_STORAGE_KEY, manage.dataset.manage);
+      rememberId(CLUB_STORAGE_KEY, manage.dataset.manage);
       location.href = "organizer.html";
       return;
     }
     const row = e.target.closest("[data-pick-club]");
     if (row) {
       const id = row.dataset.pickClub;
-      localStorage.setItem(CLUB_STORAGE_KEY, id);
+      rememberId(CLUB_STORAGE_KEY, id);
       closeClubSheet();
       // A club that isn't mine yet can only be the invite from this
       // load. Go back through ?invite= so it lands on the join screen
@@ -605,7 +605,7 @@
     }
     try {
       const club = await postJson(API_BASE, "/clubs", { name: name.trim() });
-      localStorage.setItem(CLUB_STORAGE_KEY, String(club.id));
+      rememberId(CLUB_STORAGE_KEY, String(club.id));
       location.reload();
     } catch (e) {
       toast("建立失敗：" + e.message);

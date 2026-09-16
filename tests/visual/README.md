@@ -23,6 +23,7 @@ right" from "the page is right".
 | `firstrun.js` | what somebody new meets on an empty database | after changing an empty state or the first club |
 | `join.js` | opening an invite link, asking to join, being let in | after changing invites or approval |
 | `nextseason.js` | 開新一季, from the settings page to 帳務 · 季費 | after changing the season wizard |
+| `tabs.js` | two tabs on two clubs, neither dragging the other | after changing how the club or season is remembered |
 
 All of them need a Chromium; they use the Edge already installed on Windows.
 Every one but `check.js` also needs both local servers up

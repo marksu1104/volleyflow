@@ -40,12 +40,23 @@ function report(name, problems) {
     cost: document.getElementById("c-cost").value,
     capacity: document.getElementById("c-capacity").value,
     title: document.getElementById("create-season-title").textContent,
+    startTime:
+      document.getElementById("c-start-h").value + ":" + document.getElementById("c-start-m").value,
+    hourLabels: [...document.getElementById("c-start-h").options].map((o) => o.textContent).join(","),
   }));
   report("第 1 步沿用上一季的設定", [
     ...(step1.steps.length === 4 ? [] : [`步驟有 ${step1.steps.length} 個: ${step1.steps.join(" / ")}`]),
     ...(step1.steps.join("") === "1設定2場次3名單4確認" ? [] : [`步驟名稱: ${step1.steps.join(" / ")}`]),
     ...(Number(step1.cost) > 0 ? [] : [`場地費沒有帶過來: "${step1.cost}"`]),
     ...(step1.title.includes("開新一季") ? [] : [`標題是 ${step1.title}`]),
+    // 24-hour, whatever clock the phone is set to: a native time input
+    // prints 下午 06:30 on a Chinese phone and no attribute moves it.
+    ...(step1.startTime === (current.game_start_time || "").slice(0, 5)
+      ? []
+      : [`開始時間帶成 ${step1.startTime}，上一季是 ${current.game_start_time}`]),
+    ...(step1.hourLabels.includes("23") && !step1.hourLabels.includes("下午")
+      ? []
+      : [`小時選項不是 24 小時制: ${step1.hourLabels.slice(0, 60)}`]),
   ]);
 
   // 2. 場次 — dates already run on from the last game.
