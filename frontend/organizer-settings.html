@@ -359,6 +359,24 @@
   </div>
 </div>
 
+<div id="date-sheet-backdrop" class="gsheet-backdrop" hidden>
+  <div class="gsheet">
+    <button class="gsheet-close" aria-label="關閉" onclick="closeDateSheet()">✕</button>
+    <h3 id="date-sheet-title"></h3>
+    <div class="field">
+      <label for="date-sheet-input">改到哪一天</label>
+      <input id="date-sheet-input" class="control" type="date">
+      <span class="hint">
+        場次數沒變，所以每個人的金額完全不動。這一場已經記下的請假、報名和候補都會跟著搬到新的日期。
+      </span>
+    </div>
+    <div class="btn-row" style="margin-top: 13px">
+      <button type="button" class="btn btn-quiet" onclick="closeDateSheet()">關閉</button>
+      <button type="button" class="btn btn-primary" onclick="saveGameDate()">儲存</button>
+    </div>
+  </div>
+</div>
+
 <script src="shared.js"></script>
 <script>
   // localhost -> the local API, anywhere else -> production. See apiBase.
@@ -1016,8 +1034,17 @@
     function row(g) {
       const info = describeDate(g.date);
       const status = gameStatusLabel(g.status);
-      const action = !settled && g.status === "scheduled"
-        ? `<button type="button" class="mini-action danger" onclick="openCancelSheet(${g.id}, '${info.label}')">取消這場</button>`
+      const open = !settled && g.status === "scheduled";
+      // Cancelling stays available on a night already played — a game
+      // recorded wrongly still has to be correctable. Moving one does
+      // not: a date in the past is not somewhere to move a game to.
+      const movable = open && g.date >= today;
+      const action = open
+        ? `<span class="row-actions">${
+            movable
+              ? `<button type="button" class="mini-action" onclick="openDateSheet(${g.id}, '${info.label}', '${g.date}')">改日期</button>`
+              : ""
+          }<button type="button" class="mini-action danger" onclick="openCancelSheet(${g.id}, '${info.label}')">取消這場</button></span>`
         : status
           ? `<span class="hint" style="margin:0">${status}</span>`
           : "";
@@ -1040,6 +1067,47 @@
         pastList.hidden = !pastList.hidden;
         pastToggle.textContent = `已打過的 ${past.length} 場 ${pastList.hidden ? "▾" : "▴"}`;
       };
+    }
+  }
+
+  let dateSheetGameId = null;
+
+  /** Moving a night rather than calling it off and booking another.
+   *
+   * Asked for on 2026-09-17: dates and times do move. The season keeps
+   * the same number of games at the same share, so nobody's money
+   * moves, and the absences, signups and queue recorded against this
+   * game travel with it because they are keyed by the game and not by
+   * its date. See routes/games.py move_game for the four refusals.
+   */
+  function openDateSheet(gameId, label, iso) {
+    dateSheetGameId = gameId;
+    document.getElementById("date-sheet-title").textContent = `把 ${label} 改到別天`;
+    document.getElementById("date-sheet-input").value = iso;
+    document.getElementById("date-sheet-backdrop").hidden = false;
+  }
+
+  function closeDateSheet() {
+    document.getElementById("date-sheet-backdrop").hidden = true;
+  }
+
+  async function saveGameDate() {
+    const value = document.getElementById("date-sheet-input").value;
+    if (!value) {
+      toast("請先選一個日期");
+      return;
+    }
+    // No markBusy here: postJson already marks whichever control was
+    // pressed. Nor translateApiError — postJson hands back a message
+    // that is already in Chinese, and translating it twice turns
+    // 「那一天這一季已經有一場了」 into 「操作失敗（…）」.
+    try {
+      await postJson(API_BASE, `/games/${dateSheetGameId}`, { date: value }, "PATCH");
+      closeDateSheet();
+      toast("日期改好了", "good");
+      await loadSettings(currentSeasonId);
+    } catch (e) {
+      toast(e.message);
     }
   }
 

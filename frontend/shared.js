@@ -2013,6 +2013,10 @@ const _API_ERROR_PATTERNS = [
   [/^Only a payment or refund can be undone$/, () => "只有收款或退款可以復原"],
   [/^That payment has already been undone$/, () => "這筆已經復原過了"],
   [/^No such ledger entry$/, () => "找不到這筆帳"],
+  // Moving a game to another date.
+  [/^This season already has a game on that date$/, () => "那一天這一季已經有一場了"],
+  [/^That date has already been and gone$/, () => "那一天已經過了，請選之後的日期"],
+  [/^This game is cancelled, so it cannot be moved$/, () => "這一場已經取消，不能改日期"],
   [/^Pick two different people to merge$/, () => "請選兩個不同的人合併"],
   [
     /^Only a name typed in by hand can be merged into someone else$/,

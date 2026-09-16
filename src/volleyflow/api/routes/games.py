@@ -17,14 +17,17 @@ from volleyflow.api.routes._money import (
 )
 from volleyflow.api.routes._people import (
     _require_organizer,
+    _today_in_taiwan,
     get_current_player,
 )
 from volleyflow.api.schemas import (
     AirConditioningUpdate,
     GameCancel,
+    GameDateUpdate,
     GameOut,
 )
 from volleyflow.db.models import (
+    GameRow,
     PlayerRow,
     SeasonRow,
 )
@@ -119,6 +122,69 @@ def set_game_air_conditioning(
     season.total_venue_cost += delta
     db.flush()
     _sync_season_fee_ledger(db, season)
+    db.commit()
+    db.refresh(game)
+    return GameOut(id=game.id, date=game.date, status=game.status)
+
+
+@router.patch("/games/{game_id}", response_model=GameOut)
+def move_game(
+    game_id: int,
+    payload: GameDateUpdate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> GameOut:
+    """Move one game to another date.
+
+    Asked for on 2026-09-17 — 「有時候會有日期變動、時間更改的需求」. The
+    venue shifts a booking a week, or the club swaps one evening for
+    another, and until now the only way to say so was to call the night
+    off and lose everything recorded against it.
+
+    Nobody's charge moves with it. The season still has the same number
+    of games at the same share, so no ledger entry is touched — which is
+    exactly why this is not cancelling a game and booking another one.
+    Absences, signups and the queue are keyed by the game rather than by
+    its date, so they travel with it, which is the point.
+
+    Refused four ways: a settled season is closed; a cancelled night is
+    a fact about a date and moving it would rewrite what happened; two
+    games cannot share an evening; and a date already past would make a
+    night nobody played look played.
+    """
+    game = _get_game_or_404(db, game_id)
+    season = db.get(SeasonRow, game.season_id)
+    assert season is not None
+    _require_organizer(db, season.club_id, current_player)
+    if season.settled_at is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is already settled")
+    if game.status != GameStatus.SCHEDULED:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This game is cancelled, so it cannot be moved",
+        )
+    if payload.date == game.date:
+        return GameOut(id=game.id, date=game.date, status=game.status)
+    if payload.date < _today_in_taiwan():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "That date has already been and gone"
+        )
+    clash = (
+        db.query(GameRow)
+        .filter(
+            GameRow.season_id == game.season_id,
+            GameRow.date == payload.date,
+            GameRow.id != game.id,
+        )
+        .first()
+    )
+    if clash is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This season already has a game on that date",
+        )
+
+    game.date = payload.date
     db.commit()
     db.refresh(game)
     return GameOut(id=game.id, date=game.date, status=game.status)

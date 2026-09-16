@@ -386,6 +386,13 @@ class GameCancel(BaseModel):
     docs/billing-rules.md "Game cancellation"."""
 
 
+class GameDateUpdate(BaseModel):
+    date: date
+    """Where this game moves to. The season keeps the same number of
+    games at the same share, so nobody's charge moves with it — see
+    routes.games.move_game."""
+
+
 class PlayerIdentify(BaseModel):
     """What the LIFF page sends right after LIFF resolves. id_token
     (from liff.getIDToken()) is verified server-side — see

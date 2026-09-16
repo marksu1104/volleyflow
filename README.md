@@ -249,6 +249,7 @@ node tests/visual/firstrun.js   # what a new user meets on an empty database
 node tests/visual/join.js       # opening an invite link and joining, as a stranger does
 node tests/visual/nextseason.js # carrying a club into its next season, step by step
 node tests/visual/tabs.js       # two clubs open in two tabs, each staying put
+node tests/visual/gamedates.js  # moving a game to another date, records and all
 ```
 
 The first five run in CI on every push. The last seven need a browser and
