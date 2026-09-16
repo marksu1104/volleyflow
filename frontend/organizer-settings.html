@@ -67,10 +67,15 @@
     </div>
   </div>
 
-  <div id="create-season-form" class="settings-form" hidden>
-    <button type="button" id="cancel-next-season" class="btn btn-quiet" style="margin-bottom:12px" hidden onclick="cancelNextSeason()">‹ 回到本季設定</button>
-    <div class="empty-state" id="create-season-blurb" style="text-align:left">
+  <div id="wizard-backdrop" class="gsheet-backdrop full" hidden>
+   <div class="gsheet full">
+    <div class="wizard-head">
       <h3 id="create-season-title">建立第一季</h3>
+      <span class="wizard-step-count" id="wizard-step-count">第 1 步／共 4 步</span>
+      <button type="button" class="wizard-close" id="wizard-close" aria-label="關閉" onclick="cancelNextSeason()">✕</button>
+    </div>
+  <div id="create-season-form" class="settings-form">
+    <div class="empty-state" id="create-season-blurb" style="text-align:left">
       <p>一季 = 一段時間內的一組場次 + 一筆場地費 + 一份固定成員名單。填完下面幾格，系統會把場地費平均分攤成每人每場的金額，並在開季時就把季費記到每個人的帳上。</p>
     </div>
 
@@ -207,6 +212,8 @@
       </div>
     </div>
   </div>
+   </div>
+  </div>
 
   <div id="roster-backdrop" class="gsheet-backdrop" hidden>
     <div class="gsheet">
@@ -229,7 +236,7 @@
     </div>
   </div>
 
-  <div id="settings-form" class="settings-form" hidden>
+  <div id="settings-form" class="settings-form" hidden data-season-content>
     <div class="set-row" style="cursor:pointer" onclick="startNextSeason()">
       <span class="set-label">開新一季<span class="set-sub">沿用這一季的設定和成員，日期接在最後一場之後</span></span>
       <span class="set-go">›</span>
@@ -399,7 +406,7 @@
       document.getElementById("no-club-note").hidden = hasClub;
       document.getElementById("club-name-section").hidden = !hasClub;
       if (hasClub) fillClubName();
-      document.getElementById("create-season-form").hidden = (!hasClub || !!id) && !creatingNextSeason;
+      setWizardOpen((hasClub && !id) || creatingNextSeason);
       // Deliberately not revealed here: loadSettings shows it once the
       // season is in hand. Showing it now put an entirely blank form on
       // screen — every field empty — for as long as the fetch took,
@@ -487,7 +494,24 @@
       : String((Math.round(Number(wanted) / 5) * 5) % 60).padStart(2, "0");
   }
 
+  /** Open or shut the wizard's own screen.
+   *
+   * It covers the club and season pickers deliberately: with those
+   * still showing, four steps of a *new* season read as edits to the
+   * old one. The page behind it stops scrolling for the same reason.
+   *
+   * The close button is only there when there is something to go back
+   * to — a club with no season at all has nothing behind this screen.
+   */
+  function setWizardOpen(open) {
+    document.getElementById("wizard-backdrop").hidden = !open;
+    document.getElementById("wizard-close").hidden = !creatingNextSeason;
+    document.body.style.overflow = open ? "hidden" : "";
+    if (open) document.querySelector("#wizard-backdrop .gsheet").scrollTop = 0;
+  }
+
   function showWizardStep(step) {
+    document.getElementById("wizard-step-count").textContent = `第 ${step} 步／共 4 步`;
     for (const panel of document.querySelectorAll("[data-panel]")) {
       panel.hidden = Number(panel.dataset.panel) !== step;
     }
@@ -506,7 +530,7 @@
     if (step === 3) loadClubRoster();
     if (step === 4) renderConfirm();
     renderWizard();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    document.querySelector("#wizard-backdrop .gsheet").scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function startNextSeason() {
@@ -553,12 +577,8 @@
     // already said by the 回到本季設定 button above and by the stepper
     // below, so the box has nothing left to do here.
     document.getElementById("create-season-blurb").hidden = true;
-    document.getElementById("club-name-section").hidden = true;
-    document.getElementById("cancel-next-season").hidden = false;
-    document.getElementById("settings-form").hidden = true;
-    document.getElementById("create-season-form").hidden = false;
+    setWizardOpen(true);
     showWizardStep(1);
-    window.scrollTo({ top: 0 });
   }
 
   function cancelNextSeason() {
@@ -566,10 +586,7 @@
     nextSeasonMemberIds = null;
     document.getElementById("create-season-title").textContent = "建立第一季";
     document.getElementById("create-season-blurb").hidden = false;
-    document.getElementById("club-name-section").hidden = false;
-    document.getElementById("cancel-next-season").hidden = true;
-    document.getElementById("create-season-form").hidden = true;
-    document.getElementById("settings-form").hidden = false;
+    setWizardOpen(false);
   }
 
   function generateDates() {

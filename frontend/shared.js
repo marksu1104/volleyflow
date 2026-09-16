@@ -307,6 +307,27 @@ function currentClubId() {
   return rememberedId(CLUB_STORAGE_KEY);
 }
 
+/** A switched season, made visible.
+ *
+ * The picker changes and the numbers under it are replaced, but with
+ * nothing moving in between the screen reads as though nothing
+ * happened - reported on 2026-09-17 as 「切換季的時候要有變換季的動畫
+ * 不然會以為沒切到」. Every page marks the parts that belong to a
+ * season with data-season-content; this replays a short fade over them.
+ *
+ * Only on a real switch. The first paint of a page calls onSeasonChange
+ * too, and animating that would mean every page load flickers.
+ */
+function flashSeasonContent() {
+  for (const el of document.querySelectorAll("[data-season-content]")) {
+    el.classList.remove("season-swap");
+    // Reading layout restarts the animation; without it a second switch
+    // re-adds a class the element already has and nothing plays.
+    void el.offsetWidth;
+    el.classList.add("season-swap");
+  }
+}
+
 /**
  * Wires the club <select> and season <select> together: picking a club
  * reloads that club's seasons, picking a season calls onSeasonChange
@@ -443,6 +464,7 @@ async function initClubAndSeasonPickers(
     seasonEl.onchange = () => {
       rememberId(seasonStorageKey, seasonEl.value);
       onSeasonChange(seasonEl.value);
+      flashSeasonContent();
     };
 
     onSeasonChange(seasonEl.value);

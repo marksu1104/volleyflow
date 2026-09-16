@@ -148,6 +148,11 @@ button:disabled { opacity: .6; cursor: default; }
 
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes slideUp { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+/* Switching season replaces everything below the picker. Reusing fadeIn
+   rather than inventing a second one keeps every "this just changed" on
+   the same 4px rise. See flashSeasonContent. */
+.season-swap { animation: fadeIn .18s ease both; }
+@media (prefers-reduced-motion: reduce) { .season-swap { animation: none; } }
 
 .btn {
   width: 100%; padding: 11px; border: none; border-radius: 10px; font-size: .9rem;
@@ -399,6 +404,29 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   position: absolute; top: 10px; right: 12px; width: 30px; height: 30px;
   border: none; border-radius: 50%; background: var(--surface-2);
   color: var(--ink-soft); font-size: 1rem; line-height: 1; cursor: pointer;
+}
+
+/* The season wizard takes the whole screen rather than the bottom half
+   of it. Four steps of decisions is not something you peek at from
+   under the page you were on - and leaving the club and season pickers
+   showing behind it is what made 開新一季 read as "still in the old
+   season" (2026-09-17). */
+.gsheet-backdrop.full { align-items: stretch; }
+.gsheet.full {
+  max-width: 640px; min-height: 100%; max-height: 100%;
+  border-radius: 0; padding-top: 0; animation: fadeIn .18s ease both;
+}
+.wizard-head {
+  position: sticky; top: 0; z-index: 1; background: var(--surface);
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 0 10px; margin-bottom: 14px; border-bottom: 1px solid var(--rule);
+}
+.wizard-head h3 { margin: 0; font-size: .95rem; flex: 1; }
+.wizard-step-count { font-size: .74rem; color: var(--ink-soft); font-weight: 600; }
+.wizard-close {
+  flex: none; width: 30px; height: 30px; border: none; border-radius: 50%;
+  background: var(--surface-2); color: var(--ink-soft);
+  font-size: 1rem; line-height: 1; cursor: pointer;
 }
 
 /* one game's full detail inside the sheet */
