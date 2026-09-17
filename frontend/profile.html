@@ -17,11 +17,6 @@
     color: var(--surface); font-weight: 700; font-size: .86rem; cursor: pointer; font-family: var(--font-cjk);
   }
   .no-liff { color: var(--ink-soft); font-size: .85rem; padding: 30px 0; text-align: center; }
-  #report-preview {
-    display: block; margin-top: 8px; max-width: 160px; border-radius: 8px;
-    border: 1px solid var(--rule);
-  }
-  #report-preview[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -68,20 +63,14 @@
     <div id="clubs-list"></div>
     <p class="hint">餘額分球隊各自計算，不會互相流用。</p>
 
+    <!-- A link, not the form. Reporting a problem is not a profile
+         setting, and the form used to sit below the name field, the
+         gender picker and the club list — three things nobody scrolls
+         past on their way to say something is broken. It has its own
+         page now, which is also where the LINE rich menu's third button
+         lands. Moved 2026-09-18. -->
     <div class="section-label">回報問題</div>
-    <div class="field">
-      <textarea id="report-text" class="control" rows="4"
-        placeholder="哪個畫面、按了什麼、發生什麼事？例如：帳務頁按「已收」之後金額沒有變。"></textarea>
-      <p class="hint">
-        身分、頁面與裝置資訊會自動附上，無須自行填寫。回報會保存在網站上，由開發者查看。
-      </p>
-    </div>
-    <div class="field">
-      <label for="report-shot">截圖（選填）</label>
-      <input id="report-shot" class="control" type="file" accept="image/*">
-      <img id="report-preview" alt="" hidden>
-    </div>
-    <button type="button" class="btn btn-primary" id="report-btn" onclick="sendReport()">送出回報</button>
+    <a class="btn btn-quiet" href="report.html">告訴我們哪裡怪怪的</a>
 
     <div id="dev-reports" hidden>
       <div class="section-label">開發者</div>
@@ -191,79 +180,9 @@
     }
   });
 
-  let screenshot = null;
-
-  /**
-   * Shrinks the picture before it goes anywhere. A phone screenshot is
-   * several megabytes, and the person sending it is by definition having
-   * a bad time with this app already — quite possibly on the same weak
-   * connection that caused whatever they're reporting. 1280px of JPEG is
-   * more than enough to read a UI bug from.
-   */
-  document.getElementById("report-shot").addEventListener("change", (e) => {
-    const file = e.target.files && e.target.files[0];
-    const preview = document.getElementById("report-preview");
-    if (!file) {
-      screenshot = null;
-      preview.hidden = true;
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const scale = Math.min(1, 1280 / Math.max(img.width, img.height));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-        screenshot = canvas.toDataURL("image/jpeg", 0.7);
-        preview.src = screenshot;
-        preview.hidden = false;
-      };
-      img.onerror = () => {
-        screenshot = null;
-        preview.hidden = true;
-        toast("無法讀取此圖片，請改用其他檔案。");
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
-
-  async function sendReport() {
-    const box = document.getElementById("report-text");
-    const text = box.value.trim();
-    if (!text) {
-      toast("請先描述一下遇到的問題");
-      return;
-    }
-    const btn = document.getElementById("report-btn");
-    try {
-      await whileBusy(btn, async () => {
-        await postJson(API_BASE, "/reports", {
-          message: text,
-          // Sent rather than asked for: "it broke" is only actionable
-          // with the where, and nobody types a user agent by hand.
-          page: location.pathname.split("/").pop() || "profile.html",
-          user_agent: navigator.userAgent,
-          club_id: currentClubId() ? Number(currentClubId()) : null,
-          screenshot,
-        });
-      });
-      box.value = "";
-      screenshot = null;
-      document.getElementById("report-shot").value = "";
-      document.getElementById("report-preview").hidden = true;
-      btn.disabled = false;
-      btn.textContent = "送出回報";
-      toast("已送出，謝謝你的回報。");
-    } catch (e) {
-      btn.disabled = false;
-      btn.textContent = "送出回報";
-      toast("送出失敗：" + e.message);
-    }
-  }
+  // The report form, its screenshot downscaler and sendReport all moved
+  // to report.html on 2026-09-18 — deleted here rather than left behind
+  // as dead code, so there is exactly one place that can send a report.
 
   function clubRowHtml(club, ledger) {
     const roleTag = club.role === "organizer" ? '<span class="role-tag">管理員</span>' : "";

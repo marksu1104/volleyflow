@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VolleyFlow 回報問題</title>
+<link rel="preconnect" href="https://volleyflow.onrender.com" crossorigin>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏐</text></svg>">
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* Same preview as the form had on the profile page — a thumbnail, not
+     the full picture: a phone screenshot at full width pushes the send
+     button off the screen, which is a poor thing to do to somebody who
+     is already reporting that something is broken. */
+  #report-preview {
+    display: block; margin-top: 8px; max-width: 160px; border-radius: 8px;
+    border: 1px solid var(--rule);
+  }
+  #report-preview[hidden] { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="app-bar">
+    <span class="app-bar-left">
+      <button type="button" class="back-btn" onclick="goBack()">‹ 返回</button>
+    </span>
+    <button type="button" class="brand" onclick="location.href='member.html'">VolleyFlow</button>
+    <span class="app-bar-right"></span>
+  </div>
+
+  <h1>回報問題</h1>
+
+  <div id="page-state"></div>
+
+  <div id="content" hidden>
+    <div class="field">
+      <label for="report-text">發生什麼事？</label>
+      <textarea id="report-text" class="control" rows="5"
+        placeholder="哪個畫面、按了什麼、發生什麼事？例如：帳務頁按「已收」之後金額沒有變。"></textarea>
+      <p class="hint">
+        身分、頁面與裝置資訊會自動附上，無須自行填寫。回報會保存在網站上，由開發者查看。
+      </p>
+    </div>
+
+    <div class="field">
+      <label for="report-shot">截圖（選填）</label>
+      <input id="report-shot" class="control" type="file" accept="image/*">
+      <img id="report-preview" alt="" hidden>
+      <p class="hint">一張畫面通常比一段描述快得多。</p>
+    </div>
+
+    <button type="button" class="btn btn-primary" id="report-btn" onclick="sendReport()">送出回報</button>
+  </div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+  // localhost -> the local API, anywhere else -> production. See apiBase.
+  const API_BASE = apiBase();
+  const LIFF_ID = "2011156233-6CouG6VI";
+
+  /* A page of its own, rather than a block at the bottom of 個人資料.
+   *
+   * Reporting something broken is not a profile setting, and it was
+   * sitting under the name field, the gender picker and the club list —
+   * so anyone wanting to report a problem had to scroll past three
+   * things they did not come for. It is also the third button on the
+   * LINE rich menu, and a menu entry needs somewhere of its own to land:
+   * pointing it at 個人資料 would have opened a page about the reader
+   * rather than about the problem.
+   *
+   * The submit endpoint is unchanged — POST /reports, same payload — so
+   * nothing the developer reads on reports.html had to move with it.
+   */
+
+  /** Where "返回" goes. A reader normally arrives from 個人資料, but from
+   * the rich menu they arrive from nowhere at all, and history.back()
+   * would then leave the app entirely. Falls back to the app's home. */
+  function goBack() {
+    if (document.referrer && document.referrer.includes(location.host)) {
+      history.back();
+      return;
+    }
+    location.href = "member.html";
+  }
+
+  let screenshot = null;
+
+  /**
+   * Shrinks the picture before it goes anywhere. A phone screenshot is
+   * several megabytes, and the person sending it is by definition having
+   * a bad time with this app already — quite possibly on the same weak
+   * connection that caused whatever they're reporting. 1280px of JPEG is
+   * more than enough to read a UI bug from.
+   */
+  document.getElementById("report-shot").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    const preview = document.getElementById("report-preview");
+    if (!file) {
+      screenshot = null;
+      preview.hidden = true;
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, 1280 / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        screenshot = canvas.toDataURL("image/jpeg", 0.7);
+        preview.src = screenshot;
+        preview.hidden = false;
+      };
+      img.onerror = () => {
+        screenshot = null;
+        preview.hidden = true;
+        toast("無法讀取此圖片，請改用其他檔案。");
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  async function sendReport() {
+    const box = document.getElementById("report-text");
+    const text = box.value.trim();
+    if (!text) {
+      toast("請先描述一下遇到的問題");
+      box.focus();
+      return;
+    }
+    const btn = document.getElementById("report-btn");
+    try {
+      await whileBusy(btn, async () => {
+        await postJson(API_BASE, "/reports", {
+          message: text,
+          // Sent rather than asked for: "it broke" is only actionable
+          // with the where, and nobody types a user agent by hand. The
+          // page recorded is where the reader *came from*, not this one —
+          // this page is never the thing that broke.
+          page: reportedPage(),
+          user_agent: navigator.userAgent,
+          club_id: currentClubId() ? Number(currentClubId()) : null,
+          screenshot,
+        });
+      });
+      box.value = "";
+      screenshot = null;
+      document.getElementById("report-shot").value = "";
+      document.getElementById("report-preview").hidden = true;
+      btn.disabled = false;
+      btn.textContent = "送出回報";
+      toast("已送出，謝謝你的回報。", "good");
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = "送出回報";
+      toast("送出失敗：" + e.message);
+    }
+  }
+
+  /** The screen the reader was on before they came here.
+   *
+   * The old form lived on 個人資料 and recorded its own filename, which
+   * was already only half useful. Now that reporting has a page of its
+   * own, recording "report.html" would be useless every single time — so
+   * the referrer is used, and this page's name is the honest fallback
+   * when there isn't one (arriving from the LINE menu, for instance).
+   */
+  function reportedPage() {
+    try {
+      if (document.referrer && document.referrer.includes(location.host)) {
+        return new URL(document.referrer).pathname.split("/").pop() || "report.html";
+      }
+    } catch (e) {
+      // A malformed referrer is not worth failing a bug report over.
+    }
+    return "report.html";
+  }
+
+  (async function init() {
+    const state = document.getElementById("page-state");
+    showPageLoading(state);
+    const identified = await initLiffIdentity(API_BASE, LIFF_ID);
+    stopLoadingEscalation();
+    if (!identified) {
+      // Reports carry who sent them, so this needs a verified identity
+      // like every other write in the app.
+      state.innerHTML = signInFailureHtml(identified);
+      return;
+    }
+    state.innerHTML = "";
+    document.getElementById("content").hidden = false;
+  })();
+</script>
+</body>
+</html>
