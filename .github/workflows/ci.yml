@@ -50,6 +50,36 @@ jobs:
       - name: Workflow files parse
         run: uv run python scripts/check_workflows.py
 
+      # The Postgres tests below run against the Neon *dev* branch — a
+      # real database, not an in-memory one — so its schema has to be
+      # current before they do. Nothing used to bring it up to date:
+      # only production was ever migrated, and dev drifted quietly until
+      # a model change started selecting a column that had never been
+      # added there. That happened on 2026-09-17, when three new columns
+      # on `games` turned four Postgres tests red with "column
+      # games.location does not exist" — a perfectly good migration, a
+      # green local suite, and a red CI.
+      #
+      # Green locally because the in-memory tests build their schema
+      # from the models with create_all, so they neither exercise a
+      # migration nor notice a missing one. Only a real database can
+      # tell you, and this is the only step that talks to one.
+      #
+      # Alembic is idempotent, so this is a no-op on the majority of
+      # pushes that change no schema. It runs before the tests for the
+      # same reason production's runs before the deploy.
+      - name: Migrate dev
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "DATABASE_URL (the Neon dev branch) is not set — the Postgres tests cannot run" >&2
+            exit 1
+          fi
+          uv run alembic current
+          uv run alembic upgrade head
+          uv run alembic current
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
       - name: Postgres tests
         run: uv run pytest -m postgres
         env:
