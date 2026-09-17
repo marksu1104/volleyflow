@@ -537,22 +537,39 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 /* 候補 waitlist rows — numbered so the order (the thing people asked
    about when several sign up at once) is the first thing the eye hits */
 
-/* 代打 (substitute) inline controls on an absence row */
+/* A small action on a row — 編輯, 明細, 核准臨打, 移除, 複製.
+
+   It was an underlined word, and that is what 「不要太多可以按的功能都用
+   文字，多用點按鈕的感覺或純圖示就好」 was about (2026-09-18). On a row
+   where several things are pressable, underlined text does not read as a
+   control, and nothing on screen says where one target ends and the next
+   begins.
+
+   A tinted pill now, matching .pool-promote and .m-act's buttons, so the
+   app has one vocabulary for "small thing you can press" instead of
+   three. The visible edge also retires the old invisible-hit-area trick
+   — 9px of vertical padding pulled back out with an equal negative
+   margin. That existed because the text measured 17px tall, under half
+   of Apple's 44pt guidance, so taps missed; and it had to stay narrow
+   horizontally because neighbouring targets would otherwise overlap with
+   nothing showing it, and 遞補 sits beside 移除, where a stray tap
+   removes somebody. A pill draws its own boundary, so the gap between
+   two actions is legible and the target can simply be the right size.
+
+   Sized to clear the 32px tap target tests/visual/check.js enforces:
+   .76rem over a 1.25 line-height is ~15px, so 9px top and bottom puts
+   the pill at ~33px. Worth stating because the obvious padding for a
+   pill this size (7px) lands at ~29px and would swap an ugly control
+   for one that is actually harder to hit — which the check would catch,
+   but only if the numbers are written down rather than eyeballed. */
 .mini-action {
-  border: none; background: none; color: var(--accent); font-size: .74rem;
-  font-weight: 700; cursor: pointer; text-decoration: underline;
-  /* These measured 17px tall — under half of Apple's 44pt guidance —
-     so on a phone a good share of taps simply missed, which reads as
-     the app being slow rather than as a miss. The padding grows the
-     hit area to ~35px and the equal negative margin takes it back out
-     of the layout, so rows stay exactly the height they were.
-     Horizontal growth is only 3px a side on purpose: .roster-note sets
-     an 8px gap, and going wider would overlap the neighbouring hit
-     area — with 遞補 next to 移除, a stray tap is somebody removed. */
-  padding: 9px 3px; margin: -9px -3px;
+  border: none; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  background: var(--accent-soft); color: var(--accent);
+  font-size: .76rem; font-weight: 700; line-height: 1.25;
+  padding: 9px 13px;
 }
-.mini-action.danger { color: var(--bad); }
-.mini-action:disabled { color: var(--ink-faint); text-decoration: none; cursor: default; }
+.mini-action.danger { background: var(--bad-soft); color: var(--bad); }
+.mini-action:disabled { background: var(--surface-2); color: var(--ink-faint); cursor: default; }
 /* A hint on the left, a small action on the right. The save button used to
    sit in a flex row beside the input, where .btn's width:100% ate the row. */
 .under-field { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
@@ -810,19 +827,24 @@ a.btn { display: block; text-decoration: none; text-align: center; }
 .seg { display: flex; gap: 3px; background: var(--surface-2); padding: 3px; border-radius: 9px; margin-bottom: 14px; }
 .seg span { flex: 1; text-align: center; font-size: .8rem; font-weight: 600; padding: 7px 4px; border-radius: 7px; color: var(--ink-soft); cursor: pointer; }
 .seg span.on { background: var(--accent); color: var(--surface); font-weight: 700; }
-/* 季末結算 is used once in a season — on the night the last game is
-   played — yet it claimed an equal third of this control every other
-   week of the year. While the season is still running it stops claiming
-   equal width and drops to a footnote's weight: still there, still
-   tappable, just no longer competing with the two tabs that get used
-   weekly. Asked for 2026-09-17.
+/* 季末結算 is used once in a season, so while the season is still
+   running it drops to a footnote's weight — still there, still tappable,
+   just not competing with the two tabs used every week.
+
+   Quiet means dimmer, never narrower. It first shrank the tab and grew
+   it back when selected, which meant the three tabs changed width
+   depending on which one you had tapped: the control moved under your
+   finger every time you switched. Reported the next morning, 2026-09-18,
+   and it was the right complaint — a segmented control's whole job is to
+   hold still. Widths are equal and fixed now; only the colour says which
+   one is resting.
 
    The `.on` pairing is not redundant: `.seg span.quiet` and
    `.seg span.on` have identical specificity, so without it the later
    rule would win and an opened 季末結算 would keep the faint colour it
    has while closed. */
-.seg span.quiet { flex: 0 1 auto; padding-inline: 11px; color: var(--ink-faint); }
-.seg span.quiet.on { flex: 1; color: var(--surface); font-weight: 700; }
+.seg span.quiet { color: var(--ink-faint); }
+.seg span.quiet.on { color: var(--surface); font-weight: 700; }
 
 /* small pill summary row, used by the organizer overview/settings pages
    to show season parameters at a glance */

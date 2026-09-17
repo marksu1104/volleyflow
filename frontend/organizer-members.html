@@ -339,16 +339,38 @@
 
   let joinRequests = [];
 
+  /** Who is waiting to be let in.
+   *
+   * Cached copy first, network second. This was the last bare fetch left
+   * on the page — loadMembers was converted on 2026-09-17 and this one
+   * was missed — and moving 待核准 to the top of the page made the miss
+   * far more obvious: the section now arrives *above* the roster, so a
+   * late answer shoves everything down under the reader's eyes rather
+   * than appearing quietly below them. Reported as 「待核准還是出現的太慢
+   * 了」 on 2026-09-18.
+   *
+   * Approving or declining goes through postJson, which drops the whole
+   * response cache, so the copy painted here can never outlive a
+   * decision made on it.
+   */
   async function loadRequests() {
     const clubId = currentClubId();
     if (!clubId) return;
     try {
-      const res = await fetch(`${API_BASE}/clubs/${clubId}/join-requests`, { headers: authHeader() });
-      joinRequests = res.ok ? await res.json() : [];
+      await getJsonSWR(
+        `${API_BASE}/clubs/${clubId}/join-requests`,
+        (rows) => {
+          joinRequests = rows;
+          renderRequests();
+        },
+        { headers: authHeader() }
+      );
     } catch (e) {
+      // No cached copy and the network refused: show the section as
+      // empty rather than leaving whatever was on screen before.
       joinRequests = [];
+      renderRequests();
     }
-    renderRequests();
   }
 
   function renderRequests() {
