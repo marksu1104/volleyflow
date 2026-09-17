@@ -31,7 +31,7 @@ test("people waiting to be approved come first", () => {
   const todos = buildTodos(
     season([game({ absences: [{ id: 1, player_name: "林書妤", filled_by: null }] })]),
     [{ id: 9, name: "新朋友" }],
-    [{ player_id: 1, balance: "-3055" }]
+    [{ player_id: 1, balance: "-3055", season_total: "-3055" }]
   );
 
   assert.equal(todos[0].kind, "urgent");
@@ -76,13 +76,33 @@ test("unpaid season fees are counted from the balances, and sit last", () => {
   const todos = buildTodos(
     season([game({})]),
     [],
-    [{ player_id: 1, balance: "-3055" }, { player_id: 2, balance: "0" }]
+    [
+      { player_id: 1, balance: "-3055", season_total: "-3055" },
+      { player_id: 2, balance: "0", season_total: "0" },
+    ]
   );
 
   assert.equal(todos.length, 1);
   assert.equal(todos[0].kind, "calm");
   assert.match(todos[0].label, /季費未收 1 人/);
   assert.equal(todos[0].href, "organizer-ledger.html");
+});
+
+test("a fee belonging to another season is not this season's 待辦", () => {
+  // Reported 2026-09-17, the same bug as the 帳務 page's. Balances are
+  // fetched with ?season_id=, so season_total is the season on screen
+  // while balance spans every season the club has ever run — including
+  // ones booked for later, whose fees are already charged.
+  const todos = buildTodos(
+    season([game({})]),
+    [],
+    [
+      { player_id: 1, balance: "-3055", season_total: "0" },
+      { player_id: 2, balance: "0", season_total: "0" },
+    ]
+  );
+
+  assert.deepEqual(todos, []);
 });
 
 test("a game already played is nobody's 待辦", () => {

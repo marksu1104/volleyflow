@@ -766,7 +766,7 @@
       const amount = Number(rosterBalances.get(id) || 0);
       if (!amount) return "";
       return amount < 0
-        ? `<span class="pk-bal owe">欠 $${Math.abs(amount)}</span>`
+        ? `<span class="pk-bal owe">應收 $${Math.abs(amount)}</span>`
         : `<span class="pk-bal credit">餘 $${amount}</span>`;
     };
     document.getElementById("roster-list").innerHTML = clubRoster.length

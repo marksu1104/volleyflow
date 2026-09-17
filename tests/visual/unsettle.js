@@ -135,7 +135,7 @@ const get = async (path) => (await fetch(`${API}${path}`, { headers: auth })).js
     const told = await page.evaluate(() => (document.querySelector(".toast") || {}).textContent || "");
     report("已經領過現金的人會被指名說出來", [
       ...(told.includes("阿季") ? [] : [`畫面說的是「${told}」`]),
-      ...(told.includes("欠") ? [] : ["沒有說清楚那筆現在算誰欠的"]),
+      ...(told.includes("應收") ? [] : ["沒有說清楚那筆現在記在誰頭上"]),
     ]);
   } finally {
     await browser.close();

@@ -1406,7 +1406,11 @@
         sum((e) => here(e) && e.entry_type === "drop_in_fee_charged"));
       add("已收付款", null, sum((e) => here(e) && e.entry_type === "payment"));
     }
-    add("上季結轉", null, sum((e) => !here(e)));
+    // Everything outside the season on screen. Not "上季": a season's
+    // fees are charged the moment it is created, so a club with the next
+    // season already booked has money here belonging to a season still
+    // to come. Same correction as the 帳務 page's splitLedger.
+    add("其他季別", null, sum((e) => !here(e)));
 
     // The lines and the headline must never disagree: an entry type this
     // screen doesn't know about still has to appear somewhere.

@@ -80,8 +80,7 @@ test("drop-ins are counted from the games you're actually on", () => {
 
 test("money from another season is its own line, not mixed in", () => {
   // The ledger spans seasons on purpose — a refund can be carried
-  // forward — so a credit from last season must not read as this
-  // season's.
+  // forward — so another season's money must not read as this season's.
   const rows = rowsFor({
     balance: -2350,
     games: [game({})],
@@ -91,8 +90,31 @@ test("money from another season is its own line, not mixed in", () => {
     ],
   });
 
-  assert.equal(rows.find((r) => r.label === "上季結轉").amount, 705);
+  assert.equal(rows.find((r) => r.label === "其他季別").amount, 705);
   assert.equal(rows.find((r) => r.label === "本季季費").amount, -3055);
+});
+
+test("the other season's line does not claim to be the previous one", () => {
+  // Reported 2026-09-17 on the organizer's 帳務 page and fixed here too:
+  // a season booked for January has its fees charged as soon as it is
+  // created, so the money sitting outside the season on screen is just
+  // as likely to belong to a season that hasn't started.
+  const rows = rowsFor({
+    balance: -5055,
+    games: [game({})],
+    entries: [
+      { entry_type: "season_fee_charged", amount: "-3055", season_id: 1 },
+      { entry_type: "season_fee_charged", amount: "-2000", season_id: 42 },
+    ],
+  });
+
+  const other = rows.find((r) => r.label === "其他季別");
+  assert.equal(other.amount, -2000);
+  assert.equal(
+    rows.filter((r) => /上季|上一季/.test(r.label)).length,
+    0,
+    "it may well be a future season"
+  );
 });
 
 test("the lines always add up to the balance", () => {

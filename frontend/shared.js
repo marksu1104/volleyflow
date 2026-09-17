@@ -84,8 +84,15 @@ function isGameFull(season, game) {
  * A pure function of what the page already has, so the rule is testable
  * without a browser — see tests/frontend/todos.test.js. */
 function buildTodos(season, requests, balances) {
+  // This season's money only. `balance` is club-wide and spans every
+  // season the player has ever been in, so counting from it put people
+  // on the 待辦 list over a fee belonging to some other season —
+  // including one booked for *later*, since a season's fees are charged
+  // when it is created. Callers fetch /balances?season_id=…, so
+  // season_total is the figure for the season on screen. Same rule as
+  // the 帳務 page's splitLedger.
   const owing = new Set(
-    balances.filter((b) => Number(b.balance) < 0).map((b) => b.player_id)
+    balances.filter((b) => Number(b.season_total) < 0).map((b) => b.player_id)
   );
   const upcoming = season.games.filter(
     (g) => g.status === "scheduled" && !describeDate(g.date).isPast
@@ -1730,7 +1737,7 @@ function isLocalDev() {
  * "open this in LINE". Testing a member's view meant picking up a phone
  * and using the live club's real data. This is the way in:
  *
- *     http://localhost:5500/member.html?as=周恆
+ *     http://localhost:5500/member.html?as=小明
  *
  * Remembered for the session, so links inside the app keep the identity
  * without carrying the parameter around. `?as=` with no name clears it.
@@ -1866,7 +1873,7 @@ function watchLineToken() {
 function authHeader() {
   const dev = devIdentityName();
   // encodeURIComponent because an Authorization header has to be ASCII:
-  // a browser throws outright on `Bearer dev:周恆`. auth.verify_id_token
+  // a browser throws outright on `Bearer dev:小明`. auth.verify_id_token
   // decodes it back.
   if (dev) return { Authorization: `Bearer dev:${encodeURIComponent(dev)}` };
   try {
@@ -2530,7 +2537,7 @@ function signInFailureHtml(identified) {
   if (isLocalDev()) {
     return emptyStateHtml(
       "尚未選擇身分",
-      "本機沒有 LINE 可以登入，要在網址後面加上 ?as=名字 才知道身分，例如 ?as=周恆。"
+      "本機沒有 LINE 可以登入，要在網址後面加上 ?as=名字 才知道身分，例如 ?as=小明。"
     );
   }
   return emptyStateHtml(
