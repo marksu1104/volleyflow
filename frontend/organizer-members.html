@@ -79,7 +79,10 @@
        stays where it was. -->
   <div id="requests-section" hidden>
     <div class="section-label">待核准</div>
-    <p class="hint" style="margin-top:0">
+    <!-- Hidden while the list is still coming: three lines explaining
+         what the two approve buttons do is noise beside a spinner, and
+         the whole point of the loading state is to stay short. -->
+    <p class="hint" id="requests-hint" style="margin-top:0">
       用邀請連結申請加入的人，核准前看不到球隊的任何資料。按「核准固定」會直接加入本季名單並記上季費；按「核准臨打」只讓他加入球隊。
     </p>
     <div id="requests-list" class="member-list"></div>
@@ -338,6 +341,9 @@
   }
 
   let joinRequests = [];
+  /** False until the join-requests read has answered once. Without it
+   * "still coming" and "nobody is waiting" are the same empty array. */
+  let requestsLoaded = false;
 
   /** Who is waiting to be let in.
    *
@@ -356,11 +362,19 @@
   async function loadRequests() {
     const clubId = currentClubId();
     if (!clubId) return;
+    // Says "still looking" before the request goes out, not after it
+    // lands. This read cannot start until the club id is known, which is
+    // three hops in (LIFF, identify, /clubs), and a cached copy is
+    // dropped by every write — so the wait is real and often several
+    // seconds. Saying so is the honest fix; pretending otherwise is what
+    // made it look like a gap that filled itself.
+    renderRequests();
     try {
       await getJsonSWR(
         `${API_BASE}/clubs/${clubId}/join-requests`,
         (rows) => {
           joinRequests = rows;
+          requestsLoaded = true;
           renderRequests();
         },
         { headers: authHeader() }
@@ -369,12 +383,24 @@
       // No cached copy and the network refused: show the section as
       // empty rather than leaving whatever was on screen before.
       joinRequests = [];
+      requestsLoaded = true;
       renderRequests();
     }
   }
 
   function renderRequests() {
     const section = document.getElementById("requests-section");
+    // Three states, not two. "Still coming" used to be drawn the same as
+    // "nobody is waiting" — both hidden — which is exactly why the
+    // section seemed to appear out of nowhere seconds after the page.
+    if (!requestsLoaded) {
+      section.hidden = false;
+      document.getElementById("requests-hint").hidden = true;
+      document.getElementById("requests-list").innerHTML =
+        blockLoadingHtml("正在看有沒有人在等核准");
+      return;
+    }
+    document.getElementById("requests-hint").hidden = false;
     section.hidden = joinRequests.length === 0;
     if (section.hidden) return;
     document.getElementById("requests-list").innerHTML = joinRequests

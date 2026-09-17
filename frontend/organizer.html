@@ -211,6 +211,11 @@
   }
 
   let todos = [];
+  /** False until the two reads behind 待辦 have answered once. Without
+   * it, "still looking" and "nothing to do" are the same empty array —
+   * which is why this line used to appear out of nowhere, well after the
+   * card above it. */
+  let todosLoaded = false;
 
   async function loadTodos() {
     const clubId = currentClubId();
@@ -219,19 +224,41 @@
       fetch(`${API_BASE}${path}`, { headers: authHeader() })
         .then((r) => (r.ok ? r.json() : []))
         .catch(() => []);
+    // Says "still looking" before the two reads go out. They only start
+    // once the season has landed, and then take a round trip of their
+    // own, so this line is always behind the card above it — saying so
+    // beats leaving a gap that fills itself seconds later.
+    renderTodos();
     const [requests, balances] = await Promise.all([
       ask(`/clubs/${clubId}/join-requests`),
       ask(`/clubs/${clubId}/balances?season_id=${currentSeason.id}`),
     ]);
     const next = buildTodos(currentSeason, requests, balances);
     // Same list, same pixels: repainting an unchanged row is the flicker.
-    if (JSON.stringify(next) === JSON.stringify(todos)) return;
+    // The flag has to clear first, though — on the first answer the list
+    // can legitimately be identical to the empty one it started with,
+    // and skipping the repaint would strand the spinner forever.
+    const wasLoading = !todosLoaded;
+    todosLoaded = true;
+    if (!wasLoading && JSON.stringify(next) === JSON.stringify(todos)) return;
     todos = next;
     renderTodos();
   }
 
   function renderTodos() {
     const line = document.getElementById("todo-line");
+    // Three states, not two. The line keeps its place from the first
+    // paint so nothing below it moves when the answer arrives; it is
+    // only the words inside that change.
+    if (!todosLoaded) {
+      line.hidden = false;
+      line.disabled = true;
+      document.getElementById("todo-dot").className = "spinner sm";
+      document.getElementById("todo-main").textContent = "正在看有沒有事要處理";
+      document.getElementById("todo-more").textContent = "";
+      return;
+    }
+    line.disabled = false;
     line.hidden = todos.length === 0;
     if (line.hidden) return;
     document.getElementById("todo-dot").className = `todo-dot ${todos[0].kind}`;

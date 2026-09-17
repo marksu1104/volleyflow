@@ -306,18 +306,6 @@
       <p class="hint">結束後名單與場地費會鎖住，餘額結轉到下一季。</p>
     </div>
 
-    <div id="danger-section">
-      <div class="section-label">刪除</div>
-      <div class="set-row">
-        <span class="set-label">刪除這一季<span class="set-sub">場次、請假、臨打、已記的季費都會消失</span></span>
-        <button type="button" class="mini-action danger" onclick="deleteSeason()">刪除</button>
-      </div>
-      <div class="set-row">
-        <span class="set-label">刪除整個球隊<span class="set-sub">連同底下所有季別一起刪除</span></span>
-        <button type="button" class="mini-action danger" onclick="deleteClub()">刪除</button>
-      </div>
-      <p class="hint">只有管理員能刪除，而且已經結算過的季別不能刪——那是已經結清的帳。</p>
-    </div>
   </div>
 
   <!-- Down here, not at the top. A club's name is set on the day it is
@@ -337,6 +325,30 @@
         <button type="button" class="mini-action" id="club-name-save" onclick="renameClub(this)" disabled>儲存</button>
       </div>
     </div>
+  </div>
+
+  <!-- Last on the page, and outside #settings-form on purpose.
+       Destructive things belong at the bottom, under everything you
+       might have come here to do — it used to sit inside the form with
+       the club's name field below it, so a rename button lived beneath
+       two delete buttons. Moved 2026-09-18 at the organizer's request.
+
+       Being outside the form means it no longer inherits the form's
+       visibility, so it manages its own: the section appears once a club
+       is chosen, and 刪除這一季 hides itself when there is no season —
+       otherwise this would offer to delete something that does not
+       exist. See the season-picker callback. -->
+  <div id="danger-section" hidden>
+    <div class="section-label">刪除</div>
+    <div class="set-row" id="delete-season-row">
+      <span class="set-label">刪除這一季<span class="set-sub">場次、請假、臨打、已記的季費都會消失</span></span>
+      <button type="button" class="mini-action danger" onclick="deleteSeason()">刪除</button>
+    </div>
+    <div class="set-row">
+      <span class="set-label">刪除整個球隊<span class="set-sub">連同底下所有季別一起刪除</span></span>
+      <button type="button" class="mini-action danger" onclick="deleteClub()">刪除</button>
+    </div>
+    <p class="hint">只有管理員能刪除，而且已經結算過的季別不能刪——那是已經結清的帳。</p>
   </div>
 </div>
 
@@ -463,6 +475,11 @@
       document.getElementById("club-picker").hidden = !hasClub;
       document.getElementById("no-club-note").hidden = hasClub;
       document.getElementById("club-name-section").hidden = !hasClub;
+      // 刪除 sits outside #settings-form now, so it answers for its own
+      // visibility: the section needs a club, and 刪除這一季 needs a
+      // season to delete.
+      document.getElementById("danger-section").hidden = !hasClub;
+      document.getElementById("delete-season-row").hidden = !id;
       if (hasClub) fillClubName();
       setWizardOpen((hasClub && !id) || creatingNextSeason);
       // Deliberately not revealed here: loadSettings shows it once the

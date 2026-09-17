@@ -2491,6 +2491,27 @@ function showPageLoading(container) {
 
 /** The third state: the request actually failed. Always offers a way
  * out (retry) rather than leaving a dead page. */
+/** What one section shows while its own request is still out.
+ *
+ * Every block on these screens is filled by a request of its own, and
+ * showPageLoading only covers whichever one answers first — so a block
+ * further back used to be a blank space that filled itself seconds
+ * later, pushing everything below it down. A section that cannot answer
+ * yet says so instead. Asked for on 2026-09-18: 「如果有東西不能馬上顯
+ * 現，至少你要把轉圈做出來」.
+ *
+ * Deliberately not showPageLoading: that one centres itself in 44px of
+ * padding and escalates its wording after four seconds, which is right
+ * for a whole screen and far too much inside a block that already has a
+ * heading above it.
+ */
+function blockLoadingHtml(text) {
+  return (
+    '<div class="block-state"><i class="spinner sm"></i>' +
+    `<span>${escapeHtml(text || "載入中…")}</span></div>`
+  );
+}
+
 function showPageError(container, detail) {
   clearTimeout(_loadingEscalation);
   if (!container) return;

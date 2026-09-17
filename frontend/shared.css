@@ -769,6 +769,22 @@ textarea.control { resize: vertical; min-height: 90px; }
   border: 2.5px solid var(--rule); border-top-color: var(--accent);
   animation: spin .8s linear infinite;
 }
+/* One section still waiting, rather than the whole screen. .page-state
+   owns the page and pads 44px to centre itself in it; this sits inside a
+   block that already has its own heading, so it stays short enough that
+   being replaced by a row or two barely moves the page.
+
+   It exists because the page-level spinner only ever covered whichever
+   request answered first. Once the season came from cache and landed
+   almost instantly, that spinner flashed away while 待核准 was still
+   three hops behind — leaving a gap that filled itself seconds later and
+   shoved everything down. 「如果有東西不能馬上顯現，至少你要把轉圈做出
+   來」, 2026-09-18. */
+.block-state {
+  display: flex; align-items: center; gap: 9px;
+  padding: 12px 2px; color: var(--ink-faint); font-size: .8rem;
+}
+.spinner.sm { width: 15px; height: 15px; border-width: 2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
 
