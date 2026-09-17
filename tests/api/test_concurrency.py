@@ -27,7 +27,44 @@ pytestmark = pytest.mark.postgres
 _TEST_PLAYER_PREFIX = "ConcurrencyTest-"
 
 
+_PLAYER_CHILDREN = (
+    "DELETE FROM waitlist_entries"
+    " WHERE player_id = ANY(:ids) OR brought_by_player_id = ANY(:ids)",
+    "DELETE FROM drop_ins"
+    " WHERE player_id = ANY(:ids) OR brought_by_player_id = ANY(:ids)",
+    "DELETE FROM absences WHERE player_id = ANY(:ids)",
+    "DELETE FROM ledger_entries WHERE player_id = ANY(:ids)",
+    "DELETE FROM season_members WHERE player_id = ANY(:ids)",
+    "DELETE FROM club_members WHERE player_id = ANY(:ids)",
+)
+"""Every table that references players.id, children before parents.
+
+Taken from db/models.py rather than remembered: drop_ins and
+waitlist_entries each reference a player twice, once as the person and
+once as whoever brought them, and missing the second one leaves exactly
+the orphan this cleanup exists to prevent.
+"""
+
+
 def _cleanup(club_id: int, season_id: int) -> None:
+    """Delete this run's rows — and anything a run that died left behind.
+
+    The last statement used to be a global `DELETE FROM players WHERE
+    name LIKE 'ConcurrencyTest-%'` while every delete above it was scoped
+    to *this* club and season. That asymmetry holds only as long as no
+    run ever fails. One did, on 2026-09-17, when the dev branch was
+    missing three columns the models had started selecting: it left
+    waitlist_entries and club_members behind for players that the next
+    run then tried to delete, and Postgres refused. Every run after that
+    failed at the same statement, on residue it had not created and
+    could not reach — one red run turning into permanently red CI.
+
+    So the sweep is symmetric now: find the test players, delete
+    everything referencing them wherever it lives, then delete them.
+    That also clears whatever an earlier failure stranded, which is the
+    only way this database ever gets tidied — nobody holds credentials
+    for it outside CI.
+    """
     with get_session() as db:
         game_ids = [
             row[0]
@@ -36,16 +73,12 @@ def _cleanup(club_id: int, season_id: int) -> None:
                 {"sid": season_id},
             ).all()
         ]
-        db.execute(
-            text("DELETE FROM waitlist_entries WHERE game_id = ANY(:ids)"),
-            {"ids": game_ids},
-        )
-        db.execute(
-            text("DELETE FROM drop_ins WHERE game_id = ANY(:ids)"), {"ids": game_ids}
-        )
-        db.execute(
-            text("DELETE FROM absences WHERE game_id = ANY(:ids)"), {"ids": game_ids}
-        )
+        if game_ids:
+            for table in ("waitlist_entries", "drop_ins", "absences"):
+                db.execute(
+                    text(f"DELETE FROM {table} WHERE game_id = ANY(:ids)"),
+                    {"ids": game_ids},
+                )
         db.execute(
             text("DELETE FROM ledger_entries WHERE season_id = :sid"),
             {"sid": season_id},
@@ -60,10 +93,23 @@ def _cleanup(club_id: int, season_id: int) -> None:
             text("DELETE FROM club_members WHERE club_id = :cid"), {"cid": club_id}
         )
         db.execute(text("DELETE FROM clubs WHERE id = :cid"), {"cid": club_id})
-        db.execute(
-            text("DELETE FROM players WHERE name LIKE :prefix"),
-            {"prefix": f"{_TEST_PLAYER_PREFIX}%"},
-        )
+
+        # Scoped by player rather than by this run's club and season, so
+        # rows stranded under a club and season this call knows nothing
+        # about go too.
+        player_ids = [
+            row[0]
+            for row in db.execute(
+                text("SELECT id FROM players WHERE name LIKE :prefix"),
+                {"prefix": f"{_TEST_PLAYER_PREFIX}%"},
+            ).all()
+        ]
+        if player_ids:
+            for statement in _PLAYER_CHILDREN:
+                db.execute(text(statement), {"ids": player_ids})
+            db.execute(
+                text("DELETE FROM players WHERE id = ANY(:ids)"), {"ids": player_ids}
+            )
         db.commit()
 
 
