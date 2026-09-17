@@ -366,15 +366,38 @@
     <button class="gsheet-close" aria-label="關閉" onclick="closeDateSheet()">✕</button>
     <h3 id="date-sheet-title"></h3>
     <div class="field">
-      <label for="date-sheet-input">改到哪一天</label>
+      <label for="date-sheet-input">日期</label>
       <input id="date-sheet-input" class="control" type="date">
-      <span class="hint">
-        場次數沒變，所以每個人的金額完全不動。這一場已經記下的請假、報名和候補都會跟著搬到新的日期。
-      </span>
     </div>
+
+    <div class="field-pair" style="margin-bottom:13px">
+      <div class="field">
+        <label for="g-start-h">開始時間</label>
+        <div class="time-pair">
+          <select id="g-start-h" class="control"></select><span>:</span><select id="g-start-m" class="control"></select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="g-end-h">結束時間</label>
+        <div class="time-pair">
+          <select id="g-end-h" class="control"></select><span>:</span><select id="g-end-m" class="control"></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="g-location">場地名稱</label>
+      <input id="g-location" class="control" type="text">
+      <span class="hint" id="g-location-hint"></span>
+    </div>
+
+    <span class="hint">
+      只改這一場。場次數沒變，所以每個人的金額完全不動；這一場已經記下的請假、報名和候補都會跟著走。
+    </span>
+
     <div class="btn-row" style="margin-top: 13px">
       <button type="button" class="btn btn-quiet" onclick="closeDateSheet()">關閉</button>
-      <button type="button" class="btn btn-primary" onclick="saveGameDate()">儲存</button>
+      <button type="button" class="btn btn-primary" onclick="saveGameEdit()">儲存</button>
     </div>
   </div>
 </div>
@@ -492,7 +515,10 @@
     document.getElementById(prefix + "-m").innerHTML = minutes.join("");
   }
 
-  for (const prefix of ["c-start", "c-end", "f-start", "f-end"]) fillTimeSelects(prefix);
+  // g-start / g-end are the single game's own, on the edit sheet.
+  for (const prefix of ["c-start", "c-end", "f-start", "f-end", "g-start", "g-end"]) {
+    fillTimeSelects(prefix);
+  }
 
   /** "18:30" out of the two selects, or null while no hour is chosen. */
   function readTimeValue(prefix) {
@@ -1055,13 +1081,20 @@
       const action = open
         ? `<span class="row-actions">${
             movable
-              ? `<button type="button" class="mini-action" onclick="openDateSheet(${g.id}, '${info.label}', '${g.date}')">編輯</button>`
+              ? `<button type="button" class="mini-action" onclick="openGameEdit(${g.id})">編輯</button>`
               : ""
           }<button type="button" class="mini-action danger" onclick="openCancelSheet(${g.id}, '${info.label}')">取消</button></span>`
         : status
           ? `<span class="hint" style="margin:0">${status}</span>`
           : "";
-      return `<div class="set-row"><span class="set-label">${info.label}</span>${action}</div>`;
+      // Only the nights that differ say anything, so the list reads as
+      // "these are all the same except this one" at a glance rather than
+      // repeating the season's venue on every row.
+      const own = [g.start_time ? g.start_time.slice(0, 5) : "", g.location || ""]
+        .filter(Boolean)
+        .join(" · ");
+      const sub = own ? `<span class="set-sub">${escapeHtml(own)}</span>` : "";
+      return `<div class="set-row"><span class="set-label">${info.label}${sub}</span>${action}</div>`;
     }
 
     document.getElementById("upcoming-games").innerHTML = upcoming.map(row).join("") || '<div class="empty">沒有場次</div>';
@@ -1093,10 +1126,24 @@
    * game travel with it because they are keyed by the game and not by
    * its date. See routes/games.py move_game for the four refusals.
    */
-  function openDateSheet(gameId, label, iso) {
+  function openGameEdit(gameId) {
+    const game = currentSeason.games.find((g) => g.id === gameId);
+    if (!game) return;
     dateSheetGameId = gameId;
-    document.getElementById("date-sheet-title").textContent = `把 ${label} 改到別天`;
-    document.getElementById("date-sheet-input").value = iso;
+    document.getElementById("date-sheet-title").textContent =
+      `編輯 ${describeDate(game.date).label} 這一場`;
+    document.getElementById("date-sheet-input").value = game.date;
+    writeTimeValue("g-start", game.start_time);
+    writeTimeValue("g-end", game.end_time);
+    const loc = document.getElementById("g-location");
+    loc.value = game.location || "";
+    // Empty means "the same as the season", so the season's own venue is
+    // the placeholder rather than a generic example — an empty box then
+    // shows what will actually happen instead of looking unanswered.
+    loc.placeholder = currentSeason.location || "例如：晴光館";
+    document.getElementById("g-location-hint").textContent = currentSeason.location
+      ? `留空就跟這一季一樣：${currentSeason.location}`
+      : "留空表示跟這一季一樣";
     document.getElementById("date-sheet-backdrop").hidden = false;
   }
 
@@ -1104,20 +1151,31 @@
     document.getElementById("date-sheet-backdrop").hidden = true;
   }
 
-  async function saveGameDate() {
+  async function saveGameEdit() {
     const value = document.getElementById("date-sheet-input").value;
     if (!value) {
       toast("請先選一個日期");
       return;
     }
+    // Sent whole rather than diffed: an empty venue box or an unset hour
+    // is a real instruction — "put this night back on the season's" —
+    // and null is how the server is told that. A field left out would
+    // mean "leave it alone", which is a different request. See
+    // GameUpdate in schemas.py.
+    const payload = {
+      date: value,
+      location: document.getElementById("g-location").value.trim() || null,
+      start_time: readTimeValue("g-start"),
+      end_time: readTimeValue("g-end"),
+    };
     // No markBusy here: postJson already marks whichever control was
     // pressed. Nor translateApiError — postJson hands back a message
     // that is already in Chinese, and translating it twice turns
     // 「那一天這一季已經有一場了」 into 「操作失敗（…）」.
     try {
-      await postJson(API_BASE, `/games/${dateSheetGameId}`, { date: value }, "PATCH");
+      await postJson(API_BASE, `/games/${dateSheetGameId}`, payload, "PATCH");
       closeDateSheet();
-      toast("日期改好了", "good");
+      toast("這一場改好了", "good");
       await loadSettings(currentSeasonId);
     } catch (e) {
       toast(e.message);

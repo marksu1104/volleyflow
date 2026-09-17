@@ -23,8 +23,8 @@ from volleyflow.api.routes._people import (
 from volleyflow.api.schemas import (
     AirConditioningUpdate,
     GameCancel,
-    GameDateUpdate,
     GameOut,
+    GameUpdate,
 )
 from volleyflow.db.models import (
     GameRow,
@@ -128,29 +128,38 @@ def set_game_air_conditioning(
 
 
 @router.patch("/games/{game_id}", response_model=GameOut)
-def move_game(
+def update_game(
     game_id: int,
-    payload: GameDateUpdate,
+    payload: GameUpdate,
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> GameOut:
-    """Move one game to another date.
+    """Change one game: its date, its venue, or its time.
 
-    Asked for on 2026-09-17 — 「有時候會有日期變動、時間更改的需求」. The
-    venue shifts a booking a week, or the club swaps one evening for
-    another, and until now the only way to say so was to call the night
-    off and lose everything recorded against it.
+    Asked for on 2026-09-17 — first 「有時候會有日期變動、時間更改的需求」,
+    then 「不應該只有改日期，要可以臨時更改場次資訊，像是場地名稱、時間」.
+    The venue shifts a booking a week, or one night runs at a different
+    court or a different hour, and until now the only way to say so was
+    to call the night off and lose everything recorded against it.
 
-    Nobody's charge moves with it. The season still has the same number
-    of games at the same share, so no ledger entry is touched — which is
-    exactly why this is not cancelling a game and booking another one.
-    Absences, signups and the queue are keyed by the game rather than by
-    its date, so they travel with it, which is the point.
+    Nobody's charge moves. The season still has the same number of games
+    at the same share, and the venue and time are display-only — see
+    docs/billing-rules.md, where an edit that changes nobody's math
+    writes nothing. That is exactly why this is not cancelling a game
+    and booking another one. Absences, signups and the queue are keyed
+    by the game rather than by its date, so they travel with it, which
+    is the point.
 
-    Refused four ways: a settled season is closed; a cancelled night is
-    a fact about a date and moving it would rewrite what happened; two
-    games cannot share an evening; and a date already past would make a
-    night nobody played look played.
+    Only the fields actually sent are touched, so putting this night
+    back on the season's own venue (`location` sent as null) is a
+    different request from leaving it alone. A *price* that differs
+    because the replacement court costs more is a separate question and
+    is deliberately not settled here.
+
+    The date is refused four ways: a settled season is closed; a
+    cancelled night is a fact about a date and moving it would rewrite
+    what happened; two games cannot share an evening; and a date already
+    past would make a night nobody played look played.
     """
     game = _get_game_or_404(db, game_id)
     season = db.get(SeasonRow, game.season_id)
@@ -163,28 +172,39 @@ def move_game(
             status.HTTP_400_BAD_REQUEST,
             "This game is cancelled, so it cannot be moved",
         )
-    if payload.date == game.date:
-        return GameOut(id=game.id, date=game.date, status=game.status)
-    if payload.date < _today_in_taiwan():
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, "That date has already been and gone"
-        )
-    clash = (
-        db.query(GameRow)
-        .filter(
-            GameRow.season_id == game.season_id,
-            GameRow.date == payload.date,
-            GameRow.id != game.id,
-        )
-        .first()
-    )
-    if clash is not None:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "This season already has a game on that date",
-        )
+    # Only what was actually sent. A field left out keeps its current
+    # value; a field sent as null is a request to clear it, which for
+    # the venue and the time means "back to the season's".
+    fields = payload.model_dump(exclude_unset=True)
+    if "location" in fields:
+        game.location = fields["location"]
+    if "start_time" in fields:
+        game.start_time = fields["start_time"]
+    if "end_time" in fields:
+        game.end_time = fields["end_time"]
 
-    game.date = payload.date
+    new_date = fields.get("date")
+    if new_date is not None and new_date != game.date:
+        if new_date < _today_in_taiwan():
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "That date has already been and gone"
+            )
+        clash = (
+            db.query(GameRow)
+            .filter(
+                GameRow.season_id == game.season_id,
+                GameRow.date == new_date,
+                GameRow.id != game.id,
+            )
+            .first()
+        )
+        if clash is not None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "This season already has a game on that date",
+            )
+        game.date = new_date
+
     db.commit()
     db.refresh(game)
     return GameOut(id=game.id, date=game.date, status=game.status)

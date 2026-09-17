@@ -386,11 +386,37 @@ class GameCancel(BaseModel):
     docs/billing-rules.md "Game cancellation"."""
 
 
-class GameDateUpdate(BaseModel):
-    date: date
-    """Where this game moves to. The season keeps the same number of
-    games at the same share, so nobody's charge moves with it — see
-    routes.games.move_game."""
+# `date` is a field name on GameUpdate below, and a field *with a
+# default* binds that name in the class body — which leaves Pydantic
+# resolving the annotation `date | None` against None instead of the
+# type, and raises `unsupported operand type(s) for |` at import time.
+# GameDateUpdate before it had no default, so `date: date` only
+# annotated and never bound, which is why this never came up. Aliased
+# here so the field can keep the name the API actually sends.
+_DateType = date
+
+
+class GameUpdate(BaseModel):
+    """A partial update to one game — only the fields actually present in
+    the request body are touched (see routes.games.update_game's use of
+    `exclude_unset`), so putting this night back on the season's own
+    venue (`location` sent as null) and leaving it alone stay
+    distinguishable requests. Same shape, and the same reason, as
+    SeasonUpdate.
+
+    None of these move money. A date change is a move, not a
+    cancellation: the season keeps the same number of games at the same
+    share, so nobody's charge goes with it. Location and time are
+    display-only, like the season's own pair.
+    """
+
+    date: _DateType | None = None
+    """Where this game moves to."""
+    location: str | None = None
+    start_time: time | None = None
+    end_time: time | None = None
+    """This one night's venue and time. Null puts it back on the
+    season's."""
 
 
 class PlayerIdentify(BaseModel):
@@ -503,6 +529,14 @@ class GameDetailOut(BaseModel):
     """What this particular game costs one person. Differs between games
     once air conditioning is priced, which is why an absence refund and
     a drop-in's charge both key off the game rather than the season."""
+    location: str | None = None
+    start_time: time | None = None
+    end_time: time | None = None
+    """This night's own venue and time, or null when it is the same as
+    the rest of the season's — which is the normal case. The screen
+    falls back to the season's pair on null rather than showing a gap;
+    see describeGameWhen in member.html. Display-only: billing never
+    reads them."""
     absences: list[AbsenceDetailOut]
     confirmed_drop_ins: list[DropInDetailOut]
     waitlist_entries: list[DropInSummary]

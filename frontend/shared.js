@@ -74,6 +74,32 @@ function isGameFull(season, game) {
   return expectedAttendance(season, game) >= season.capacity;
 }
 
+/** This game's time and venue: its own when it has them, the season's
+ * otherwise.
+ *
+ * A booking really does move — 「有時候會換場地」, 2026-09-17 — so a game
+ * carries `location`, `start_time` and `end_time` of its own. Null on
+ * any of them means "the same as every other night", which is what
+ * every game booked before that date holds, so the season stays the
+ * answer unless one night overrides it.
+ *
+ * Shared rather than written per page for the same reason acPill and
+ * isGameFull are: the member's screen and the organizer's show the same
+ * game and have to say the same thing about it. Display only — billing
+ * never reads any of this. See docs/billing-rules.md.
+ */
+function gameStartTime(season, game) {
+  return (game && game.start_time) || season.game_start_time || null;
+}
+
+function gameEndTime(season, game) {
+  return (game && game.end_time) || season.game_end_time || null;
+}
+
+function gameLocation(season, game) {
+  return (game && game.location) || season.location || null;
+}
+
 /** Whether the first game has already happened — the line the roster
  * change rules are drawn on: free and
  * silent before it, a confirmation after, because a mid-season change
@@ -237,11 +263,17 @@ function renderGameHero(season, game, opts) {
   const capacity = season.capacity;
   const full = expected >= capacity;
 
+  // This night's own time and venue when it has them — see
+  // gameStartTime. Identical to the season's for every game that does
+  // not override, which is nearly all of them.
+  const startsAt = gameStartTime(season, game);
+  const endsAt = gameEndTime(season, game);
+  const where = gameLocation(season, game);
   const whenParts = [];
-  if (season.game_start_time && season.game_end_time) {
-    whenParts.push(escapeHtml(`${season.game_start_time.slice(0, 5)}–${season.game_end_time.slice(0, 5)}`));
+  if (startsAt && endsAt) {
+    whenParts.push(escapeHtml(`${startsAt.slice(0, 5)}–${endsAt.slice(0, 5)}`));
   }
-  if (season.location) whenParts.push(escapeHtml(season.location));
+  if (where) whenParts.push(escapeHtml(where));
 
   return `
     <div class="hero">

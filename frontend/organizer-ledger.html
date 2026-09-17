@@ -766,7 +766,7 @@
     if (!confirm("要復原這次結算嗎？每一筆退費都會用一筆相反的紀錄沖銷掉，原本的紀錄會留著。")) return;
     try {
       // postJson marks the pressed control busy and hands back a message
-      // already in Chinese — see saveGameDate on the settings page.
+      // already in Chinese — see saveGameEdit on the settings page.
       const result = await postJson(API_BASE, `/seasons/${currentSeason.id}/unsettle`, {});
       const paid = (result && result.already_paid_out) || [];
       loadLedger(currentSeason.id);

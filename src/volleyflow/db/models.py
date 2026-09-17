@@ -213,6 +213,23 @@ class GameRow(Base):
     season is booked. Flipping it moves the season's total venue cost by
     ac_surcharge and re-syncs every member's charge; see
     routes.set_game_air_conditioning."""
+    location: Mapped[str | None] = mapped_column(default=None)
+    start_time: Mapped[time | None] = mapped_column(default=None)
+    end_time: Mapped[time | None] = mapped_column(default=None)
+    """This one night's venue and time, when they differ from the rest
+    of the season's.
+
+    NULL means "the same as every other night", which is the normal case
+    and what every game booked before 2026-09-17 holds — so the season's
+    own pair stays the answer unless a game overrides it. Asked for
+    because a booking really does move: 「有時候會換場地」.
+
+    Display-only, exactly like the season's pair: billing never reads
+    them, so changing one writes no ledger entry. See
+    docs/billing-rules.md, "Keeping the charge in sync when the inputs
+    change" — an edit that changes nobody's math writes nothing. What a
+    *different venue at a different price* costs is a separate question
+    and is not modelled here."""
 
 
 class AbsenceRow(Base):

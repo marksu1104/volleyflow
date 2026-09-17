@@ -1,8 +1,13 @@
-"""Moving one game to another date.
+"""Changing one game: its date, its venue, or its time.
 
-The venue shifts a booking, or the club swaps an evening. Everything
-already recorded against that night has to come with it, and nobody's
-money may move — see routes.games.move_game.
+The venue shifts a booking, the club swaps an evening, or one night runs
+at a different court or hour. Everything already recorded against that
+night has to come with it, and nobody's money may move — see
+routes.games.update_game.
+
+The venue and the time are display-only here. A replacement court that
+costs a *different amount* is a separate question and is deliberately
+not what this endpoint does; see docs/billing-rules.md.
 """
 
 from datetime import date, timedelta
@@ -116,3 +121,77 @@ def test_a_member_may_not_move_a_game(client: TestClient) -> None:
     )
 
     assert refused.status_code == 403
+
+
+def test_a_night_can_run_at_another_venue_without_moving(client: TestClient) -> None:
+    season = _season(client)
+    game = season["games"][0]
+
+    changed = client.patch(
+        f"/games/{game['id']}",
+        json={
+            "location": "第二球場",
+            "start_time": "19:00:00",
+            "end_time": "22:00:00",
+        },
+    )
+
+    assert changed.status_code == 200, changed.text
+    after = client.get(f"/seasons/{season['id']}").json()["games"][0]
+    assert after["location"] == "第二球場"
+    assert after["start_time"] == "19:00:00"
+    assert after["end_time"] == "22:00:00"
+    # No date in the request, so the night must not have moved — the
+    # whole point of updating only what was actually sent.
+    assert after["date"] == game["date"]
+
+
+def test_clearing_a_nights_own_venue_puts_it_back_on_the_seasons(
+    client: TestClient,
+) -> None:
+    # Null is a real instruction here, not a missing field: "back to the
+    # same venue as every other night". The screen then falls back to the
+    # season's own — see gameLocation in shared.js.
+    season = _season(client)
+    game = season["games"][0]
+    client.patch(f"/games/{game['id']}", json={"location": "第二球場"})
+
+    client.patch(f"/games/{game['id']}", json={"location": None})
+
+    after = client.get(f"/seasons/{season['id']}").json()["games"][0]
+    assert after["location"] is None
+
+
+def test_a_night_can_move_and_change_venue_in_one_request(client: TestClient) -> None:
+    season = _season(client)
+    game = season["games"][0]
+
+    client.patch(f"/games/{game['id']}", json={"date": _in(31), "location": "第二球場"})
+
+    after = client.get(f"/seasons/{season['id']}").json()["games"][0]
+    assert after["date"] == _in(31)
+    assert after["location"] == "第二球場"
+
+
+def test_changing_a_nights_venue_charges_nobody_anything(client: TestClient) -> None:
+    # The guarantee that keeps this endpoint out of billing: the venue
+    # and the time are display-only, so an edit that changes nobody's
+    # math writes nothing (docs/billing-rules.md). If a per-game price
+    # is ever added, this is what will catch it going in silently.
+    season = start_season(
+        client, game_dates=[_in(30), _in(37)], member_names=["Alice"], capacity=2
+    )
+    before = client.get(
+        f"/clubs/{season['club_id']}/players/{season['member_ids'][0]}/ledger"
+    ).json()
+
+    client.patch(
+        f"/games/{season['games'][0]['id']}",
+        json={"location": "第二球場", "start_time": "20:00:00"},
+    )
+
+    after = client.get(
+        f"/clubs/{season['club_id']}/players/{season['member_ids'][0]}/ledger"
+    ).json()
+    assert after["balance"] == before["balance"]
+    assert len(after["entries"]) == len(before["entries"])

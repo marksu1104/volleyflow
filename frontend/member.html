@@ -1061,8 +1061,12 @@
 
   function describeGameWhen(season, game) {
     const d = describeDate(game.date);
-    const time = season.game_start_time ? " " + season.game_start_time.slice(0, 5) : "";
-    return `${d.month}/${d.day}（${d.weekday.slice(-1)}）${time}${season.location ? " · " + season.location : ""}`;
+    // This night's own time and venue when it has them — see
+    // gameStartTime in shared.js.
+    const startsAt = gameStartTime(season, game);
+    const where = gameLocation(season, game);
+    const time = startsAt ? " " + startsAt.slice(0, 5) : "";
+    return `${d.month}/${d.day}（${d.weekday.slice(-1)}）${time}${where ? " · " + where : ""}`;
   }
 
   function closeSignup() { document.getElementById("signup-backdrop").hidden = true; }

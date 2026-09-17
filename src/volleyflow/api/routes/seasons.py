@@ -769,6 +769,12 @@ def get_season(
                 status=game.status,
                 air_conditioned=game.air_conditioned,
                 share=shares[game.id],
+                # Null for almost every game, meaning "the same as the
+                # rest of the season" — the screen falls back to the
+                # season's own pair rather than showing a gap.
+                location=game.location,
+                start_time=game.start_time,
+                end_time=game.end_time,
                 locked=not (
                     viewer_is_organizer or _within_change_deadline(game, season_row)
                 ),

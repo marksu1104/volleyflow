@@ -121,7 +121,7 @@ const seasonOf = async (id) => (await fetch(`${API}/seasons/${id}`, { headers: a
     const moved = after.games.find((g) => g.id === target.id) || {};
     const shown = await page.evaluate(() => document.getElementById("upcoming-games").innerText);
     report("改完之後日期真的變了，記錄也跟著走", [
-      ...(sheet.title.includes("改到別天") ? [] : [`面板標題是 ${sheet.title}`]),
+      ...(sheet.title.includes("編輯") ? [] : [`面板標題是 ${sheet.title}`]),
       ...(sheet.value === target.date ? [] : [`面板帶的是 ${sheet.value}，該場是 ${target.date}`]),
       ...(moved.date === movedTo ? [] : [`伺服器上是 ${moved.date}，應該是 ${movedTo}`]),
       ...(shown.includes(`${next.getMonth() + 1}/${next.getDate()}`) ? [] : ["畫面上沒有看到新的日期"]),
