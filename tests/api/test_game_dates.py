@@ -2,12 +2,13 @@
 
 The venue shifts a booking, the club swaps an evening, or one night runs
 at a different court or hour. Everything already recorded against that
-night has to come with it, and nobody's money may move — see
-routes.games.update_game.
+night travels with it — see routes.games.update_game.
 
-The venue and the time are display-only here. A replacement court that
-costs a *different amount* is a separate question and is deliberately
-not what this endpoint does; see docs/billing-rules.md.
+Three of the four fields move nobody's money: a date change is a move
+rather than a cancellation, and the venue's *name* and the hour are
+display-only. The fourth, `venue_cost_delta`, is the one that prices a
+night, and it is covered by the tests at the bottom of this file. See
+docs/billing-rules.md, "A different venue for one night".
 """
 
 from datetime import date, timedelta
