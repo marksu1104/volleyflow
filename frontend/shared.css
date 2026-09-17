@@ -121,7 +121,14 @@ h2 { font-size: .9rem; margin: 28px 0 10px; color: var(--ink-soft); font-weight:
   font-size: .74rem; color: var(--ink-soft); font-weight: 700; margin: 14px 0 7px;
   text-transform: uppercase; letter-spacing: .04em;
 }
-.section-label:first-child { margin-top: 0; }
+/* Only the label at the very top of the page loses its space. This used
+   to be every `.section-label:first-child`, which meant any section
+   opening with one — and on the roster page that is all of them — sat
+   flush against whatever came before it. Reported 2026-09-18 about
+   新增訪客, though 待核准, 重複的名字, 等待加入本季 and 加入連結 all had
+   it; the dense roster row directly above 新增訪客 just made it obvious
+   there first. Sections that deliberately want no gap set it inline. */
+.wrap > .section-label:first-child { margin-top: 0; }
 /* A section-label that also opens and closes what's under it — the
    roster page's "其他球隊成員", collapsed by default because 本季固定成員
    is what the organizer actually came here to read, and a long tail of
