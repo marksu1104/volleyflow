@@ -125,14 +125,18 @@ function inDays(days) {
     }));
     // This member is already playing, so the sheet does not put them in
     // the list — it opens empty, which is the state the screenshot on
-    // 2026-09-16 was of. Either honest answer is fine here (「—・先新增
-    // 報名對象」 with nobody chosen, 「候補 N 位」 once somebody is); what
-    // must never appear is $0, which reads as "this is free" on a night
-    // that charges a share a head.
+    // 2026-09-16 was of. Somebody who is *not* already playing opens the
+    // same sheet pre-filled with themselves, and the two looked like
+    // different screens until 2026-09-17; the bar keeps one grammar in
+    // every state now — 合計, a figure, and a breakdown — so the queue is
+    // named underneath rather than replacing the total. What must never
+    // appear is $0, which reads as "this is free" on a night that
+    // charges a share a head.
     report("額滿時的報名單不會用 $0 回答", [
       ...(quote.amount.includes("$0") ? ["金額寫著 $0"] : []),
       ...(quote.go.includes("候補") ? [] : [`按鈕寫的是「${quote.go}」`]),
-      ...(quote.breakdown.includes("先新增") || quote.amount.includes("候補")
+      ...(quote.label === "合計" ? [] : [`總計那一行寫的是「${quote.label}」`]),
+      ...(quote.breakdown.includes("先新增") || quote.breakdown.includes("候補")
         ? []
         : [`寫的是「${quote.label} ${quote.amount}・${quote.breakdown}」`]),
     ]);

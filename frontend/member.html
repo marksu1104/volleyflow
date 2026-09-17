@@ -1141,25 +1141,35 @@
     const amount = document.getElementById("su-amt");
     const label = document.getElementById("su-total-label");
     const breakdown = document.getElementById("su-breakdown");
+    // One grammar in every state: 合計, a figure, and a breakdown under
+    // it. Reported as 「我在我自己球隊的報名介面跟別人球隊的報名介面長的不
+    // 一樣，一個會算錢、一個寫候補多少人」 — and it was not mainly about
+    // the game being full. openSignup starts this list empty for anyone
+    // already playing (your own club, where you are a fixed member) and
+    // pre-filled with you for anyone who is not (somebody else's club),
+    // so the two sheets opened in different states; the total bar then
+    // swapped its label, the meaning of its figure, its type size and
+    // its colour between them, which is what made one read as a
+    // different screen rather than the same one further along.
+    //
+    // So this slot is always money. The queue is said twice above it
+    // already — 「N 位排候補」 on the capacity line, and a 候補 tag on each
+    // queued row — so it belongs in the breakdown, never in place of the
+    // total.
+    label.textContent = "合計";
     if (suPeople.length === 0) {
       // Nobody chosen yet, so there is no figure to show. "$0" is a
       // price, and it reads as "this costs nothing" — the opposite of
       // true on a game that charges a share per person.
-      label.textContent = "合計";
       amount.textContent = "—";
-      amount.classList.remove("waiting");
       breakdown.textContent = "先新增報名對象";
     } else if (confirmed === 0 && waiting > 0) {
-      // Everybody is queued, so "what do I owe now" is always $0 — which is
-      // not the question the tap asked. Answer the one it did.
-      label.textContent = "這次報名";
-      amount.textContent = `候補 ${waiting} 位`;
-      amount.classList.add("waiting");
-      breakdown.textContent = `遞補上才收，每位 $${share}・現在不收費`;
+      // Everybody is queued, so nothing is owed now. Still not "$0",
+      // for the same reason as above.
+      amount.textContent = "—";
+      breakdown.textContent = `候補 ${waiting} 位・遞補上才收，每位 $${share}`;
     } else {
-      label.textContent = "合計";
       amount.textContent = "$" + confirmed * share;
-      amount.classList.remove("waiting");
       breakdown.textContent = waiting
         ? `${confirmed} 位 × $${share}；候補 ${waiting} 位遞補上才收`
         : `${confirmed} 位 × $${share}`;

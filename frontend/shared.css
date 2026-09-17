@@ -898,8 +898,11 @@ textarea {
   margin: 15px 0 11px; padding-top: 12px; border-top: 1px solid var(--rule); font-size: .82rem;
 }
 .su-total-text { display: flex; flex-direction: column; gap: 2px; }
+/* One size, one colour, in every state — see renderSignup in
+   member.html. There used to be a .waiting variant that shrank this and
+   turned it amber when the whole signup was queued, which is half of
+   what made a full game's sheet look like a different screen. */
 .su-amt { font-family: var(--font-num); font-size: 1.2rem; font-weight: 800; }
-.su-amt.waiting { font-size: 1rem; color: var(--warn); }
 .su-breakdown { color: var(--ink-faint); font-size: .72rem; }
 
 /* Tapping a date changes the card above the calendar, and without a cue
