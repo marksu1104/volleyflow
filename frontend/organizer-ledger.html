@@ -212,20 +212,36 @@
     // the older one, repainting money figures from before the last
     // write.
     const ticket = ledgerLoad.take();
+    // What the screen knew when this read set off. It matters more now
+    // that a cached copy can arrive: an answer from before the last tap
+    // would otherwise repaint a payment away. See localRevision.
+    const askedAt = localRevision();
     const errorEl = document.getElementById("error");
     errorEl.textContent = "";
     try {
-      const res = await fetch(`${API_BASE}/seasons/${seasonId}`, {
-        headers: authHeader(),
-      });
+      // Cached copy first, network second — the same conversion
+      // organizer-settings.html made, for the same reason: this was the
+      // only link in the chain (LIFF, identify, clubs, seasons, then
+      // this) still going to the network every time. Measured at 1910ms
+      // warm against 508ms for 設定, which reads the same season the
+      // same way. A 404 now reports through the catch rather than its
+      // own branch, matching that page.
+      await getJsonSWR(`${API_BASE}/seasons/${seasonId}`, (season) => {
+        paint(season).catch((e) => {
+          if (!ledgerLoad.current(ticket)) return;
+          errorEl.textContent = "連不上伺服器：" + e.message;
+        });
+      }, { headers: authHeader() });
+    } catch (e) {
       if (!ledgerLoad.current(ticket)) return;
-      if (!res.ok) {
-        document.getElementById("no-season").innerHTML = "";
-        errorEl.textContent = "找不到這一季";
-        return;
-      }
-      const season = await res.json();
+      document.getElementById("no-season").innerHTML = "";
+      errorEl.textContent = "連不上伺服器：" + e.message;
+    }
+
+    async function paint(season) {
       if (!ledgerLoad.current(ticket)) return;
+      // Older than what is on screen — painting it would undo a tap.
+      if (currentSeason && currentSeason.id === season.id && localRevision() !== askedAt) return;
       currentSeason = season;
       // Started before the balances rather than after them: the two
       // don't depend on each other, and running them back to back made
@@ -233,15 +249,17 @@
       const settlementReady = fetchSettlement(season);
       await loadBalances(currentSeason);
       if (!ledgerLoad.current(ticket)) return;
-      settlementPreview = await settlementReady;
-      if (!ledgerLoad.current(ticket)) return;
-      await Promise.all([renderFeeTab(), renderDropInTab(), renderClosingTab()]);
+      // The screen goes up here, not after the settlement. That preview
+      // feeds 季末結算 and nothing else, so waiting for it held 季費 and
+      // 當天臨打 — three quarters of the page — behind a round trip they
+      // have no use for. renderClosingTab already copes with an empty
+      // preview; it is what it draws before one is fetched at all.
+      await Promise.all([renderFeeTab(), renderDropInTab()]);
       if (!ledgerLoad.current(ticket)) return;
       setHasSeason(true);
-    } catch (e) {
+      settlementPreview = await settlementReady;
       if (!ledgerLoad.current(ticket)) return;
-      document.getElementById("no-season").innerHTML = "";
-      errorEl.textContent = "連不上伺服器：" + e.message;
+      await renderClosingTab();
     }
   }
 

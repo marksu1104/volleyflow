@@ -268,38 +268,60 @@
     // than the wait it replaces.
     const firstLoad = document.getElementById("roster-section").hidden;
     if (firstLoad) showPageLoading(document.getElementById("no-season"));
+    // Sent now, read later. These two feed the sections *below* the
+    // roster, so they no longer hold it up — but there is no reason for
+    // them to start any later than they used to. Parsed here rather than
+    // where they are used: getJsonSWR calls its callback twice, and a
+    // Response body can only be read once, so passing the raw responses
+    // down would throw on the second pass.
+    const extras = Promise.all([
+      fetch(`${API_BASE}/seasons/${seasonId}/join-pool`, { headers: authHeader() })
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
+      fetch(`${API_BASE}/clubs/${currentClubId()}/members`, { headers: authHeader() })
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
+    ]);
+
     try {
-      // The roster and the join pool don't depend on each other, so they
-      // go out together rather than one after the other.
-      const [res, pool, club] = await Promise.all([
-        fetch(`${API_BASE}/seasons/${seasonId}`, { headers: authHeader() }),
-        fetch(`${API_BASE}/seasons/${seasonId}/join-pool`, { headers: authHeader() }),
-        fetch(`${API_BASE}/clubs/${currentClubId()}/members`, { headers: authHeader() }),
-      ]);
+      // Cached copy first, network second. This was the last of the four
+      // management pages still reading its season through a bare fetch,
+      // and the slowest warm page because of it — the same conversion
+      // organizer-settings.html and organizer-ledger.html already made.
+      // A 404 reports through the catch now rather than its own branch,
+      // matching those two.
+      await getJsonSWR(`${API_BASE}/seasons/${seasonId}`, (season) => {
+        paint(season).catch((e) => {
+          if (!membersLoad.current(ticket)) return;
+          errorEl.textContent = "連不上伺服器：" + e.message;
+        });
+      }, { headers: authHeader() });
+    } catch (e) {
       if (!membersLoad.current(ticket)) return;
-      if (!res.ok) {
-        document.getElementById("no-season").innerHTML = "";
-        errorEl.textContent = "找不到這一季";
-        return;
-      }
-      const season = await res.json();
+      document.getElementById("no-season").innerHTML = "";
+      errorEl.textContent = "連不上伺服器：" + e.message;
+    }
+
+    async function paint(season) {
       if (!membersLoad.current(ticket)) return;
       // Somebody changed something after this read set off, so painting
       // it would undo their tap. The change queues its own reload.
       if (currentSeason && currentSeason.id === season.id && localRevision() !== askedAt) return;
       currentSeason = season;
-      currentPool = pool.ok ? await pool.json() : [];
-      allClubMembers = club.ok ? await club.json() : [];
+      // The roster goes up on the season alone — renderMembers reads
+      // nothing but its argument — so the page shows the thing it exists
+      // to show without waiting on the two lists underneath it.
       renderMembers(currentSeason);
-      renderJoinPool();
-      renderDuplicates();
       document.getElementById("no-season").innerHTML = "";
       document.getElementById("roster-section").hidden = false;
       document.getElementById("guest-section").hidden = false;
-    } catch (e) {
+
+      const [pool, members] = await extras;
       if (!membersLoad.current(ticket)) return;
-      document.getElementById("no-season").innerHTML = "";
-      errorEl.textContent = "連不上伺服器：" + e.message;
+      currentPool = pool;
+      allClubMembers = members;
+      renderJoinPool();
+      renderDuplicates();
     }
   }
 
