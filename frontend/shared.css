@@ -810,6 +810,19 @@ a.btn { display: block; text-decoration: none; text-align: center; }
 .seg { display: flex; gap: 3px; background: var(--surface-2); padding: 3px; border-radius: 9px; margin-bottom: 14px; }
 .seg span { flex: 1; text-align: center; font-size: .8rem; font-weight: 600; padding: 7px 4px; border-radius: 7px; color: var(--ink-soft); cursor: pointer; }
 .seg span.on { background: var(--accent); color: var(--surface); font-weight: 700; }
+/* 季末結算 is used once in a season — on the night the last game is
+   played — yet it claimed an equal third of this control every other
+   week of the year. While the season is still running it stops claiming
+   equal width and drops to a footnote's weight: still there, still
+   tappable, just no longer competing with the two tabs that get used
+   weekly. Asked for 2026-09-17.
+
+   The `.on` pairing is not redundant: `.seg span.quiet` and
+   `.seg span.on` have identical specificity, so without it the later
+   rule would win and an opened 季末結算 would keep the faint colour it
+   has while closed. */
+.seg span.quiet { flex: 0 1 auto; padding-inline: 11px; color: var(--ink-faint); }
+.seg span.quiet.on { flex: 1; color: var(--surface); font-weight: 700; }
 
 /* small pill summary row, used by the organizer overview/settings pages
    to show season parameters at a glance */
@@ -1033,33 +1046,13 @@ textarea {
 .bc-chev { color: var(--ink-faint); margin-left: 5px; font-weight: 600; }
 
 /* ---- a season's terms on the management screen ----
-   Five identical grey pills gave the venue cost, the minimum roster, the
-   times, the location and the settled state exactly the same weight, so
-   the money read as a footnote. Money leads as figures; the
-   arrangements are a line of text under them; the settled state reads
-   as a state. */
-.sm-figures {
-  display: flex; width: 100%; margin-top: 12px; background: var(--surface);
-  border-radius: 13px; padding: 13px; box-shadow: var(--shadow);
-}
-.sm-figure {
-  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px;
-  padding-right: 10px;
-}
-.sm-figure + .sm-figure { border-left: 1px solid var(--rule); padding-left: 12px; }
-.sm-figure:last-child { padding-right: 0; }
-.sm-label {
-  font-size: .66rem; font-weight: 600; color: var(--ink-faint);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-/* A season's venue cost runs to five digits, and the three columns have
-   to share one phone width — so the figure shrinks to fit rather than
-   spilling over the divider into the column beside it. */
-.sm-value {
-  font-family: var(--font-num); font-size: clamp(.95rem, 4.2vw, 1.2rem);
-  font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums;
-  overflow: hidden; text-overflow: ellipsis;
-}
+   One line, under the card. This used to be three figure tiles sitting
+   above that line — 場地費總額, 每人每場, 最低人數 — and every one of
+   those numbers is also on the settings page, where it can actually be
+   changed rather than only read. That was three tiles of height on the
+   screen an organizer opens most often, spent restating something they
+   cannot act on from there. The tiles went on 2026-09-17; the settled
+   state stays a state, so it still reads as one. */
 .sm-line {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   margin-top: 9px; font-size: .78rem; color: var(--ink-soft);

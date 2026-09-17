@@ -275,45 +275,33 @@
     if (e.target.id === "todo-backdrop") closeTodos();
   });
 
-  /** This season's terms, as figures rather than a row of small pills.
+  /** This season's terms, as one line.
    *
-   * They were five grey pills of the same size — the venue cost, the
-   * minimum roster, the times, the location and the settled state all
-   * weighted identically and all looking like footnotes. The two that
-   * are money and the two that are logistics are not the same kind of
-   * fact, so they no longer look the same: the numbers lead, the
-   * arrangements sit under them as a line of text, and 已結算 is a
-   * state so it reads as a state.
+   * It used to be three figure tiles — 場地費總額, 每人每場, 最低人數 —
+   * sitting above a line of arrangements. Every one of those numbers is
+   * also on the settings page, where it can actually be *changed*;
+   * here it could only be read. So it spent three tiles' worth of
+   * height, on the screen an organizer opens most often, restating
+   * something they cannot act on. Collapsed on 2026-09-17: the facts
+   * stay, the height goes, and 已結算 is still a state so it still
+   * reads as one.
    */
   function renderMeta(season) {
     const el = document.getElementById("season-meta");
     const settled = season.settled_at !== null;
-    const games = season.games.length;
-    const when = [
+    const parts = [
+      `${season.games.length} 場`,
+      `${season.members.length} 人`,
+      `每人每場 $${season.share_per_game}`,
       season.game_start_time && season.game_end_time
         ? `${escapeHtml(season.game_start_time.slice(0, 5))}–${escapeHtml(season.game_end_time.slice(0, 5))}`
         : null,
       season.location ? escapeHtml(season.location) : null,
-      `${games} 場・${season.members.length} 人`,
     ].filter(Boolean);
 
     el.innerHTML = `
-      <div class="sm-figures">
-        <div class="sm-figure">
-          <span class="sm-label">場地費總額</span>
-          <span class="sm-value">$${season.total_venue_cost}</span>
-        </div>
-        <div class="sm-figure">
-          <span class="sm-label">每人每場</span>
-          <span class="sm-value">$${season.share_per_game}</span>
-        </div>
-        <div class="sm-figure">
-          <span class="sm-label">最低人數</span>
-          <span class="sm-value">${season.minimum_roster}</span>
-        </div>
-      </div>
       <div class="sm-line">
-        <span>${when.join(" · ")}</span>
+        <span>${parts.join(" · ")}</span>
         ${settled ? '<span class="sm-state done">已結算</span>' : '<span class="sm-state">尚未結算</span>'}
       </div>
     `;

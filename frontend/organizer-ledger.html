@@ -201,7 +201,32 @@
             { label: "建立第一季", href: "organizer-settings.html" }
           )
         : noClubYetHtml();
-    if (hasSeason) showTab(location.hash === "#settle" ? "closing" : "fee");
+    // On a day there is a game, this page's job is collecting cash
+    // courtside, so it opens on 當天臨打. Every other day it opens on
+    // 季費, which is what you read before a season starts. A #settle
+    // link still wins outright — that is somebody arriving from a
+    // link that names the tab it wants.
+    if (hasSeason) {
+      const today = dateKey(new Date());
+      const gameToday = currentSeason.games.some(
+        (g) => g.date === today && g.status === "scheduled"
+      );
+      // 季末結算 is worth an equal third of this control on exactly one
+      // night a season. Until the last game has been played it steps
+      // aside instead — still there, still tappable, just not competing
+      // with the two tabs used every week. showTab only toggles `on`
+      // and the panels' hidden flag, so this class survives every
+      // switch.
+      const games = currentSeason.games;
+      const last = games[games.length - 1];
+      const stillRunning =
+        currentSeason.settled_at === null && !!last && last.date >= today;
+      const closingTab = document.querySelector('#ledger-tabs [data-tab="closing"]');
+      if (closingTab) closingTab.classList.toggle("quiet", stillRunning);
+      showTab(
+        location.hash === "#settle" ? "closing" : gameToday ? "dropin" : "fee"
+      );
+    }
   }
 
   const ledgerLoad = staleGuard();

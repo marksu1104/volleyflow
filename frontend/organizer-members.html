@@ -62,26 +62,32 @@
   </div>
   <div id="error"></div>
 
-  <div id="join-link-section" hidden>
-    <div class="section-label">加入連結</div>
-    <div class="link-box">
-      <code id="join-link"></code>
-      <button type="button" onclick="copyJoinLink()">複製</button>
-    </div>
-    <p class="hint">用 LINE 開啟這個連結，會自動選到這個球隊並提示加入。</p>
-  </div>
-
   <div id="settled-note" class="settled-note" hidden>
     這一季已經結算，成員名單不能再變動。
   </div>
 
   <div id="no-season"></div>
 
-  <!-- 本季固定成員 leads: it's what the organizer opens this page to
-       read. 待加入 is its own section right after — somebody who has
-       already said "I'm a fixed member" and is waiting on a decision —
-       and everyone else on the roster page collapses behind a toggle,
-       since most weeks there's nothing to do with them. -->
+  <!-- 待核准 leads, whenever there is anybody in it. Someone who pressed
+       the invite link cannot see a single thing about the club until
+       they are approved — they are waiting on a person, which is the
+       only thing on this page with a clock running. The roster is here
+       every day and is not going anywhere. This section hides itself
+       when it is empty, so on an ordinary week it costs nothing and
+       本季固定成員 is still the first thing on screen. Moved 2026-09-17;
+       the organizer declined moving 等待加入本季 up with it, so that one
+       stays where it was. -->
+  <div id="requests-section" hidden>
+    <div class="section-label">待核准</div>
+    <p class="hint" style="margin-top:0">
+      用邀請連結申請加入的人，核准前看不到球隊的任何資料。按「核准固定」會直接加入本季名單並記上季費；按「核准臨打」只讓他加入球隊。
+    </p>
+    <div id="requests-list" class="member-list"></div>
+  </div>
+
+  <!-- 本季固定成員 is what the organizer opens this page to read, so it
+       leads once nobody is waiting. Everyone else collapses behind a
+       toggle, since most weeks there is nothing to do with them. -->
   <div id="roster-section" hidden data-season-content>
     <div class="section-label">本季固定成員</div>
     <p id="warn-note" class="hint" style="color: var(--warn)">
@@ -93,14 +99,6 @@
     </p>
 
     <div id="member-list" class="member-list"></div>
-  </div>
-
-  <div id="requests-section" hidden>
-    <div class="section-label">待核准</div>
-    <p class="hint" style="margin-top:0">
-      用邀請連結申請加入的人，核准前看不到球隊的任何資料。按「核准固定」會直接加入本季名單並記上季費；按「核准臨打」只讓他加入球隊。
-    </p>
-    <div id="requests-list" class="member-list"></div>
   </div>
 
   <div id="dup-section" hidden>
@@ -141,6 +139,20 @@
       <span class="chev">▾</span> 其他球隊成員 <span class="collapse-count" id="pool-count"></span>
     </button>
     <div id="pool-list" class="member-list" hidden></div>
+  </div>
+
+  <!-- Last, not first. Copying the invite link is something you do while
+       a season is being put together — once a month at most — and it used
+       to be pinned above everything else, so every single visit to this
+       page began with the one control you were least likely to press.
+       Moved 2026-09-17. -->
+  <div id="join-link-section" hidden>
+    <div class="section-label">加入連結</div>
+    <div class="link-box">
+      <code id="join-link"></code>
+      <button type="button" onclick="copyJoinLink()">複製</button>
+    </div>
+    <p class="hint">用 LINE 開啟這個連結，會自動選到這個球隊並提示加入。</p>
   </div>
 </div>
 

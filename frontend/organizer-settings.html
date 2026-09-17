@@ -55,18 +55,6 @@
     尚未加入任何球隊——請先到<a href="member.html">會員頁</a>用 LINE 開啟，建立或加入一個球隊。
   </p>
 
-  <div id="club-name-section" class="settings-form" hidden>
-    <div class="section-label" style="margin-top:0">球隊</div>
-    <div class="field">
-      <label for="club-name">球隊名稱</label>
-      <input id="club-name" class="control" type="text" maxlength="20" autocomplete="off">
-      <div class="under-field">
-        <span class="hint" id="club-name-hint">會顯示在每位成員畫面的左上角，最多 20 個字。</span>
-        <button type="button" class="mini-action" id="club-name-save" onclick="renameClub(this)" disabled>儲存</button>
-      </div>
-    </div>
-  </div>
-
   <div id="wizard-backdrop" class="gsheet-backdrop full" hidden>
    <div class="gsheet full">
     <div class="wizard-head">
@@ -329,6 +317,25 @@
         <button type="button" class="mini-action danger" onclick="deleteClub()">刪除</button>
       </div>
       <p class="hint">只有管理員能刪除，而且已經結算過的季別不能刪——那是已經結清的帳。</p>
+    </div>
+  </div>
+
+  <!-- Down here, not at the top. A club's name is set on the day it is
+       created and then essentially never again, yet it used to be the
+       first thing on this page — above 場次, which is what an organizer
+       actually opens 設定 to do. Deliberately still a sibling of
+       #settings-form rather than a child: a club with no season yet has
+       to be renameable, and that form stays hidden until a season
+       exists. Moved 2026-09-17. -->
+  <div id="club-name-section" class="settings-form" hidden>
+    <div class="section-label" style="margin-top:0">球隊</div>
+    <div class="field">
+      <label for="club-name">球隊名稱</label>
+      <input id="club-name" class="control" type="text" maxlength="20" autocomplete="off">
+      <div class="under-field">
+        <span class="hint" id="club-name-hint">會顯示在每位成員畫面的左上角，最多 20 個字。</span>
+        <button type="button" class="mini-action" id="club-name-save" onclick="renameClub(this)" disabled>儲存</button>
+      </div>
     </div>
   </div>
 </div>
