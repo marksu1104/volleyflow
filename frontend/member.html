@@ -269,7 +269,7 @@
     if (!pendingInviteClubId) {
       wrap.innerHTML = emptyStateHtml(
         "找不到這個球隊",
-        "這個邀請連結可能已經失效，或球隊已經被刪除。請向主揪確認。",
+        "這個邀請連結可能已經失效，或球隊已經被刪除。請向管理員確認。",
         { label: "回到我的球隊", onclick: "forgetInvite()" }
       );
       return;
@@ -277,7 +277,7 @@
     wrap.innerHTML = `
       <div class="empty-state" style="text-align:left">
         <h3>加入「${escapeHtml(pendingInviteClubName)}」？</h3>
-        <p>選一個送出申請。主揪核准之後，就能看到場次、請假和帳務。</p>
+        <p>選一個送出申請。管理員核准之後，就能看到場次、請假和帳務。</p>
         <div class="btn-row" style="margin-top:12px">
           <button type="button" class="btn btn-primary" onclick="joinFromPrompt(true, this)">申請當固定成員</button>
           <button type="button" class="btn btn-quiet" onclick="joinFromPrompt(false, this)">申請臨打</button>
@@ -294,7 +294,7 @@
     document.getElementById("season-picker").hidden = true;
     document.getElementById("hero-wrap").innerHTML = emptyStateHtml(
       `已送出申請：${club ? club.name : ""}`,
-      "主揪核准之後，這裡就會出現本季的場次。可以先關掉，之後從同一個連結再打開。",
+      "管理員核准之後，這裡就會出現本季的場次。可以先關掉，之後從同一個連結再打開。",
       { label: "重新整理", onclick: "location.reload()" }
     );
   }
@@ -359,7 +359,7 @@
     if (!club) {
       html = emptyStateHtml(
         "尚未加入任何球隊",
-        "點左上角的球隊按鈕，可以建立一個新的球隊，或用主揪給你的連結加入。"
+        "點左上角的球隊按鈕，可以建立一個新的球隊，或用管理員給你的連結加入。"
       );
     } else if (mine && mine.role === "organizer") {
       html = emptyStateHtml(
@@ -370,7 +370,7 @@
     } else {
       html = emptyStateHtml(
         `「${club.name}」尚未開季`,
-        "主揪開季之後，這裡就會出現本季的場次、你的請假狀態和帳務。"
+        "管理員開季之後，這裡就會出現本季的場次、你的請假狀態和帳務。"
       );
     }
     document.getElementById("hero-wrap").innerHTML = html;
@@ -489,7 +489,7 @@
     // drop-in would contradict what they just said, and taking leave
     // from a roster they're not on means nothing.
     if (membership.wants_fixed_membership === true) {
-      return "等待主揪把你加入本季名單，在那之前只能查看";
+      return "等待管理員把你加入本季名單，在那之前只能查看";
     }
     // An unanswered question is deliberately *not* a block. Signing up
     // as a drop-in is a legitimate thing to do whether or not you
@@ -544,7 +544,7 @@
     const clubId = currentClubId();
     const rows = allClubs.map((c) => {
       const mine = myClubs.find((m) => String(m.id) === String(c.id));
-      const roleTag = mine && mine.role === "organizer" ? '<span class="role-tag">主揪</span>' : "";
+      const roleTag = mine && mine.role === "organizer" ? '<span class="role-tag">管理員</span>' : "";
       const manageLink = mine && mine.role === "organizer"
         ? `<button type="button" class="club-row-manage" data-manage="${c.id}">管理 →</button>`
         : "";
@@ -555,7 +555,7 @@
             !mine
               ? '<span class="cr-sub">邀請連結・尚未加入</span>'
               : mine.status === "pending"
-                ? '<span class="cr-sub">等待主揪核准</span>'
+                ? '<span class="cr-sub">等待管理員核准</span>'
                 : ""
           }</span>
           ${roleTag}${manageLink}
@@ -592,7 +592,7 @@
 
   function promptJoinClub() {
     toast(
-      "請向主揪索取「用連結加入球隊」的網址，用 LINE 打開即可自動加入該球隊。"
+      "請向管理員索取「用連結加入球隊」的網址，用 LINE 打開即可自動加入該球隊。"
     );
   }
 

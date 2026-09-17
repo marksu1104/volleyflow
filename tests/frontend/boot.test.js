@@ -149,7 +149,7 @@ test("the organizer is never waiting on the organizer", () => {
 
 test("a fixed member waiting on the roster is told exactly that", () => {
   const reason = viewingOnlyReason({ role: "member", wants_fixed_membership: true }, false);
-  assert.match(reason, /等待主揪/);
+  assert.match(reason, /等待管理員/);
 });
 
 test("being on the roster settles it, whatever the column says", () => {

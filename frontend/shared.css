@@ -230,7 +230,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
    management tabs pushed the game card and the calendar off the
    bottom of a phone screen, and the overview's whole point is
    seeing both at once. */
-.picker-row { display: flex; gap: 8px; }
+.picker-row { display: flex; gap: 8px; margin-bottom: 12px; }
 /* An hour and a minute, side by side. A native time input prints the
    phone's own clock (下午 06:30 on a Chinese phone) and no attribute
    moves it, so the app spells 18:30 out itself. */
@@ -722,12 +722,12 @@ textarea.control { resize: vertical; min-height: 90px; }
 .m-done { display: flex; align-items: center; gap: 6px; font-size: .76rem; color: var(--good); font-weight: 700; margin-top: 8px; }
 .m-keep { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 9px; font-size: .78rem; color: var(--ink-soft); }
 
-/* 主揪 · 設定 rows */
+/* 管理員 · 設定 rows */
 .set-row { display: flex; align-items: center; gap: 10px; padding: 11px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 11px; margin-bottom: 5px; }
 .set-label { flex: 1; font-size: .85rem; }
 .set-sub { display: block; font-size: .73rem; color: var(--ink-faint); margin-top: 1px; }
 .set-go { color: var(--ink-faint); font-size: .85rem; }
-/* Two things you can do to one row — 改日期 beside 取消這場 — kept at a
+/* Two things you can do to one row — 編輯 beside 取消 — kept at a
    thumb's distance from each other so neither is hit by accident. */
 .row-actions { display: flex; align-items: center; gap: 6px; }
 .warn-box { font-size: .75rem; color: var(--warn); background: var(--warn-soft); border-radius: 9px; padding: 9px 11px; margin-top: 11px; line-height: 1.55; }
@@ -979,7 +979,8 @@ textarea {
    to be a labelled section of its own at the bottom, ~80px, for one
    number. It sits in the season row instead: that row already says
    which season this is, and the balance belongs to that season. */
-.season-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.season-row {
+  margin-bottom: 12px; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .season-row .season-picker { flex: 1; min-width: 0; margin: 0; text-overflow: ellipsis; }
 /* Two lines so the value has something to be the value *of* — 已結清
    on its own says nothing, and that is the state most members are in

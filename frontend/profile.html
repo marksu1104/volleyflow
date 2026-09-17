@@ -52,7 +52,7 @@
         <input id="name-input" class="control" type="text">
         <button type="button" onclick="saveName()">儲存</button>
       </div>
-      <p class="hint">主揪和其他人在名單上看到的就是這個名字。</p>
+      <p class="hint">管理員和其他人在名單上看到的就是這個名字。</p>
     </div>
 
     <div class="field">
@@ -281,7 +281,7 @@
     document.getElementById("clubs-list").innerHTML = clubs
       .map((c, i) => {
         const ledger = balances[i];
-        const roleTag = c.role === "organizer" ? '<span class="role-tag">主揪</span>' : "";
+        const roleTag = c.role === "organizer" ? '<span class="role-tag">管理員</span>' : "";
         let balHtml = "";
         if (ledger) {
           const n = Number(ledger.balance);

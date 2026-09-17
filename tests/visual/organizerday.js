@@ -13,9 +13,9 @@ const { chromium } = require("playwright");
 const BASE = "http://localhost:5500";
 const API = "http://localhost:8000";
 const ORGANIZER = "周恆";
-const MEMBER = "主揪測員";
-const NEWCOMER = "主揪測新人";
-const SUB = "主揪測代打";
+const MEMBER = "管理員測員";
+const NEWCOMER = "管理員測新人";
+const SUB = "管理員測代打";
 
 const asOrganizer = {
   Authorization: `Bearer dev:${encodeURIComponent(ORGANIZER)}`,
@@ -58,7 +58,7 @@ function inDays(days) {
   const member = await identify(MEMBER);
   const newcomer = await identify(NEWCOMER);
 
-  const club = await post("/clubs", { name: "主揪測試" });
+  const club = await post("/clubs", { name: "管理員測試" });
   const invite = await get(`/clubs/${club.id}/invite`);
   const asPlayer = (name) => ({
     Authorization: `Bearer dev:${encodeURIComponent(name)}`,
@@ -170,7 +170,7 @@ function inDays(days) {
     await page.click(`[data-confirm-sub="${absenceId}"]`);
     await page.waitForTimeout(2500);
     const covered = (await get(`/seasons/${season.id}`)).games[0].absences.find((a) => a.id === absenceId);
-    report("主揪可以替沒人代打的那一場指定人選", [
+    report("管理員可以替沒人代打的那一場指定人選", [
       ...(covered && covered.filled_by === SUB ? [] : [`伺服器上記到的代打是 ${covered && covered.filled_by}`]),
     ]);
 
@@ -211,6 +211,6 @@ function inDays(days) {
     await fetch(`${API}/clubs/${club.id}`, { method: "DELETE", headers: asOrganizer });
   }
 
-  console.log(failed ? `\n${failed} 項有問題。` : "\n主揪的一天走起來都正常。");
+  console.log(failed ? `\n${failed} 項有問題。` : "\n管理員的一天走起來都正常。");
   process.exit(failed ? 1 : 0);
 })();

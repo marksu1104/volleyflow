@@ -328,7 +328,7 @@
         <span class="set-label">刪除整個球隊<span class="set-sub">連同底下所有季別一起刪除</span></span>
         <button type="button" class="mini-action danger" onclick="deleteClub()">刪除</button>
       </div>
-      <p class="hint">只有主揪能刪除，而且已經結算過的季別不能刪——那是已經結清的帳。</p>
+      <p class="hint">只有管理員能刪除，而且已經結算過的季別不能刪——那是已經結清的帳。</p>
     </div>
   </div>
 </div>
@@ -778,7 +778,7 @@
                 <span class="avatar sm">${escapeHtml((m.name || "?").slice(0, 1))}</span>
                 <span class="pk-name">${escapeHtml(m.name)}</span>
                 ${m.linked === false ? '<span class="guest-tag">訪客</span>' : ""}
-                ${m.role === "organizer" ? '<span class="role-tag">主揪</span>' : ""}
+                ${m.role === "organizer" ? '<span class="role-tag">管理員</span>' : ""}
                 ${owedLabel(m.id)}
               </div>`
           )
@@ -1055,9 +1055,9 @@
       const action = open
         ? `<span class="row-actions">${
             movable
-              ? `<button type="button" class="mini-action" onclick="openDateSheet(${g.id}, '${info.label}', '${g.date}')">改日期</button>`
+              ? `<button type="button" class="mini-action" onclick="openDateSheet(${g.id}, '${info.label}', '${g.date}')">編輯</button>`
               : ""
-          }<button type="button" class="mini-action danger" onclick="openCancelSheet(${g.id}, '${info.label}')">取消這場</button></span>`
+          }<button type="button" class="mini-action danger" onclick="openCancelSheet(${g.id}, '${info.label}')">取消</button></span>`
         : status
           ? `<span class="hint" style="margin:0">${status}</span>`
           : "";

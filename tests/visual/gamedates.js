@@ -85,14 +85,14 @@ const seasonOf = async (id) => (await fetch(`${API}/seasons/${id}`, { headers: a
       const rows = [...document.querySelectorAll("#upcoming-games .set-row")];
       return {
         rows: rows.length,
-        withMove: rows.filter((r) => r.textContent.includes("改日期")).length,
-        withCancel: rows.filter((r) => r.textContent.includes("取消這場")).length,
+        withMove: rows.filter((r) => r.textContent.includes("編輯")).length,
+        withCancel: rows.filter((r) => r.textContent.includes("取消")).length,
       };
     });
-    report("還沒打的場次都可以改日期", [
+    report("還沒打的場次都可以編輯", [
       ...(offered.rows > 0 ? [] : ["設定頁沒有列出任何場次"]),
       ...(offered.withMove === offered.rows ? [] : [`${offered.rows} 列裡只有 ${offered.withMove} 列能改`]),
-      ...(offered.withCancel === offered.rows ? [] : ["取消這場不見了"]),
+      ...(offered.withCancel === offered.rows ? [] : ["取消不見了"]),
     ]);
 
     // A day later — the seeded games are a week apart, so it is free.
@@ -163,6 +163,6 @@ const seasonOf = async (id) => (await fetch(`${API}/seasons/${id}`, { headers: a
     }
   }
 
-  console.log(failed ? `\n${failed} 項有問題。` : "\n改日期整條都正常。");
+  console.log(failed ? `\n${failed} 項有問題。` : "\n編輯整條都正常。");
   process.exit(failed ? 1 : 0);
 })();

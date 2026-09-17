@@ -60,16 +60,12 @@
   /** The server stores UTC and doesn't say so; the people reading this
    * are in Taiwan, so the zone is named rather than left to whatever the
    * device happens to be set to. */
+  // Shared with the ledger's 明細 — see stampTime in shared.js. A
+  // declaration rather than `const localTime = stampTime`, which is only
+  // usable after the line it sits on has run and left the test harness
+  // holding an undefined binding.
   function localTime(iso) {
-    const stamped = /(Z|[+-]\d\d:\d\d)$/.test(iso) ? iso : iso + "Z";
-    return new Date(stamped).toLocaleString("zh-TW", {
-      timeZone: "Asia/Taipei",
-      month: "numeric",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
+    return stampTime(iso);
   }
 
   /** One report. Every field is something a user typed or their browser

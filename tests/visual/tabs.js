@@ -85,7 +85,7 @@ function report(name, problems) {
       ...(roster.rows >= season.members.length
         ? []
         : [`名單只有 ${roster.rows} 人，這一季有 ${season.members.length} 人`]),
-      ...(roster.organizerTags >= 1 ? [] : ["名單裡沒有主揪，八成抓到別隊的人"]),
+      ...(roster.organizerTags >= 1 ? [] : ["名單裡沒有管理員，八成抓到別隊的人"]),
       ...errors,
     ]);
   } finally {

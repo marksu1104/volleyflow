@@ -23,6 +23,24 @@ function dateKey(d) {
 }
 
 /** Weekday label + a relative "今天/明天/已結束" hint for one game date. */
+/** A stored timestamp as a person here reads it: 9/16 20:15.
+ *
+ * Times are stored naive UTC (routes/_people._now), so they have to be
+ * stamped as UTC before being shown in Taipei — without that the
+ * evening's payments read as the small hours of the same day.
+ */
+function stampTime(iso) {
+  const stamped = /(Z|[+-]\d\d:\d\d)$/.test(iso) ? iso : iso + "Z";
+  return new Date(stamped).toLocaleString("zh-TW", {
+    timeZone: "Asia/Taipei",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 function describeDate(dateStr) {
   const date = new Date(dateStr + "T00:00:00");
   const today = new Date();
@@ -2007,8 +2025,8 @@ const _API_ERROR_PATTERNS = [
   [/^Player is not a member of this club$/, () => "這個人不是球隊成員"],
   [/^Player is not a fixed member of this game's season$/, () => "這個人不是本季的固定成員"],
   [/^You are not a member of this club$/, () => "你不是這個球隊的成員"],
-  [/^Waiting for the organizer to approve you$/, () => "還在等主揪核准，核准後才能使用"],
-  [/^Already asked to join/, () => "已經送出申請，正在等主揪核准"],
+  [/^Waiting for the organizer to approve you$/, () => "還在等管理員核准，核准後才能使用"],
+  [/^Already asked to join/, () => "已經送出申請，正在等管理員核准"],
   [/^Not waiting to be approved$/, () => "這個人已經不在待核准名單上了"],
   [/^Only a payment or refund can be undone$/, () => "只有收款或退款可以復原"],
   [/^That payment has already been undone$/, () => "這筆已經復原過了"],
@@ -2016,7 +2034,7 @@ const _API_ERROR_PATTERNS = [
   // Moving a game to another date.
   [/^This season already has a game on that date$/, () => "那一天這一季已經有一場了"],
   [/^That date has already been and gone$/, () => "那一天已經過了，請選之後的日期"],
-  [/^This game is cancelled, so it cannot be moved$/, () => "這一場已經取消，不能改日期"],
+  [/^This game is cancelled, so it cannot be moved$/, () => "這一場已經取消，不能編輯"],
   [/^Pick two different people to merge$/, () => "請選兩個不同的人合併"],
   [
     /^Only a name typed in by hand can be merged into someone else$/,
@@ -2027,15 +2045,15 @@ const _API_ERROR_PATTERNS = [
     /^(.+?) is no longer in this club$/,
     (m) => `「${m[1]}」已經不在這個球隊了，請直接輸入名字報名`,
   ],
-  [/^Only this club's organizer can do that$/, () => "只有主揪可以這麼做"],
-  [/^This is the club's only organizer$/, () => "這是球隊唯一的主揪，不能移除"],
+  [/^Only this club's organizer can do that$/, () => "只有管理員可以這麼做"],
+  [/^This is the club's only organizer$/, () => "這是球隊唯一的管理員，不能移除"],
   [
     /^Still a fixed member of a season/,
     () => "還是某一季的固定成員，請先在那一季把他移除",
   ],
   [
     /^You can only do that for yourself, unless you're the organizer$/,
-    () => "只能對自己這麼做，除非你是主揪",
+    () => "只能對自己這麼做，除非你是管理員",
   ],
   [/^You can only list your own clubs$/, () => "只能查看自己的球隊"],
   [
@@ -2143,7 +2161,7 @@ const _API_ERROR_PATTERNS = [
   [/^Nothing to report$/, () => "沒有內容可以回報"],
   [
     /^Couldn't send the report/,
-    () => "送出失敗，請直接跟主揪說",
+    () => "送出失敗，請直接跟管理員說",
   ],
   [
     /^(Screenshot is too large|Screenshot isn't valid base64|Screenshot must be)/,
@@ -2489,7 +2507,7 @@ function emptyStateHtml(title, body, action) {
 function noClubYetHtml() {
   return emptyStateHtml(
     "尚未加入任何球隊",
-    "請先到會員頁用 LINE 開啟，建立一個球隊，或用主揪給你的連結加入。",
+    "請先到會員頁用 LINE 開啟，建立一個球隊，或用管理員給你的連結加入。",
     { label: "前往會員頁", href: "member.html" }
   );
 }
