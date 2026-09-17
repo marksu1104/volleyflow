@@ -29,6 +29,7 @@ def game_from_row(row: GameRow) -> Game:
         date=row.date,
         status=row.status,
         air_conditioned=row.air_conditioned,
+        venue_cost_delta=row.venue_cost_delta,
     )
 
 

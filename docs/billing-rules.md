@@ -4,9 +4,10 @@ Defines every rule the billing engine implements. The code translates this
 document, not the other way around. To change a rule, change this file first,
 then the code and tests.
 
-Status: milestone 1 core, milestone 6 charge-timing update. Last updated 2026-09-10
-(the cost is split by `capacity`, not by the current roster — see "Who the
-cost is split between").
+Status: milestone 1 core, milestone 6 charge-timing update. Last updated 2026-09-17
+(one night can run at a different venue for a different price — see "A
+different venue for one night"). The cost is still split by `capacity`,
+not by the current roster — see "Who the cost is split between".
 
 ## Terms
 
@@ -19,15 +20,19 @@ billing-specific ones.
 | `total_games` | Number of games generated when the season is created |
 | `capacity` | How many play one game — and what the cost is divided between, see below |
 | `share_per_game` | The atomic money unit, see below |
+| `venue_cost_delta` | What one night costs the club above (or below) a normal night, see "A different venue for one night" |
 | `billable_games` | Games that still have to be paid for, see Cancellation |
 | `surplus` | Money collected above the venue cost by rounding up, see Surplus |
 
 ## Core formula
 
 ```
-ac_total   = ac_surcharge * (games with the air conditioning on)
-base_each  = (total_venue_cost - ac_total) / total_games
-share(g)   = ceil((base_each + (ac_surcharge if g is cooled else 0)) / capacity)
+ac_total    = ac_surcharge * (games with the air conditioning on)
+delta_total = sum of venue_cost_delta over every game
+base_each   = (total_venue_cost - ac_total - delta_total) / total_games
+share(g)    = ceil((base_each
+                    + (ac_surcharge if g is cooled else 0)
+                    + venue_cost_delta(g)) / capacity)
 ```
 
 Rounded up to whole dollars, once per game's share, and nowhere else.
@@ -144,6 +149,84 @@ charged. They pay the organizer in cash on the night, and chasing
 someone for another $30 — or handing it back — because the forecast was
 wrong costs more goodwill than the difference is worth. The members
 absorb it, which is what a season fee is for.
+
+### A different venue for one night
+
+Added 2026-09-17, at the organizer's request: 「有時候會換場地，那個場地
+的價錢不同」. A booking moves, the usual court is taken, and one night
+runs somewhere that costs a different amount.
+
+`venue_cost_delta` is what that night costs the club **above a normal
+night**, and it behaves exactly like `ac_surcharge`, for the same
+reason: it is taken *out* of the base before the split and added back on
+the night it belongs to, so it lands on the people who played that night
+and on nobody else. Zero — the default, and what every game holds — makes
+the formula collapse to what it was before.
+
+**The delta moves `total_venue_cost`.** Decided 2026-09-17 by the
+organizer, choosing this over holding the total fixed and redistributing
+from the other nights. A pricier court means the club really transfers
+more money; the other twelve nights did not become cheaper, and making
+them *look* cheaper would balance the books against something that never
+happened. So setting a delta of +800 moves `total_venue_cost` by +800,
+the same way flipping the air conditioning moves it by `ac_surcharge`.
+
+The property that makes this worth having, from this club's own season:
+
+```
+13 games, 8 of them cooled, 18 capacity, transferred 52290, ac 540
+one uncooled night moves to a court costing 800 more
+
+total_venue_cost = 52290 + 800            = 53090
+delta_total                                = 800
+base_each  = (53090 - 4320 - 800) / 13     = 3690      unchanged
+plain      = ceil(3690 / 18)               = 205       unchanged
+cooled     = ceil((3690 + 540) / 18)       = 235       unchanged
+that night = ceil((3690 + 800) / 18)       = 250
+collected  = (235 x 8 + 205 x 4 + 250) x 18 = 53100    vs 53090, surplus 10
+```
+
+Every other night's price does not move at all. Only the night that
+actually cost more gets more expensive, by $45 a head, and the shares
+still reconcile against what was transferred — which is the check that
+says the model is right.
+
+**Changing it re-prices the season for everyone**, because
+`share_per_game` and every member's `season_fee_charged` depend on
+`total_venue_cost`. Each current member gets one adjustment entry for
+the difference, never an edit to the original charge — the same
+machinery as changing the venue cost by hand or flipping the air
+conditioning. See "Keeping the charge in sync when the inputs change".
+The screen must say so before the change is made: this is the one
+per-game edit that moves money, which is why the organizer asked for a
+warning on it and not on the venue's name or the hour.
+
+**A drop-in already charged for that night keeps what they were
+charged**, exactly as with the air conditioning, and for the same
+reason: chasing someone for another $45 after the fact costs more
+goodwill than the difference is worth. The members absorb it.
+
+**Cancellation.** The two cancelled statuses mean different things about
+the money, so the delta follows each one's meaning:
+
+| Status | `venue_cost_delta` | `total_venue_cost` |
+|---|---|---|
+| `CANCELLED_UNREFUNDED` | kept | unchanged — that court was paid for |
+| `CANCELLED_REFUNDED` | cleared to 0 | drops by the delta — the venue gave it all back |
+
+This one is explicit because the air-conditioning rule quietly is not,
+and the gap only matters once the numbers get bigger.
+`settlement.season_shares` prices *every* game, including
+`CANCELLED_REFUNDED` ones, while `settle_member` charges only the
+billable ones — so an amount subtracted from the base for a night nobody
+pays for is an amount the club never collects. At `ac_surcharge` of 540
+that is a rounding-sized leak nobody noticed; at a venue delta of 800 it
+is real money. Clearing the delta on a refunded cancellation closes it.
+
+**Refusals.** A delta may be negative (a cheaper court), but never one
+that would make `total_venue_cost` or `base_each` negative — the same
+guard `shares_by_game` already applies to `ac_surcharge`. A settled
+season refuses the change outright, like every other re-pricing.
 
 ### Why rounding happens exactly once
 

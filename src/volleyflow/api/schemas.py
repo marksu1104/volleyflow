@@ -417,6 +417,13 @@ class GameUpdate(BaseModel):
     end_time: time | None = None
     """This one night's venue and time. Null puts it back on the
     season's."""
+    venue_cost_delta: Decimal | None = None
+    """What this night costs the club above (or below) a normal one.
+
+    The only field here that moves money: it shifts the season's
+    `total_venue_cost` and re-prices every member through adjustment
+    entries. Null clears it back to zero. See
+    docs/billing-rules.md, "A different venue for one night"."""
 
 
 class PlayerIdentify(BaseModel):
@@ -537,6 +544,11 @@ class GameDetailOut(BaseModel):
     falls back to the season's pair on null rather than showing a gap;
     see describeGameWhen in member.html. Display-only: billing never
     reads them."""
+    venue_cost_delta: Decimal = Decimal("0")
+    """What this night cost the club above (or below) a normal one — 0
+    for almost every game. Unlike the three fields above it, this one is
+    priced: `share` already includes it. Sent so the screen can say which
+    nights carry an extra cost and warn before changing one."""
     absences: list[AbsenceDetailOut]
     confirmed_drop_ins: list[DropInDetailOut]
     waitlist_entries: list[DropInSummary]

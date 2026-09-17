@@ -775,6 +775,7 @@ def get_season(
                 location=game.location,
                 start_time=game.start_time,
                 end_time=game.end_time,
+                venue_cost_delta=game.venue_cost_delta,
                 locked=not (
                     viewer_is_organizer or _within_change_deadline(game, season_row)
                 ),

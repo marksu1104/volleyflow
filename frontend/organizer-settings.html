@@ -398,8 +398,16 @@
       <span class="hint" id="g-location-hint"></span>
     </div>
 
+    <div class="field">
+      <label for="g-cost-delta">這一場的場地費差額</label>
+      <input id="g-cost-delta" class="control" type="number" step="1" placeholder="0">
+      <span class="hint" id="g-cost-hint"></span>
+    </div>
+
+    <div id="g-cost-warn" class="warn-box" hidden></div>
+
     <span class="hint">
-      只改這一場。場次數沒變，所以每個人的金額完全不動；這一場已經記下的請假、報名和候補都會跟著走。
+      改日期、時間或場地名稱不會動到任何人的錢；這一場已經記下的請假、報名和候補都會跟著走。
     </span>
 
     <div class="btn-row" style="margin-top: 13px">
@@ -1133,10 +1141,43 @@
    * game travel with it because they are keyed by the game and not by
    * its date. See routes/games.py move_game for the four refusals.
    */
+  let originalDelta = 0;
+
   function openGameEdit(gameId) {
     const game = currentSeason.games.find((g) => g.id === gameId);
     if (!game) return;
     dateSheetGameId = gameId;
+    originalDelta = Number(game.venue_cost_delta || 0);
+    const cost = document.getElementById("g-cost-delta");
+    cost.value = originalDelta === 0 ? "" : String(originalDelta);
+    document.getElementById("g-cost-hint").textContent =
+      `這一場目前每人 $${game.share}。換到比較貴的場地就填多出來的錢，比較便宜填負數，留空表示跟平常一樣。`;
+    document.getElementById("g-cost-warn").hidden = true;
+    // Assignment rather than addEventListener: this sheet is opened again
+    // for every game, and addEventListener would stack one more handler
+    // each time — the same reason the season picker uses onchange.
+    cost.oninput = () => {
+      const now = Number(cost.value || 0);
+      const warn = document.getElementById("g-cost-warn");
+      if (now === originalDelta) {
+        warn.hidden = true;
+        return;
+      }
+      // Deliberately does not work out the new per-person figure here.
+      // Rounding happens in exactly one place — pricing.shares_by_game —
+      // and repeating it in the browser would give money a second source
+      // of truth that could disagree with the books. The total moves by
+      // exactly what was typed, which is knowable without rounding
+      // anything, and the new per-person amount shows on the row itself
+      // once it is saved.
+      const moved = now - originalDelta;
+      const total = Number(currentSeason.total_venue_cost) + moved;
+      warn.hidden = false;
+      warn.textContent =
+        `場地費總額會從 $${currentSeason.total_venue_cost} 變成 $${total}。` +
+        `只有這一場的每人金額會變，其他場次完全不動。` +
+        `每個人的帳上會補一筆差額，已經收到的錢不動。`;
+    };
     document.getElementById("date-sheet-title").textContent =
       `編輯 ${describeDate(game.date).label} 這一場`;
     document.getElementById("date-sheet-input").value = game.date;
@@ -1169,11 +1210,16 @@
     // and null is how the server is told that. A field left out would
     // mean "leave it alone", which is a different request. See
     // GameUpdate in schemas.py.
+    const cost = document.getElementById("g-cost-delta").value.trim();
     const payload = {
       date: value,
       location: document.getElementById("g-location").value.trim() || null,
       start_time: readTimeValue("g-start"),
       end_time: readTimeValue("g-end"),
+      // Empty means "the same as every other night", which the server
+      // reads as zero — see GameUpdate. Sent as typed rather than as a
+      // Number so a decimal never loses precision on the way.
+      venue_cost_delta: cost === "" ? null : cost,
     };
     // No markBusy here: postJson already marks whichever control was
     // pressed. Nor translateApiError — postJson hands back a message

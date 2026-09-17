@@ -227,9 +227,27 @@ class GameRow(Base):
     Display-only, exactly like the season's pair: billing never reads
     them, so changing one writes no ledger entry. See
     docs/billing-rules.md, "Keeping the charge in sync when the inputs
-    change" — an edit that changes nobody's math writes nothing. What a
-    *different venue at a different price* costs is a separate question
-    and is not modelled here."""
+    change" — an edit that changes nobody's math writes nothing. What
+    that different venue *costs* is the separate column below."""
+    venue_cost_delta: Mapped[Decimal] = mapped_column(
+        Numeric(10, 0), default=Decimal("0")
+    )
+    """What this one night costs the club above (or below) a normal night.
+
+    The money half of moving a game: the replacement court charges a
+    different amount, so the club really transfers a different amount.
+    Priced exactly like `ac_surcharge` — taken out of the season total
+    before the even split, then added back on the night it belongs to —
+    so it lands on whoever played that night and on nobody else, and
+    every other night's price does not move at all.
+
+    Zero for every game booked before 2026-09-17, which collapses the
+    calculation back to what it was. Negative is allowed and meaningful
+    (a cheaper hall); only the aggregate is guarded, in
+    pricing.shares_by_game. Changing it moves `total_venue_cost` and
+    re-syncs every member's charge through adjustment entries, so unlike
+    the three columns above this one is *not* display-only. See
+    docs/billing-rules.md, "A different venue for one night"."""
 
 
 class AbsenceRow(Base):

@@ -28,6 +28,19 @@ class Game:
     venue and therefore what every member owes; see
     docs/billing-rules.md "Air conditioning".
     """
+    venue_cost_delta: Decimal = Decimal("0")
+    """What this one night costs the club above (or below) a normal night.
+
+    A booking moves and the usual court is taken, so one night runs
+    somewhere that charges a different amount — 「有時候會換場地，那個場地
+    的價錢不同」. Priced exactly like `ac_surcharge`: taken out of the
+    season total before the even split, then added back on the night it
+    belongs to, so it lands on the people who played that night and
+    nobody else. Zero — the default, and what every game booked before
+    2026-09-17 holds — collapses the formula back to what it was.
+
+    See docs/billing-rules.md "A different venue for one night".
+    """
 
 
 @dataclass(frozen=True)

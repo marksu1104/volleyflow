@@ -1,5 +1,7 @@
 """One night: cancelling it, and what the air conditioning did to it."""
 
+from decimal import Decimal
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -67,6 +69,17 @@ def cancel_game(
         if payload.refunded
         else GameStatus.CANCELLED_UNREFUNDED
     )
+    # A refunded cancellation means the venue handed back what this night
+    # cost — including whatever extra a replacement court added — so the
+    # delta goes back with it and the season total drops by the same
+    # amount. Leaving it behind would keep money subtracted from the base
+    # for a night nobody is charged for, which is money the club never
+    # collects. An unrefunded cancellation keeps it: that court was paid
+    # for whether or not anybody played on it. See docs/billing-rules.md,
+    # "A different venue for one night".
+    if payload.refunded and game.venue_cost_delta != 0:
+        season.total_venue_cost -= game.venue_cost_delta
+        game.venue_cost_delta = Decimal("0")
     db.flush()
     if payload.refunded:
         _sync_season_fee_ledger(db, season)
@@ -183,6 +196,31 @@ def update_game(
     if "end_time" in fields:
         game.end_time = fields["end_time"]
 
+    # The one field here that moves money. A different court charges a
+    # different amount, so the club really transfers a different amount:
+    # the season total moves with the delta rather than the other nights
+    # being quietly re-priced to absorb it. Every current member's charge
+    # is then corrected by an adjustment entry, never by editing what
+    # they were already charged — the same machinery as flipping the air
+    # conditioning. See docs/billing-rules.md, "A different venue for one
+    # night".
+    repriced = False
+    if "venue_cost_delta" in fields:
+        new_delta = fields["venue_cost_delta"]
+        if new_delta is None:
+            new_delta = Decimal("0")
+        if new_delta != game.venue_cost_delta:
+            moved = new_delta - game.venue_cost_delta
+            if season.total_venue_cost + moved < 0:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "That would make the season's venue cost negative — "
+                    "check the amount against the season's total",
+                )
+            game.venue_cost_delta = new_delta
+            season.total_venue_cost += moved
+            repriced = True
+
     new_date = fields.get("date")
     if new_date is not None and new_date != game.date:
         if new_date < _today_in_taiwan():
@@ -204,6 +242,17 @@ def update_game(
                 "This season already has a game on that date",
             )
         game.date = new_date
+
+    if repriced:
+        db.flush()
+        # shares_by_game refuses a season whose surcharges and deltas
+        # together exceed the whole venue bill. That is a thing the
+        # organizer can type, so it answers as a refusal rather than
+        # escaping as a 500.
+        try:
+            _sync_season_fee_ledger(db, season)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
     db.commit()
     db.refresh(game)

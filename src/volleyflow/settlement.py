@@ -70,6 +70,7 @@ def season_shares(season: Season) -> dict[int, Decimal]:
         [game.air_conditioned for game in season.games],
         season.capacity,
         season.ac_surcharge,
+        [game.venue_cost_delta for game in season.games],
     )
     return {game.id: share for game, share in zip(season.games, shares, strict=True)}
 

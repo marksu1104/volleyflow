@@ -57,6 +57,7 @@ def shares_by_game(
     air_conditioned: Sequence[bool],
     capacity: int,
     ac_surcharge: Decimal = Decimal("0"),
+    venue_cost_deltas: Sequence[Decimal] | None = None,
 ) -> list[Decimal]:
     """Each game's share per person, in the order the games were given.
 
@@ -78,9 +79,16 @@ def shares_by_game(
         share(g)   = ceil((base_each + ac_surcharge if g else base_each)
                           / capacity)
 
-    With `ac_surcharge` at zero this is exactly `share_per_game` for
-    every game, which is what makes the change invisible to every season
-    booked before air conditioning was modelled.
+    `venue_cost_deltas` is the same idea for a night that ran somewhere
+    else: one entry per game saying what that night cost the club above
+    (or below) a normal one, taken out of the total before the split and
+    added back on the night it belongs to. A cheaper court is a negative
+    entry; only the aggregate is guarded, so a discount on one night and
+    a premium on another simply net off.
+
+    With `ac_surcharge` at zero and no deltas this is exactly
+    `share_per_game` for every game, which is what makes both changes
+    invisible to every season booked before they were modelled.
 
     Rounding still happens once per share and nowhere else. The surplus
     it creates is the same surplus described in docs/billing-rules.md.
@@ -93,18 +101,28 @@ def shares_by_game(
     if ac_surcharge < 0:
         raise ValueError("ac_surcharge cannot be negative")
 
+    deltas = (
+        [Decimal("0")] * total_games
+        if venue_cost_deltas is None
+        else list(venue_cost_deltas)
+    )
+    if len(deltas) != total_games:
+        raise ValueError("venue_cost_deltas needs one entry per game")
+
     ac_total = ac_surcharge * sum(1 for on in air_conditioned if on)
-    base_total = total_venue_cost - ac_total
+    delta_total = sum(deltas, Decimal("0"))
+    base_total = total_venue_cost - ac_total - delta_total
     if base_total < 0:
         raise ValueError(
-            "air conditioning costs more than the whole venue bill — "
-            "check ac_surcharge against total_venue_cost"
+            "air conditioning and venue changes cost more than the whole "
+            "venue bill — check ac_surcharge and venue_cost_deltas against "
+            "total_venue_cost"
         )
 
     base_each = base_total / total_games
     return [
         (
-            (base_each + (ac_surcharge if on else Decimal("0"))) / capacity
+            (base_each + (ac_surcharge if on else Decimal("0")) + delta) / capacity
         ).to_integral_value(rounding=ROUND_CEILING)
-        for on in air_conditioned
+        for on, delta in zip(air_conditioned, deltas, strict=True)
     ]
