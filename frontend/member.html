@@ -237,6 +237,47 @@
     else renderNoSeason(); // now that allClubs/myClubs are known, name the club
   });
 
+  /* Where the LINE rich menu's buttons land.
+   *
+   * Every menu entry points at this page with a parameter rather than at
+   * a path. A liff.line.me link forwards query params through to the
+   * endpoint — the club's invite link depends on exactly that — whereas
+   * a path only works if the LIFF app's endpoint is the folder root,
+   * which is a console setting and not knowable from here. So the menu
+   * names a destination and this decides how to reach it:
+   *
+   *   (no parameter)   this page — 場次與報名
+   *   ?open=ledger     the money sheet
+   *   ?open=report     the report page
+   *
+   * Stripped from the URL the way ?invite= is, so a reload does not
+   * reopen the sheet over whatever the reader has since moved on to.
+   */
+  identityReady.then(async (identified) => {
+    if (!identified) return;
+    const params = new URLSearchParams(location.search);
+    const open = params.get("open");
+    if (!open) return;
+    params.delete("open");
+    const rest = params.toString();
+    history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : ""));
+    // An invite is the more urgent errand: until it is answered that
+    // screen is the only thing this page can usefully show.
+    if (pendingInviteToken) return;
+    if (open === "report") {
+      location.replace("report.html");
+      return;
+    }
+    if (open === "ledger") {
+      // openLedger paints 載入中 when myLedger is still null and does
+      // not repaint when it arrives, so opening it early would strand
+      // the sheet on a spinner. ledgerReady is null when there is no
+      // club or no identity to fetch a ledger for.
+      if (ledgerReady) await ledgerReady;
+      openLedger();
+    }
+  });
+
   identityReady.then((identified) => {
     if (!identified) {
       stopLoadingEscalation();
