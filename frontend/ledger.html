@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VolleyFlow 我的帳務</title>
+<link rel="preconnect" href="https://volleyflow.onrender.com" crossorigin>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏐</text></svg>">
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
+<link rel="stylesheet" href="shared.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="app-bar">
+    <span class="app-bar-left">
+      <button type="button" class="back-btn" onclick="goBack()">‹ 返回</button>
+    </span>
+    <button type="button" class="brand" onclick="location.href='member.html'">VolleyFlow</button>
+    <span class="app-bar-right"></span>
+  </div>
+
+  <h1>我的帳務</h1>
+
+  <div id="page-state"></div>
+
+  <div id="content" hidden>
+    <div id="owed-total" hidden></div>
+    <p class="section-label" id="clubs-label">我的球隊</p>
+    <div id="clubs-list"></div>
+    <p class="hint">每一隊的帳各自計算，不會互相流用。點一隊看明細。</p>
+  </div>
+</div>
+
+<!-- One club's breakdown, opened from a row. Same sheet pattern as the
+     member page's 我的帳務 and the organizer's screens. -->
+<div id="detail-backdrop" class="gsheet-backdrop" hidden onclick="if (event.target === this) closeDetail()">
+  <div class="gsheet">
+    <button type="button" class="gsheet-close" onclick="closeDetail()">✕</button>
+    <h3 id="dt-club"></h3>
+    <div id="dt-total" class="lg-total"></div>
+    <div id="dt-rows"></div>
+  </div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+  // localhost -> the local API, anywhere else -> production. See apiBase.
+  const API_BASE = apiBase();
+  const LIFF_ID = "2011156233-6CouG6VI";
+  let me = null;
+  let myClubs = [];
+
+  /* Every club's money on one screen.
+   *
+   * The member page's 我的帳務 sheet only ever showed the club you
+   * happened to be looking at, and it had a worse problem than being
+   * narrow: with no club remembered — a first visit, a cleared browser,
+   * a new phone — it opened on 載入中 and stayed there, because it
+   * paints once and does not repaint when the answer arrives. Listing
+   * every club removes the state that caused it rather than patching it.
+   *
+   * The balances arrive with the club list itself (GET
+   * /players/{id}/clubs), so this page costs one request. A club's
+   * breakdown costs three more, and only for the club actually opened.
+   */
+
+  /** Where "返回" goes. Arriving from 個人資料 there is history to go
+   * back to; arriving from the LINE menu there is none, and
+   * history.back() would leave the app entirely. */
+  function goBack() {
+    if (document.referrer && document.referrer.includes(location.host)) {
+      history.back();
+      return;
+    }
+    location.href = "member.html";
+  }
+
+  /** One read, awaited. shared.js deliberately has no such helper —
+   * getJsonSWR is callback-based because it answers twice, from cache
+   * and then from the network, which is right for a page's main content
+   * and wrong for three chained reads behind a tap. The refusal has to
+   * surface as a thrown message: a sheet that silently shows nothing is
+   * the failure this page exists to remove. */
+  async function getJson(url, options) {
+    const res = await fetch(url, options);
+    if (!res.ok) throw new Error(`伺服器回應 ${res.status}`);
+    return res.json();
+  }
+
+  const owes = (c) => {
+    const n = Number(c.balance);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  /** What you owe, added up — never a net figure.
+   *
+   * Netting a club that owes you against a club you owe would describe
+   * money that does not exist: balances never move between clubs (see
+   * docs/billing-rules.md, "Ledger"). So this sums only what is owed,
+   * and says plainly that it is spread across clubs. */
+  function renderOwedTotal(clubs) {
+    const box = document.getElementById("owed-total");
+    const total = clubs.reduce((t, c) => t + Math.min(0, owes(c)), 0);
+    if (total === 0) {
+      box.hidden = true;
+      return;
+    }
+    const spread = clubs.filter((c) => owes(c) < 0).length;
+    box.className = "lg-total owe";
+    box.innerHTML =
+      `<span>全部應繳${spread > 1 ? `（${spread} 隊）` : ""}</span>` +
+      `<strong>$${Math.abs(total)}</strong>`;
+    box.hidden = false;
+  }
+
+  function clubRowHtml(club) {
+    const n = Number(club.balance);
+    // Missing is not zero. A cached club list stored before balances
+    // shipped carries no such field, and Number(undefined) is NaN —
+    // which would read as 應繳 $NaN on a money row. Say nothing until
+    // the figure is real. Same guard as profile.html's rows.
+    const known = club.balance !== undefined && club.balance !== null && !Number.isNaN(n);
+    const roleTag = club.role === "organizer" ? '<span class="role-tag">管理員</span>' : "";
+    let bal = "";
+    if (known) {
+      bal =
+        n === 0
+          ? '<span class="bal">已結清</span>'
+          : `<span class="bal ${n > 0 ? "plus" : "minus"}">${
+              n > 0 ? `餘額 $${n}` : `應繳 $${Math.abs(n)}`
+            }</span>`;
+    }
+    return `
+      <button type="button" class="club-row" onclick="openDetail(${club.id})">
+        <i class="club-dot">${escapeHtml(club.name.slice(0, 1))}</i>
+        <span class="cr-name">${escapeHtml(club.name)}</span>
+        ${roleTag}${bal}
+      </button>
+    `;
+  }
+
+  async function renderClubs() {
+    const list = document.getElementById("clubs-list");
+    showPageLoading(list);
+    try {
+      await getJsonSWR(
+        `${API_BASE}/players/${me.id}/clubs`,
+        (clubs) => {
+          stopLoadingEscalation();
+          myClubs = clubs;
+          document.getElementById("clubs-label").textContent = `我的球隊 ${clubs.length} 個`;
+          list.innerHTML =
+            clubs.map(clubRowHtml).join("") ||
+            '<div class="empty">尚未加入任何球隊</div>';
+          renderOwedTotal(clubs);
+        },
+        { headers: authHeader() }
+      );
+    } catch (e) {
+      stopLoadingEscalation();
+      showPageError(list, e.message);
+    }
+  }
+
+  /** One club's breakdown.
+   *
+   * Three reads, and only for the club actually opened: the newest
+   * season (the list comes back id-descending, so [0] is current), that
+   * season's games, and this player's ledger. The breakdown itself is
+   * summaryRows in shared.js — the same function the member page uses,
+   * deliberately not a second copy, because two implementations is how
+   * two screens start disagreeing about what somebody owes.
+   */
+  async function openDetail(clubId) {
+    const club = myClubs.find((c) => String(c.id) === String(clubId));
+    document.getElementById("detail-backdrop").hidden = false;
+    document.getElementById("dt-club").textContent = club ? club.name : "";
+    const rows = document.getElementById("dt-rows");
+    const total = document.getElementById("dt-total");
+    total.className = "lg-total";
+    total.textContent = "";
+    rows.innerHTML = blockLoadingHtml("載入中");
+
+    try {
+      const [seasons, ledger] = await Promise.all([
+        getJson(`${API_BASE}/clubs/${clubId}/seasons`, { headers: authHeader() }),
+        getJson(`${API_BASE}/clubs/${clubId}/players/${me.id}/ledger`, {
+          headers: authHeader(),
+        }),
+      ]);
+      // Newest first (SeasonRow.id desc), so [0] is the season in play.
+      // A club with no season yet is normal — someone who joined before
+      // the organizer set one up — and the breakdown then has no counts
+      // to draw on, which summaryRows handles by putting everything
+      // under 其他季別.
+      const season = seasons.length
+        ? await getJson(`${API_BASE}/seasons/${seasons[0].id}`, { headers: authHeader() })
+        : null;
+
+      const n = Number(ledger.balance);
+      total.className = "lg-total " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
+      total.innerHTML =
+        `<span>${n === 0 ? "目前已結清" : n > 0 ? "應退給你" : "你應繳"}</span>` +
+        `<strong>$${Math.abs(n)}</strong>`;
+
+      // The roster name, not the LINE name: summaryRows counts games by
+      // matching player_name against the season's absences and drop-ins,
+      // and a club where the organizer typed a different spelling would
+      // otherwise report 請假 0 次 next to a real refund.
+      rows.innerHTML = summaryRows(ledger, season, ledger.player_name)
+        .map(
+          (r) => `
+            <div class="lg-row">
+              <span class="lg-what">${escapeHtml(r.label)}${
+                r.detail ? `<span class="lg-detail">${escapeHtml(r.detail)}</span>` : ""
+              }</span>
+              <span class="lg-amt ${r.amount >= 0 ? "plus" : "minus"}">${
+                r.amount >= 0 ? "+" : "−"
+              }$${Math.abs(r.amount)}</span>
+            </div>`
+        )
+        .join("");
+    } catch (e) {
+      rows.innerHTML = `<div class="empty">讀不到這一隊的明細：${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function closeDetail() {
+    document.getElementById("detail-backdrop").hidden = true;
+  }
+
+  (async function init() {
+    const state = document.getElementById("page-state");
+    showPageLoading(state);
+    const identified = await initLiffIdentity(API_BASE, LIFF_ID);
+    if (!identified) {
+      stopLoadingEscalation();
+      state.innerHTML = signInFailureHtml(identified);
+      return;
+    }
+    me = identified;
+    state.innerHTML = "";
+    document.getElementById("content").hidden = false;
+    await renderClubs();
+  })();
+</script>
+</body>
+</html>
