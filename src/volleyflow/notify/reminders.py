@@ -26,6 +26,25 @@ from volleyflow.schedule import GameStatus
 
 logger = logging.getLogger("volleyflow.reminders")
 
+# Every push ends with this. A notice that names a problem without
+# offering a way to act on it makes the reader go and find the app
+# themselves, and the join-request digest was worse than that — it said
+# "go to 管理成員" and gave no route at all.
+#
+# The liff.line.me address rather than the GitHub Pages one: only a LIFF
+# URL opens inside LINE carrying an identity. The plain site address,
+# tapped from a chat, lands on liff.login() and bounces the reader to a
+# LINE login screen for no reason.
+#
+# This is the member app — the same destination as the rich menu's first
+# button, so the app has one front door rather than several. There is no
+# LIFF app pointing at the organizer pages, so a digest cannot deep-link
+# to 管理成員; it names the screen and lets the reader get there.
+#
+# Adding it costs nothing: it rides inside a message already being sent,
+# and the free tier counts messages, not characters.
+APP_URL = "https://liff.line.me/2011156233-6CouG6VI"
+
 
 def _expected_roster(session: Session, game: GameRow, season: SeasonRow) -> list[str]:
     """Names expected to attend: fixed members minus this game's
@@ -115,7 +134,7 @@ def send_game_reminder(session: Session, game: GameRow) -> None:
     # one club and a date alone doesn't say which.
     text = (
         f"注意：{club_name} {game.date} 這場人數不足，目前只有 {len(roster)} 人"
-        f"（門檻 {season.minimum_roster} 人）"
+        f"（門檻 {season.minimum_roster} 人）\n{APP_URL}"
     )
     for line_user_id in recipients:
         try:
@@ -158,7 +177,7 @@ def send_join_request_digests(session: Session) -> int:
         club_name = club.name if club is not None else ""
         text = (
             f"「{club_name}」有 {count} 位新成員等待核准，"
-            "請到 VolleyFlow 的「管理成員」處理。"
+            f"請到 VolleyFlow 的「管理成員」處理。\n{APP_URL}"
         )
         for line_user_id in _organizer_line_ids(session, club_id):
             try:
