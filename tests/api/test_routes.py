@@ -2013,6 +2013,7 @@ def test_list_player_clubs_includes_organizer_role(client: TestClient) -> None:
             "wants_fixed_membership": None,
             "status": "active",
             "pending_count": 0,
+            "balance": "0",
         }
     ]
 
@@ -2026,6 +2027,69 @@ def test_list_player_clubs_for_someone_else_returns_403(client: TestClient) -> N
     )
 
     assert response.status_code == 403
+
+
+def test_list_player_clubs_carries_the_balance_the_ledger_reports(
+    client: TestClient,
+) -> None:
+    # The money screen shows every club at once, so the figure has to
+    # travel with the club list. What it must never do is disagree with
+    # the per-club ledger behind it — one screen saying you owe $5,000
+    # and the next saying $4,800 destroys trust in both. Compared as
+    # Decimal rather than as text: this sums in SQL while the ledger sums
+    # in Python, so the two can differ in scale ("-5000" vs "-5000.00")
+    # while being the same money, and the scale is not what matters.
+    season = _start_season(client, member_names=["Alice"], capacity=2)
+    alice = identify(client, "Alice's account")
+    join_club(client, season["club_id"], auth_headers(alice["token"]))
+    roster_id = season["member_ids"][0]
+    client.post(
+        f"/clubs/{season['club_id']}/players/{roster_id}/link",
+        json={"line_player_id": alice["id"]},
+    )
+
+    # Linking hands the LINE identity to the roster row and deletes the
+    # row it came from, so Alice now *is* the player the season fee was
+    # charged to. Asking as alice["id"] would read a player that no
+    # longer exists.
+    body = client.get(
+        f"/players/{roster_id}/clubs", headers=auth_headers(alice["token"])
+    ).json()
+    ledger = client.get(
+        f"/clubs/{season['club_id']}/players/{roster_id}/ledger",
+        headers=auth_headers(alice["token"]),
+    ).json()
+
+    assert len(body) == 1
+    assert Decimal(body[0]["balance"]) == Decimal(ledger["balance"])
+    assert Decimal(body[0]["balance"]) != 0, (
+        "a zero here would pass for the wrong reason"
+    )
+
+
+def test_list_player_clubs_keeps_each_clubs_money_separate(
+    client: TestClient,
+) -> None:
+    # Balances never flow between clubs (docs/billing-rules.md, "Ledger"),
+    # so one club's season fee must not show up against another's row.
+    owing = _start_season(client, member_names=["Alice"], capacity=2)
+    alice = identify(client, "Alice's account")
+    join_club(client, owing["club_id"], auth_headers(alice["token"]))
+    roster_id = owing["member_ids"][0]
+    client.post(
+        f"/clubs/{owing['club_id']}/players/{roster_id}/link",
+        json={"line_player_id": alice["id"]},
+    )
+    quiet = create_club(client, name="Nothing Owed Here")
+    join_club(client, quiet["id"], auth_headers(alice["token"]))
+
+    body = client.get(
+        f"/players/{roster_id}/clubs", headers=auth_headers(alice["token"])
+    ).json()
+
+    by_club = {c["id"]: Decimal(c["balance"]) for c in body}
+    assert by_club[owing["club_id"]] < 0
+    assert by_club[quiet["id"]] == 0
 
 
 # --- club-scoped reads ---------------------------------------------------

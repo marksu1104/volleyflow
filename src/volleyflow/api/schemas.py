@@ -92,6 +92,20 @@ class MyClubOut(BaseModel):
     """'pending' until the organizer approves them; see ClubMemberRow.status."""
     pending_count: int = 0
     """For an organizer: how many people are waiting to be approved."""
+    balance: Decimal = Decimal(0)
+    """This player's money in this club. Positive: the organizer owes
+    them. Negative: they owe.
+
+    Carried on the club row so that "where do I stand everywhere" is one
+    request rather than one per club. The profile page used to fetch a
+    whole entry history per club to display a single number each, which
+    is what made 我的球隊 take so long to appear.
+
+    Deliberately one figure per club and never a total: balances do not
+    flow between clubs (docs/billing-rules.md, "Ledger"), so a summed
+    number would describe money that does not exist. Any adding up is
+    the screen's business, and only as a display.
+    """
 
 
 class MembershipIntent(BaseModel):

@@ -1,5 +1,6 @@
 """Clubs, their membership, and the invite link into one."""
 
+from decimal import Decimal
 from typing import Any
 
 from fastapi import (
@@ -203,6 +204,24 @@ def list_player_clubs(
         .group_by(ClubMemberRow.club_id)
         .all()
     }
+    # One grouped query for every club's balance, the same shape as the
+    # pending count above and as list_club_balances: a number per club,
+    # never a ledger per club. Reading the full entry history once per
+    # club to add up a single figure in the browser is the N+1 behind
+    # 「個人資料頁面的我的球隊，每次都會進入網頁後過很久才載入出現」.
+    #
+    # Safe to key on player_id alone: linking refuses when the LINE row
+    # already has ledger entries, and merging re-points them, so a
+    # player's money never sits under an id they no longer are.
+    owed = {
+        club_id: total
+        for club_id, total in db.query(
+            LedgerEntryRow.club_id, func.sum(LedgerEntryRow.amount)
+        )
+        .filter(LedgerEntryRow.player_id == player_id)
+        .group_by(LedgerEntryRow.club_id)
+        .all()
+    }
     return [
         MyClubOut(
             id=club.id,
@@ -211,6 +230,7 @@ def list_player_clubs(
             wants_fixed_membership=membership.wants_fixed_membership,
             status=membership.status,
             pending_count=waiting.get(club.id, 0),
+            balance=owed.get(club.id, Decimal(0)),
         )
         for club, membership in rows
     ]
