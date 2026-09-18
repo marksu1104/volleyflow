@@ -247,7 +247,11 @@
    * what lets two tabs sit on different clubs. */
   function goToClub(clubId) {
     rememberId(CLUB_STORAGE_KEY, String(clubId));
-    location.href = "member.html";
+    // ?club= says "a club was already chosen, do not ask again". Without
+    // it, member.html's picker — which appears when somebody belongs to
+    // more than one club — would open on arrival and ask which club to
+    // look at, immediately after they picked one here.
+    location.href = "member.html?club=" + encodeURIComponent(clubId);
   }
 
   function closeDetail() {

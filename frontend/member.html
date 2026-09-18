@@ -298,6 +298,27 @@
       renderPendingScreen();
       return;
     }
+    /* Choose the club before being shown one — but only when there is a
+     * choice to make.
+     *
+     * One club goes straight through: a tap that only ever has one
+     * answer is friction, not a choice. So does arriving with a club
+     * already named — ?club= is set by the money page's 前往這個球隊
+     * button, and asking again immediately after somebody chose there
+     * would be absurd. Stripped from the URL the same way ?invite= and
+     * ?open= are, so a reload does not keep re-applying it. */
+    const clubParams = new URLSearchParams(location.search);
+    const namedClub = clubParams.get("club");
+    if (namedClub) {
+      clubParams.delete("club");
+      const rest = clubParams.toString();
+      history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : ""));
+      rememberId(CLUB_STORAGE_KEY, namedClub);
+    }
+    if (!namedClub && active.length > 1) {
+      renderClubPicker(active);
+      return;
+    }
     startPickers();
   });
 
@@ -368,6 +389,103 @@
   function forgetInvite() {
     forgetId(CLUB_STORAGE_KEY);
     location.href = location.pathname;
+  }
+
+  /** Which club to look at, for somebody who belongs to several.
+   *
+   * The rows go up immediately: the club list already carries the name,
+   * the role and the balance, so nothing here waits on the network. Each
+   * club's next game needs two reads of its own, so those go out after
+   * the rows are on screen and fill in behind a spinner rather than
+   * holding the whole screen blank — a gap reads as a page that finished
+   * and found nothing.
+   */
+  function renderClubPicker(clubs) {
+    stopLoadingEscalation();
+    document.getElementById("season-picker").hidden = true;
+    document.getElementById("cal-label").hidden = true;
+    document.getElementById("month-cal").hidden = true;
+    const wrap = document.getElementById("hero-wrap");
+    wrap.innerHTML =
+      '<p class="section-label" style="margin-top:0">要看哪一隊</p>' +
+      clubs
+        .map(
+          (c) => `
+          <button type="button" class="club-row" data-pick-club="${c.id}">
+            <i class="club-dot">${escapeHtml(c.name.slice(0, 1))}</i>
+            <span class="cr-name">${escapeHtml(c.name)}
+              <!-- The spinner inline rather than blockLoadingHtml():
+                   that returns a <div>, and a div inside this span is
+                   invalid nesting. -->
+              <span class="cr-sub" id="pick-when-${c.id}"><i class="spinner sm"></i> 讀取中…</span>
+            </span>
+            ${c.role === "organizer" ? '<span class="role-tag">管理員</span>' : ""}
+            ${balanceBadgeHtml(c.balance)}
+          </button>`
+        )
+        .join("");
+
+    wrap.querySelectorAll("[data-pick-club]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        rememberId(CLUB_STORAGE_KEY, btn.dataset.pickClub);
+        startPickers();
+      });
+    });
+
+    clubs.forEach((c) => fillClubNextGame(c.id));
+  }
+
+  /** One club's next game, read after the picker is already drawn.
+   *
+   * Two reads per club and only for the clubs on screen: the season list
+   * (newest first, so [0] is the one in play) and that season's games.
+   * There is no endpoint that answers "next game" directly — a season
+   * summary carries first and last date but not the next one.
+   *
+   * Says 已請假 or 已報名 only when the season's own records support it.
+   * A wrong answer about whether somebody is playing is worse than no
+   * answer, so anything else is left blank.
+   */
+  async function fillClubNextGame(clubId) {
+    const el = document.getElementById(`pick-when-${clubId}`);
+    if (!el) return;
+    try {
+      const headers = authHeader();
+      const seasons = await (
+        await fetch(`${API_BASE}/clubs/${clubId}/seasons`, { headers })
+      ).json();
+      if (!Array.isArray(seasons) || !seasons.length) {
+        el.textContent = "尚未排定場次";
+        return;
+      }
+      const season = await (
+        await fetch(`${API_BASE}/seasons/${seasons[0].id}`, { headers })
+      ).json();
+
+      // Local date, not toISOString(): that converts to UTC and can name
+      // yesterday for anyone east of Greenwich, which is everybody here.
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      const next = (season.games || []).find(
+        (g) => g.date >= today && g.status !== "cancelled"
+      );
+      if (!next) {
+        el.textContent = "本季已結束";
+        return;
+      }
+
+      const me = playerName();
+      const away = (next.absences || []).some((a) => a.player_name === me);
+      const playing =
+        (next.confirmed_drop_ins || []).some((d) => d.player_name === me) ||
+        (season.members || []).some((m) => m.name === me);
+      const mark = away ? "・已請假" : playing ? "・已報名" : "";
+      el.textContent = describeGameWhen(season, next) + mark;
+    } catch (e) {
+      // The name and the balance are already correct and useful on their
+      // own; a club whose games will not load keeps its row.
+      el.textContent = "";
+    }
   }
 
   function startPickers() {
