@@ -1,32 +1,35 @@
-// What the folder root does with what LINE sends it.
+// What the folder root does with what reaches it.
 //
-// index.html exists so the LIFF endpoint can point at the folder rather
-// than at one page inside it, which is what lets each rich menu button
-// name its own destination and land in a single document load.
+// index.html is a plain forward to member.html. It is not the LIFF
+// endpoint and no longer has any part in LIFF routing: each rich menu
+// destination has its own LIFF app pointing straight at its own page
+// (member.html, ledger.html, report.html), so a menu tap never passes
+// through here.
 //
-// The thing worth guarding is a mechanism I got wrong first time round.
-// Opening liff.line.me/{id}/report.html does NOT fetch
-// <endpoint>/report.html. LINE loads the endpoint itself with
-// ?liff.state=%2Freport.html appended and expects the LIFF SDK on that
-// page to act on it. Measured against the live site before the fix:
+// This file used to assert three more cases, all about liff.state —
+// that the root read the parameter and forwarded to the page it named.
+// They were deleted on 2026-09-18 with the design they guarded, not
+// because they were failing. Briefly, the LIFF endpoint was pointed at
+// this folder and this page tried to resolve liff.state itself, which
+// threw away the SDK handshake and put every menu button into an
+// infinite login loop in the LINE app. The fix was not to resolve
+// liff.state more carefully; it was to stop routing through one page at
+// all.
 //
-//   200  liff.line.me/{id}/report.html
-//   200  .../volleyflow/member.html?liff.state=%2Freport.html
-//   404  .../volleyflow/member.html/report.html
+// So: do not reinstate liff.state cases here. If one ever fails again
+// it will be because somebody pointed a LIFF endpoint back at the
+// folder root, and the check to write then is a different one.
 //
-// index.html deliberately does not load the LIFF SDK — it exists to be
-// left as fast as possible — so nothing else will act on liff.state. An
-// earlier version forwarded every parameter to member.html, which would
-// have reproduced that 404 for all three menu buttons at once.
+// What remains are the two paths that still reach this page, and both
+// still matter:
 //
-// Both branches matter and they fail differently:
-//   - liff.state present  -> every rich menu button, silently 404
-//   - liff.state absent   -> every invite link already shared in LINE
-//
-// The invite case is the quieter of the two. The token is the only thing
-// naming the club (api/invites.py), so dropping it does not error — it
-// lands the visitor on a club picker that cannot show them the club they
-// were invited to.
+//   - an invite link already shared in LINE, if its recipient opens the
+//     bare site rather than the liff.line.me link. The token is the only
+//     thing naming the club (api/invites.py), so losing it does not
+//     error — it lands them on a picker that cannot show them the club
+//     they were invited to.
+//   - anybody typing the folder root. They should get the app, not a
+//     directory listing or a 404.
 
 const { chromium } = require("playwright");
 
@@ -34,21 +37,6 @@ const BASE = "http://localhost:5500";
 const WHO = "周恆";
 
 const CASES = [
-  {
-    name: "選單的問題回報落在回報頁",
-    query: "?liff.state=%2Freport.html",
-    wants: "/report.html",
-  },
-  {
-    name: "選單的我的帳務落在帳務頁",
-    query: "?liff.state=%2Fledger.html",
-    wants: "/ledger.html",
-  },
-  {
-    name: "liff.state 自己帶的參數不會掉",
-    query: "?liff.state=%2Fmember.html%3Fopen%3Dledger",
-    wants: "/member.html?open=ledger",
-  },
   {
     name: "邀請連結的 token 有跟著過去",
     query: "?invite=TESTTOKEN123",
@@ -75,12 +63,10 @@ function report(name, problems) {
       const context = await browser.newContext({ viewport: { width: 390, height: 900 } });
       const page = await context.newPage();
 
-      // The document chain, not the final URL. Each target page boots,
-      // finds no LINE session in a plain browser and calls liff.login(),
-      // so by the end the address bar is on access.line.me and says
-      // nothing about whether the redirect worked. Reading the final URL
-      // reported a working redirect as broken the first time this was
-      // measured by hand.
+      // The document chain, not the final URL. member.html boots, finds
+      // no LINE session in a plain browser and calls liff.login(), so by
+      // the end the address bar is on access.line.me and says nothing
+      // about whether the forward worked.
       const docs = [];
       page.on("response", (r) => {
         if (r.request().resourceType() === "document") {
@@ -94,7 +80,7 @@ function report(name, problems) {
           waitUntil: "domcontentloaded",
         });
       } catch (e) {
-        // A navigation interrupted by the next one is how a redirect
+        // A navigation interrupted by the next one is how a forward
         // looks from here; the chain below is the evidence either way.
       }
       await page.waitForTimeout(1500);
@@ -110,8 +96,6 @@ function report(name, problems) {
     await browser.close();
   }
 
-  console.log(
-    failed ? `\n${failed} 項有問題。` : "\n根目錄把每一種進來的方式都送到該去的頁面。"
-  );
+  console.log(failed ? `\n${failed} 項有問題。` : "\n根目錄把進來的人都送到會員頁。");
   process.exit(failed ? 1 : 0);
 })();

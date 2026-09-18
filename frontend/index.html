@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VolleyFlow</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏐</text></svg>">
-<!-- The LIFF endpoint has to be a LIFF page. Leaving this out is what
-     caused the redirect loop on 2026-09-18 — see the script below. -->
-<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
   /* No shared.css on purpose. This page exists to be left, and pulling
      in a stylesheet and a font would delay the one thing it does. */
@@ -20,90 +17,37 @@
 </style>
 </head>
 <body>
-<noscript><p>請點<a href="member.html">這裡</a>開啟 VolleyFlow。</p></noscript>
-<p id="fallback" hidden>正在開啟 VolleyFlow… 沒有反應的話請點<a href="member.html">這裡</a>。</p>
+<noscript><p>請開啟 <a href="member.html">VolleyFlow</a>。</p></noscript>
+<p id="fallback" hidden>正在開啟 VolleyFlow…　未自動開啟請選擇 <a href="member.html">VolleyFlow</a>。</p>
 
 <script>
-  /* The folder root, so the LIFF endpoint can point at the folder rather
-   * than at one page inside it — which is what lets each rich menu
-   * button name its own destination instead of routing everything
-   * through member.html and a second load.
+  /* The folder root: a plain forward to member.html.
    *
-   * EVERY LIFF ENTRY ARRIVES HERE, not just the ones with no path. A
-   * menu button opening liff.line.me/{id}/report.html arrives as
-   * /volleyflow/?liff.state=%2Freport.html; an invite link arrives as
-   * /volleyflow/?liff.state=%3Finvite%3D…; a bare link arrives plain. So
-   * this page sits in front of the whole app and must not get it wrong.
+   * No LIFF SDK here, and that absence is deliberate. For part of one
+   * day this page was the LIFF endpoint and the whole app routed
+   * through it; it read liff.state and redirected before the SDK had
+   * run, which threw away the handshake and put every rich menu button
+   * into an infinite login loop inside the LINE app.
    *
-   * That makes it a LIFF page, not a doormat. It loads the SDK and calls
-   * liff.init(), and the SDK resolves liff.state itself. See the block
-   * below for what happened when it did not.
+   * That design is gone. Each menu destination now has its own LIFF app
+   * pointing straight at its own page — member.html, ledger.html,
+   * report.html — so no LIFF entry passes through here at all: no
+   * liff.state, no handshake, no session to establish.
    *
-   * The invite token is why the query string is carried through on the
-   * ordinary path: it is the only thing naming the club
-   * (see api/invites.py), and without it the visitor lands on a club
-   * picker that cannot show them the club they were invited to.
+   * Do not add liff.init() back. It was added while this page was the
+   * endpoint and removed when it stopped being one; calling it here now
+   * would initialise an app this page is not the endpoint of.
    *
-   * Deliberately not a <meta refresh>: that cannot carry a query string
-   * it has not been told about, and it cannot wait for liff.init(). The
-   * app is a LIFF page and cannot work without JavaScript anyway, so a
-   * script here costs nothing that was ever available — and the
-   * <noscript> above still says what to do.
+   * What still arrives is somebody opening the folder root directly.
+   * They get the app with the query string intact — the invite token is
+   * the only thing naming a club (see api/invites.py), and dropping it
+   * lands the visitor on a picker that cannot show them the club they
+   * were invited to.
    *
    * replace(), not assign(): this page must not become a history entry,
-   * or Back from member.html lands here and bounces straight forward
-   * again, trapping the reader.
+   * or Back from member.html bounces straight forward again.
    */
-  (function () {
-    var LIFF_ID = "2011156233-6CouG6VI";
-    var hasState = location.search.indexOf("liff.state") !== -1;
-    var onward = "member.html" + location.search + location.hash;
-
-    /* liff.state belongs to the SDK, not to this page. Getting that
-     * backwards took the app down on 2026-09-18.
-     *
-     * Opening liff.line.me/{id}/report.html does not fetch
-     * <endpoint>/report.html. LINE loads the endpoint itself with
-     * ?liff.state=%2Freport.html appended, and the LIFF SDK's init()
-     * establishes the session and *then* follows liff.state, resolving
-     * it against the endpoint URL.
-     *
-     * The first version of this file read the parameter and redirected
-     * before any SDK ran, which threw the handshake away:
-     *
-     *   1. tap         -> /volleyflow/?liff.state=%2Freport.html
-     *   2. this page   -> report.html, LIFF context discarded
-     *   3. report.html -> liff.init() finds no session -> liff.login()
-     *   4. LINE        -> returns to the endpoint, i.e. back to step 1
-     *
-     * On a desktop browser step 3 stops at LINE's login page, which
-     * reads like ordinary "not signed in" behaviour — so every check
-     * passed while the real app span in circles. Only the LINE in-app
-     * browser reaches step 4. Verify this file there, never here.
-     *
-     * So: initialise, and when liff.state is present stay out of the
-     * SDK's way entirely. Racing it is what caused the loop. */
-    if (typeof liff === "undefined") {
-      // SDK blocked or offline. Nothing here can recover a LIFF session,
-      // but an ordinary visitor still deserves the app rather than a
-      // blank page — an earlier attempt at this fix called liff.init()
-      // without loading the SDK at all, which threw before any promise
-      // existed and left exactly that blank page.
-      location.replace(onward);
-      return;
-    }
-
-    liff
-      .init({ liffId: LIFF_ID })
-      .then(function () {
-        if (hasState) return; // the SDK is navigating; do not interfere
-        location.replace(onward);
-      })
-      .catch(function () {
-        if (hasState) return;
-        location.replace(onward);
-      });
-  })();
+  location.replace("member.html" + location.search + location.hash);
 
   // Only if the line above somehow did not take. Shown late so that a
   // normal, fast forward never flashes it.
