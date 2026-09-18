@@ -47,7 +47,10 @@
 <script>
   // localhost -> the local API, anywhere else -> production. See apiBase.
   const API_BASE = apiBase();
-  const LIFF_ID = "2011156233-6CouG6VI";
+  /* This page's own LIFF app — see the note in report.html. One LIFF
+   * app has one endpoint, so the rich menu needs one app per
+   * destination; member.html keeps the original id. */
+  const LIFF_ID = "2011156233-SWicoUre";
   let me = null;
   let myClubs = [];
 

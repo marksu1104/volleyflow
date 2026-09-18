@@ -60,7 +60,20 @@
 <script>
   // localhost -> the local API, anywhere else -> production. See apiBase.
   const API_BASE = apiBase();
-  const LIFF_ID = "2011156233-6CouG6VI";
+  /* This page's own LIFF app, not the one member.html uses.
+   *
+   * A LIFF app has exactly one endpoint URL, so one app cannot open
+   * three different pages directly. Trying to fake that with a single
+   * app — pointing its endpoint at the folder root and letting a
+   * redirect page sort out liff.state — took the menu down twice on
+   * 2026-09-18: first an infinite login loop, then a page-not-found.
+   * The handshake belongs to the SDK and breaks if anything navigates
+   * before liff.init() has run.
+   *
+   * Three apps, one per destination, is how LINE intends this. Each
+   * page initialises its own and lands in a single document load, with
+   * no liff.state and nothing to race. See docs/dev-log.md. */
+  const LIFF_ID = "2011156233-LiXoOfF4";
 
   /* A page of its own, rather than a block at the bottom of 個人資料.
    *
