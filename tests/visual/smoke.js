@@ -35,6 +35,10 @@ const PAGES = [
   "organizer-ledger.html",
   "organizer-settings.html",
   "profile.html",
+  // Added when the page was built, rather than later: it shows money,
+  // and it was the one page in the app with no console-error coverage
+  // at all. Reached from 個人資料, which is why it sits here.
+  "ledger.html",
   // Where anyone reports a problem, linked from the page above and from
   // the LINE rich menu. Safe to press everything on: the only action is
   // 送出回報, which refuses an empty description with a toast rather than
