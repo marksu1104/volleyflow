@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VolleyFlow</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏐</text></svg>">
+<!-- The LIFF endpoint has to be a LIFF page. Leaving this out is what
+     caused the redirect loop on 2026-09-18 — see the script below. -->
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
   /* No shared.css on purpose. This page exists to be left, and pulling
      in a stylesheet and a font would delay the one thing it does. */
@@ -21,71 +24,85 @@
 <p id="fallback" hidden>正在開啟 VolleyFlow… 沒有反應的話請點<a href="member.html">這裡</a>。</p>
 
 <script>
-  /* The folder root, so that the LIFF endpoint can point at the folder
-   * rather than at one page inside it.
+  /* The folder root, so the LIFF endpoint can point at the folder rather
+   * than at one page inside it — which is what lets each rich menu
+   * button name its own destination instead of routing everything
+   * through member.html and a second load.
    *
-   * Why that matters: LIFF appends any extra path onto the endpoint URL.
-   * With the endpoint set to …/volleyflow/member.html, a link like
-   * liff.line.me/{id}/report.html resolves to …/member.html/report.html
-   * and 404s — which is why the rich menu had to pass ?open=report and
-   * let member.html boot fully before sending the reader somewhere else.
-   * Two document loads and two LIFF inits to reach an empty textarea.
+   * EVERY LIFF ENTRY ARRIVES HERE, not just the ones with no path. A
+   * menu button opening liff.line.me/{id}/report.html arrives as
+   * /volleyflow/?liff.state=%2Freport.html; an invite link arrives as
+   * /volleyflow/?liff.state=%3Finvite%3D…; a bare link arrives plain. So
+   * this page sits in front of the whole app and must not get it wrong.
    *
-   * With the endpoint at …/volleyflow/, each menu button names its own
-   * page and lands directly. What still arrives *here* is anything with
-   * no path: the old menu links and, more importantly, every invite link
-   * already shared in LINE, which looks like liff.line.me/{id}?invite=…
+   * That makes it a LIFF page, not a doormat. It loads the SDK and calls
+   * liff.init(), and the SDK resolves liff.state itself. See the block
+   * below for what happened when it did not.
    *
-   * So this forwards to member.html carrying the query string intact.
-   * Dropping it would break every invite already sent — the token is the
-   * only thing naming the club (see api/invites.py), and without it the
-   * visitor lands on a club picker that cannot show them the club they
-   * were invited to.
+   * The invite token is why the query string is carried through on the
+   * ordinary path: it is the only thing naming the club
+   * (see api/invites.py), and without it the visitor lands on a club
+   * picker that cannot show them the club they were invited to.
    *
    * Deliberately not a <meta refresh>: that cannot carry a query string
-   * it has not been told about. The app is a LIFF page and cannot work
-   * without JavaScript anyway, so a script here costs nothing that was
-   * ever available — and the <noscript> above still says what to do.
+   * it has not been told about, and it cannot wait for liff.init(). The
+   * app is a LIFF page and cannot work without JavaScript anyway, so a
+   * script here costs nothing that was ever available — and the
+   * <noscript> above still says what to do.
    *
    * replace(), not assign(): this page must not become a history entry,
    * or Back from member.html lands here and bounces straight forward
    * again, trapping the reader.
    */
   (function () {
-    var params = new URLSearchParams(location.search);
-    var state = params.get("liff.state");
+    var LIFF_ID = "2011156233-6CouG6VI";
+    var hasState = location.search.indexOf("liff.state") !== -1;
+    var onward = "member.html" + location.search + location.hash;
 
-    /* liff.state is how LIFF actually forwards a path, and getting this
-     * wrong breaks every path-style menu button at once.
+    /* liff.state belongs to the SDK, not to this page. Getting that
+     * backwards took the app down on 2026-09-18.
      *
-     * Opening liff.line.me/{id}/report.html does NOT fetch
+     * Opening liff.line.me/{id}/report.html does not fetch
      * <endpoint>/report.html. LINE loads the endpoint itself with
-     * ?liff.state=%2Freport.html appended, and expects the LIFF SDK on
-     * that page to read the parameter and go there. Measured, after
-     * assuming concatenation and watching it 404:
+     * ?liff.state=%2Freport.html appended, and the LIFF SDK's init()
+     * establishes the session and *then* follows liff.state, resolving
+     * it against the endpoint URL.
      *
-     *   200  liff.line.me/{id}/report.html
-     *   200  .../volleyflow/member.html?liff.state=%2Freport.html
-     *   404  .../volleyflow/member.html/report.html
+     * The first version of this file read the parameter and redirected
+     * before any SDK ran, which threw the handshake away:
      *
-     * This page deliberately does not load the LIFF SDK — it exists to
-     * be left as fast as possible — so nothing else here will act on
-     * liff.state. Forwarding it blindly to member.html would hand it to
-     * a page whose SDK resolves it against member.html, reproducing that
-     * same 404 for all three menu buttons.
+     *   1. tap         -> /volleyflow/?liff.state=%2Freport.html
+     *   2. this page   -> report.html, LIFF context discarded
+     *   3. report.html -> liff.init() finds no session -> liff.login()
+     *   4. LINE        -> returns to the endpoint, i.e. back to step 1
      *
-     * So: resolve it here. The value is a path, possibly carrying its
-     * own query string ("/member.html?open=ledger"), and it is relative
-     * to this folder — the leading slash is LINE's, not a site root. */
-    if (state) {
-      location.replace(state.replace(/^\/+/, "") || "member.html");
+     * On a desktop browser step 3 stops at LINE's login page, which
+     * reads like ordinary "not signed in" behaviour — so every check
+     * passed while the real app span in circles. Only the LINE in-app
+     * browser reaches step 4. Verify this file there, never here.
+     *
+     * So: initialise, and when liff.state is present stay out of the
+     * SDK's way entirely. Racing it is what caused the loop. */
+    if (typeof liff === "undefined") {
+      // SDK blocked or offline. Nothing here can recover a LIFF session,
+      // but an ordinary visitor still deserves the app rather than a
+      // blank page — an earlier attempt at this fix called liff.init()
+      // without loading the SDK at all, which threw before any promise
+      // existed and left exactly that blank page.
+      location.replace(onward);
       return;
     }
 
-    // No liff.state: an ordinary visit, or an invite link already shared
-    // in LINE. Carry the query string through — the invite token is the
-    // only thing naming the club.
-    location.replace("member.html" + location.search + location.hash);
+    liff
+      .init({ liffId: LIFF_ID })
+      .then(function () {
+        if (hasState) return; // the SDK is navigating; do not interfere
+        location.replace(onward);
+      })
+      .catch(function () {
+        if (hasState) return;
+        location.replace(onward);
+      });
   })();
 
   // Only if the line above somehow did not take. Shown late so that a
