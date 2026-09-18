@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VolleyFlow</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏐</text></svg>">
+<style>
+  /* No shared.css on purpose. This page exists to be left, and pulling
+     in a stylesheet and a font would delay the one thing it does. */
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #eef1f5; color: #5c667a;
+    font: 400 15px/1.6 "Noto Sans TC", -apple-system, "PingFang TC", system-ui, sans-serif;
+  }
+  a { color: #15618f; font-weight: 700; }
+</style>
+</head>
+<body>
+<noscript><p>請點<a href="member.html">這裡</a>開啟 VolleyFlow。</p></noscript>
+<p id="fallback" hidden>正在開啟 VolleyFlow… 沒有反應的話請點<a href="member.html">這裡</a>。</p>
+
+<script>
+  /* The folder root, so that the LIFF endpoint can point at the folder
+   * rather than at one page inside it.
+   *
+   * Why that matters: LIFF appends any extra path onto the endpoint URL.
+   * With the endpoint set to …/volleyflow/member.html, a link like
+   * liff.line.me/{id}/report.html resolves to …/member.html/report.html
+   * and 404s — which is why the rich menu had to pass ?open=report and
+   * let member.html boot fully before sending the reader somewhere else.
+   * Two document loads and two LIFF inits to reach an empty textarea.
+   *
+   * With the endpoint at …/volleyflow/, each menu button names its own
+   * page and lands directly. What still arrives *here* is anything with
+   * no path: the old menu links and, more importantly, every invite link
+   * already shared in LINE, which looks like liff.line.me/{id}?invite=…
+   *
+   * So this forwards to member.html carrying the query string intact.
+   * Dropping it would break every invite already sent — the token is the
+   * only thing naming the club (see api/invites.py), and without it the
+   * visitor lands on a club picker that cannot show them the club they
+   * were invited to.
+   *
+   * Deliberately not a <meta refresh>: that cannot carry a query string
+   * it has not been told about. The app is a LIFF page and cannot work
+   * without JavaScript anyway, so a script here costs nothing that was
+   * ever available — and the <noscript> above still says what to do.
+   *
+   * replace(), not assign(): this page must not become a history entry,
+   * or Back from member.html lands here and bounces straight forward
+   * again, trapping the reader.
+   */
+  location.replace("member.html" + location.search + location.hash);
+
+  // Only if the line above somehow did not take. Shown late so that a
+  // normal, fast forward never flashes it.
+  setTimeout(function () {
+    var el = document.getElementById("fallback");
+    if (el) el.hidden = false;
+  }, 1200);
+</script>
+</body>
+</html>
