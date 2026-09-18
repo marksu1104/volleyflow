@@ -84,10 +84,31 @@ body {
    on the right. Being identical everywhere is the point — it's how you
    can tell at a glance that 管理 and 會員 are the same app. */
 .app-bar {
-  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  /* minmax(0, 1fr), not 1fr: a bare 1fr is minmax(auto, 1fr), whose
+     floor is the column's min-content width. Removing that floor is
+     necessary but on its own does nothing visible, and it is worth
+     saying why, because the obvious reading is wrong: the track shrank
+     to 121.75px exactly as asked, and the club chip — inline-flex, so
+     sized shrink-to-fit from its own content — stayed 180px and simply
+     overflowed it into the VolleyFlow wordmark.
+
+     Three things have to hold together, and each is useless alone: this
+     track must be allowed to shrink, .app-bar-left must be *bound* to
+     the track (justify-self:stretch — start sizes it to its content
+     instead), and .club-chip must be capped at that. Capping the chip
+     while its parent still sized to content meant 100% of 180px, which
+     constrains nothing. Measured, after three wrong guesses: check.js,
+     「標題列的球隊名、品牌、頭像不會疊在一起」. */
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
   gap: 8px; margin-bottom: 12px; min-height: 36px;
 }
-.app-bar-left { justify-self: start; min-width: 0; }
+/* stretch, not start: justify-self:start makes a grid item size to its
+   own content, so this stayed 180px inside a 121.75px track and hung
+   58px out of it. Stretching binds it to the track, which is what gives
+   .club-chip's max-width something real to resolve against. The chip is
+   inline-flex, so it still sits against the left edge either way. */
+.app-bar-left { justify-self: stretch; min-width: 0; }
 .app-bar-right { justify-self: end; display: flex; align-items: center; gap: 8px; }
 .brand {
   justify-self: center; font-family: var(--font-num); font-size: .95rem; font-weight: 800;
@@ -269,12 +290,27 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   display: inline-flex; align-items: center; gap: 7px; border: none; background: var(--surface-2);
   color: var(--ink); font-size: .86rem; font-weight: 700; padding: 7px 12px 7px 8px; border-radius: 999px;
   cursor: pointer; font-family: var(--font-cjk);
+  /* max-width is the one that actually does the work. An inline-flex box
+     takes its width from its contents and will happily overflow a
+     narrower parent; nothing was compressing it, so min-width:0 alone
+     freed a box that was never being squeezed. Capping it at the grid
+     area is what finally pushes the pressure inward onto the name, which
+     can then ellipsis. */
+  max-width: 100%;
+  min-width: 0;
 }
-.club-chip .caret { color: var(--ink-faint); font-size: .7rem; }
-.club-chip-name { max-width: 11em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.club-chip .caret { color: var(--ink-faint); font-size: .7rem; flex: none; }
+/* min-width:0 is what actually lets the ellipsis happen: a flex item
+   will not shrink below its content without it, so the cap alone only
+   decided where the overflow started. */
+.club-chip-name { max-width: 11em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .club-dot {
   width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--surface);
   display: inline-flex; align-items: center; justify-content: center; font-size: .64rem; font-style: normal; font-weight: 700;
+  /* Fixed ornament: now that the chip can shrink, without this the
+     circle squashes into an ellipse — and the overlap rule measures only
+     the three top-level items, so it would never catch that. */
+  flex: none;
 }
 
 /* hero card: the next/selected game's headline facts */

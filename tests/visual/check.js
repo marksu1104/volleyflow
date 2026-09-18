@@ -106,6 +106,22 @@ check("月曆換月份不會變形", (m) => {
   return problems.length ? problems.join("；") : null;
 });
 
+check("標題列的球隊名、品牌、頭像不會疊在一起", (m) => {
+  if (!m.appBar) return "沒有量到";
+  const { chip, brand, avatar, bar } = m.appBar;
+  const problems = [];
+  if (chip.right > brand.left + 0.5) {
+    problems.push(`球隊名壓到品牌 ${Math.round(chip.right - brand.left)}px`);
+  }
+  if (brand.right > avatar.left + 0.5) {
+    problems.push(`品牌壓到頭像 ${Math.round(brand.right - avatar.left)}px`);
+  }
+  if (avatar.right > bar.right + 0.5) {
+    problems.push(`頭像超出標題列 ${Math.round(avatar.right - bar.right)}px`);
+  }
+  return problems.length ? problems.join("、") : null;
+});
+
 (async () => {
   let measured;
   const browser = await chromium.launch({ channel: "msedge" });
@@ -276,6 +292,51 @@ check("月曆換月份不會變形", (m) => {
       }
       box.remove();
       return shapes;
+    });
+
+    // The app bar, built here rather than found. Nothing else in this
+    // file renders one: the scratch page is a bare .wrap with a single
+    // #out div, so querySelector(".app-bar") is null and a rule written
+    // against it would report "沒有量到" forever while the bug shipped.
+    // That is not hypothetical — three separate checks hid a stranded
+    // ledger sheet this same day by preparing state the real reader
+    // never has.
+    //
+    // The name is the one that actually collided on a phone. The bar is
+    // grid-template-columns: 1fr auto 1fr, and a 1fr track is
+    // minmax(auto, 1fr), so it refuses to shrink below its content —
+    // min-width:0 on the *item* cannot help, because it is the *track*
+    // that will not give. Capping the club name only moves the width at
+    // which it breaks, so the check measures overlap rather than length.
+    measured.appBar = await page.evaluate(() => {
+      const bar = document.createElement("div");
+      bar.className = "app-bar";
+      bar.innerHTML =
+        '<span class="app-bar-left">' +
+        '<button type="button" class="club-chip">' +
+        '<i class="club-dot">測</i>' +
+        '<span class="club-chip-name">測試球隊（seed）</span>' +
+        '<span class="caret">▾</span>' +
+        "</button></span>" +
+        '<button type="button" class="brand">VolleyFlow</button>' +
+        '<span class="app-bar-right">' +
+        '<button type="button" class="avatar">周</button>' +
+        "</span>";
+      document.querySelector(".wrap").prepend(bar);
+
+      const round = (n) => Math.round(n * 100) / 100;
+      const box = (el) => {
+        const b = el.getBoundingClientRect();
+        return { left: round(b.left), right: round(b.right), w: round(b.width) };
+      };
+      const measurement = {
+        chip: box(bar.querySelector(".club-chip")),
+        brand: box(bar.querySelector(".brand")),
+        avatar: box(bar.querySelector(".avatar")),
+        bar: box(bar),
+      };
+      bar.remove();
+      return measurement;
     });
 
     fs.mkdirSync(OUT, { recursive: true });
