@@ -12,8 +12,11 @@
 const { chromium } = require("playwright");
 const path = require("path");
 
-const WIDTH = 2500;
-const HEIGHT = 843;
+// The rich menu's compact size by default. Overridable because the same
+// renderer now also produces the Official Account's profile picture,
+// which is square — see _avatar.html.
+const WIDTH = Number(process.env.SHOT_WIDTH || 2500);
+const HEIGHT = Number(process.env.SHOT_HEIGHT || 843);
 
 const source = process.argv[2];
 const out = process.argv[3];
@@ -41,7 +44,11 @@ if (!source || !out) {
       h: document.body.scrollHeight,
     }));
     const ok = box.w === WIDTH && box.h === HEIGHT;
-    console.log(`body ${box.w}x${box.h} ${ok ? "— matches LINE's compact size" : "— WRONG SIZE, LINE will refuse it"}`);
+    console.log(
+      `body ${box.w}x${box.h} ${
+        ok ? `— matches the ${WIDTH}x${HEIGHT} asked for` : "— WRONG SIZE, LINE will refuse it"
+      }`
+    );
     console.log(`written: ${out}`);
     process.exit(ok ? 0 : 1);
   } finally {

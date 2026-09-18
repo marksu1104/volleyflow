@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>VolleyFlow avatar</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;800&display=swap">
+<style>
+  /* The Official Account's profile picture, rendered at 640x640 by
+     _richmenu_render.js with SHOT_WIDTH/SHOT_HEIGHT set.
+
+     Drawn rather than drawn-over: the colours are the app's own accent
+     and ground (shared.css), so the account and the app it opens look
+     like the same thing.
+
+     Designed for the size it is actually seen at. In a LINE chat list
+     this is about 40px across, so it carries one shape and no words —
+     a wordmark at that size is a grey smudge. The ball reads as a ball
+     at 40px and still looks deliberate at full size. */
+  html, body { margin: 0; padding: 0; }
+  body {
+    width: 640px; height: 640px;
+    display: grid; place-items: center;
+    background: #15618f;
+  }
+  svg { display: block; }
+</style>
+</head>
+<body>
+  <!-- A volleyball, reduced to the three seams that make it readable.
+       Round-capped strokes so nothing looks broken when LINE scales the
+       image down and resamples it.
+
+       The seams are clipped to the ball. Hand-written curves do not stay
+       inside a circle just because their endpoints are near it — the
+       first version bulged past the edge at two and four o'clock, which
+       at 40px in a chat list reads as specks hanging off the ball rather
+       than as seams. Clipping makes that impossible however the curves
+       are tuned later. The outline circle stays outside the clip, or it
+       would lose the outer half of its own stroke. -->
+  <svg width="380" height="380" viewBox="0 0 100 100" fill="none"
+       stroke="#ffffff" stroke-width="5.5" stroke-linecap="round">
+    <defs>
+      <clipPath id="ball">
+        <circle cx="50" cy="50" r="38"/>
+      </clipPath>
+    </defs>
+    <circle cx="50" cy="50" r="38"/>
+    <g clip-path="url(#ball)">
+      <path d="M50 12c-11 13-16 26-16 38s5 25 16 38"/>
+      <path d="M14.5 38c16 5 30 6 41 3s22-9 31-19"/>
+      <path d="M14.5 62c16-5 30-6 41-3s22 9 31 19"/>
+    </g>
+  </svg>
+</body>
+</html>
