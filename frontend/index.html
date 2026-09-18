@@ -51,7 +51,42 @@
    * or Back from member.html lands here and bounces straight forward
    * again, trapping the reader.
    */
-  location.replace("member.html" + location.search + location.hash);
+  (function () {
+    var params = new URLSearchParams(location.search);
+    var state = params.get("liff.state");
+
+    /* liff.state is how LIFF actually forwards a path, and getting this
+     * wrong breaks every path-style menu button at once.
+     *
+     * Opening liff.line.me/{id}/report.html does NOT fetch
+     * <endpoint>/report.html. LINE loads the endpoint itself with
+     * ?liff.state=%2Freport.html appended, and expects the LIFF SDK on
+     * that page to read the parameter and go there. Measured, after
+     * assuming concatenation and watching it 404:
+     *
+     *   200  liff.line.me/{id}/report.html
+     *   200  .../volleyflow/member.html?liff.state=%2Freport.html
+     *   404  .../volleyflow/member.html/report.html
+     *
+     * This page deliberately does not load the LIFF SDK — it exists to
+     * be left as fast as possible — so nothing else here will act on
+     * liff.state. Forwarding it blindly to member.html would hand it to
+     * a page whose SDK resolves it against member.html, reproducing that
+     * same 404 for all three menu buttons.
+     *
+     * So: resolve it here. The value is a path, possibly carrying its
+     * own query string ("/member.html?open=ledger"), and it is relative
+     * to this folder — the leading slash is LINE's, not a site root. */
+    if (state) {
+      location.replace(state.replace(/^\/+/, "") || "member.html");
+      return;
+    }
+
+    // No liff.state: an ordinary visit, or an invite link already shared
+    // in LINE. Carry the query string through — the invite token is the
+    // only thing naming the club.
+    location.replace("member.html" + location.search + location.hash);
+  })();
 
   // Only if the line above somehow did not take. Shown late so that a
   // normal, fast forward never flashes it.
