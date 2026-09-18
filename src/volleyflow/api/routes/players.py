@@ -20,6 +20,7 @@ from volleyflow.api.routes._people import (
 )
 from volleyflow.api.schemas import (
     GenderUpdate,
+    LineReachableOut,
     MemberOut,
     NameUpdate,
     PlayerIdentify,
@@ -28,6 +29,7 @@ from volleyflow.api.schemas import (
 from volleyflow.db.models import (
     PlayerRow,
 )
+from volleyflow.notify import line_client
 
 router = APIRouter()
 
@@ -91,6 +93,40 @@ def identify_player(
         avatar_url=new_player.avatar_url,
         gender=_gender(new_player.gender),
         is_developer=is_developer(new_player),
+    )
+
+
+@router.get("/players/me/line-reachable", response_model=LineReachableOut)
+def check_line_reachable(
+    current_player: PlayerRow = Depends(get_current_player),
+) -> LineReachableOut:
+    """Whether LINE would actually deliver a push to the caller.
+
+    Only ever about the caller themselves, and that is the design, not
+    a limitation. The obvious alternative — reporting this for every
+    organizer of a club — would tell organizer A something only
+    organizer B can act on, while exposing B's account state to A for
+    no benefit.
+
+    Deliberately not folded into POST /players/identify, which runs on
+    every LIFF page load and is otherwise pure database work. This
+    makes an outbound call to LINE; putting it there would charge every
+    page open a network round trip to answer a question only the
+    management screen asks.
+
+    `line_client` is imported as a module and called through it, so a
+    test can replace is_reachable — the same reason `auth` is imported
+    that way, and for the same failure if it isn't (tests/api/conftest).
+    """
+    if current_player.line_user_id is None:
+        # A name-only player, added by hand and with no LINE account to
+        # reach. get_current_player needs a token, so this is close to
+        # unreachable in practice — but "no account" is not "not a
+        # friend", and answering false would offer them a fix that
+        # would not help.
+        return LineReachableOut(reachable=None)
+    return LineReachableOut(
+        reachable=line_client.is_reachable(current_player.line_user_id)
     )
 
 

@@ -468,6 +468,19 @@ class PlayerIdentifyOut(BaseModel):
     server checks again on every report request; this only hides a link."""
 
 
+class LineReachableOut(BaseModel):
+    reachable: bool | None = None
+    """Whether LINE would actually deliver a push to this person: true if
+    they have added the Official Account as a friend, false if they have
+    not, and null when the question could not be asked at all — no
+    token, or LINE itself unreachable.
+
+    Three states rather than two, on purpose. The screen offers to add
+    the friend only on a definite false; prompting somebody who added
+    it months ago would read as the app being broken, and "we couldn't
+    check" is not evidence that they haven't."""
+
+
 class GuestOut(BaseModel):
     """Somebody the caller has brought to this club before.
 

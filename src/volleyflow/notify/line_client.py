@@ -5,6 +5,47 @@ import os
 import httpx
 
 _PUSH_URL = "https://api.line.me/v2/bot/message/push"
+_PROFILE_URL = "https://api.line.me/v2/bot/profile/{user_id}"
+
+
+def is_reachable(user_id: str) -> bool | None:
+    """Whether a push to this person would actually arrive.
+
+    LINE delivers only to somebody who has added the Official Account
+    as a friend and hasn't blocked it, and refuses everyone else — which
+    is why send_game_reminder wraps each organizer in its own try. That
+    refusal happens at the moment it matters least: the night a game is
+    short-handed, in a log line nobody reads. This asks the same
+    question in advance, so an organizer can be told while there is
+    still time to fix it.
+
+    The profile endpoint answers without sending anything: 200 for a
+    friend, 404 for everyone else. That 404 is the answer and not a
+    failure, so this is the one call in this module that deliberately
+    does not raise_for_status.
+
+    Returns None for "cannot say" — no token, LINE unreachable, or any
+    other status. A caller must treat that as neither yes nor no:
+    telling somebody to add a friend they added months ago is worse
+    than staying quiet. Five seconds, not the ten the pushes get,
+    because a page waits on this one and a nightly job does not.
+    """
+    token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+    if not token:
+        return None
+    try:
+        response = httpx.get(
+            _PROFILE_URL.format(user_id=user_id),
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+    except httpx.HTTPError:
+        return None
+    if response.status_code == 200:
+        return True
+    if response.status_code == 404:
+        return False
+    return None
 
 
 def _push(to: str, text: str) -> None:

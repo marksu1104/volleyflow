@@ -109,7 +109,7 @@ function gameLocation(season, game) {
  *
  * A pure function of what the page already has, so the rule is testable
  * without a browser — see tests/frontend/todos.test.js. */
-function buildTodos(season, requests, balances) {
+function buildTodos(season, requests, balances, lineReachable) {
   // This season's money only. `balance` is club-wide and spans every
   // season the player has ever been in, so counting from it put people
   // on the 待辦 list over a fee belonging to some other season —
@@ -176,6 +176,21 @@ function buildTodos(season, requests, balances) {
       sub: "當天現場收",
       href: "organizer-ledger.html",
       action: "收款",
+    });
+  }
+  // Strictly false, never merely falsy. `undefined` means the caller
+  // never asked, `null` means LINE could not answer, and both have to
+  // stay silent: telling somebody to add a friend they added months ago
+  // reads as the app being broken, which is worse than saying nothing.
+  // The fourth argument is optional for the same reason — every other
+  // caller passes three and must keep getting no todo from this.
+  if (lineReachable === false) {
+    list.push({
+      kind: "warn",
+      label: "尚未加入官方帳號好友",
+      sub: "人數不足時無法通知你",
+      href: OFFICIAL_ACCOUNT_URL,
+      action: "加入",
     });
   }
   return list;

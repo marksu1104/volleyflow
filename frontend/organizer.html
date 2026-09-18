@@ -220,20 +220,30 @@
   async function loadTodos() {
     const clubId = currentClubId();
     if (!clubId || !currentSeason) return;
-    const ask = (path) =>
+    const ask = (path, fallback = []) =>
       fetch(`${API_BASE}${path}`, { headers: authHeader() })
-        .then((r) => (r.ok ? r.json() : []))
-        .catch(() => []);
-    // Says "still looking" before the two reads go out. They only start
-    // once the season has landed, and then take a round trip of their
-    // own, so this line is always behind the card above it — saying so
-    // beats leaving a gap that fills itself seconds later.
+        .then((r) => (r.ok ? r.json() : fallback))
+        .catch(() => fallback);
+    // Says "still looking" before the three reads go out. They only
+    // start once the season has landed, and then take a round trip of
+    // their own, so this line is always behind the card above it —
+    // saying so beats leaving a gap that fills itself seconds later.
     renderTodos();
-    const [requests, balances] = await Promise.all([
+    // The friendship check is the one read whose failure has to say
+    // something different from its answer, so it gets `null` rather
+    // than the others' empty array: `[].reachable` is undefined, which
+    // would land on "could not ask" by luck instead of on purpose.
+    const [requests, balances, reach] = await Promise.all([
       ask(`/clubs/${clubId}/join-requests`),
       ask(`/clubs/${clubId}/balances?season_id=${currentSeason.id}`),
+      ask("/players/me/line-reachable", null),
     ]);
-    const next = buildTodos(currentSeason, requests, balances);
+    const next = buildTodos(
+      currentSeason,
+      requests,
+      balances,
+      reach ? reach.reachable : null
+    );
     // Same list, same pixels: repainting an unchanged row is the flicker.
     // The flag has to clear first, though — on the first answer the list
     // can legitimately be identical to the empty one it started with,

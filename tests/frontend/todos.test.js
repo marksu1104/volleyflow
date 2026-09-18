@@ -105,6 +105,29 @@ test("a fee belonging to another season is not this season's 待辦", () => {
   assert.deepEqual(todos, []);
 });
 
+test("not having added the Official Account is a 待辦 that offers the way in", () => {
+  const todos = buildTodos(season([game({})]), [], [], false);
+
+  assert.equal(todos.length, 1);
+  assert.equal(todos[0].kind, "warn");
+  assert.match(todos[0].label, /尚未加入官方帳號好友/);
+  // The real address, not the constant compared to itself: this is what
+  // somebody actually taps, and a typo in it is silent.
+  assert.equal(todos[0].href, "https://line.me/R/ti/p/@363bopii");
+});
+
+test("already having added it is not a 待辦", () => {
+  assert.deepEqual(buildTodos(season([game({})]), [], [], true), []);
+});
+
+test("not being able to ask LINE is not a 待辦 either", () => {
+  // null is the server saying it could not check; undefined is a caller
+  // that never asked. Neither is evidence the friend is missing, and
+  // warning on either would fire at everybody the day LINE is slow.
+  assert.deepEqual(buildTodos(season([game({})]), [], [], null), []);
+  assert.deepEqual(buildTodos(season([game({})]), [], []), []);
+});
+
 test("a game already played is nobody's 待辦", () => {
   const past = season([game({ date: "2020-01-07", absences: [{ id: 1, player_name: "林書妤", filled_by: null }] })]);
   past.minimum_roster = 12;
