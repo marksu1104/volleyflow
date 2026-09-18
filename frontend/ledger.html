@@ -101,15 +101,27 @@
    * and says plainly that it is spread across clubs. */
   function renderOwedTotal(clubs) {
     const box = document.getElementById("owed-total");
-    const total = clubs.reduce((t, c) => t + Math.min(0, owes(c)), 0);
-    if (total === 0) {
+    const owing = clubs.filter((c) => owes(c) < 0);
+    // Only when it is genuinely adding something up. With one club
+    // owing, the headline repeated the row beneath it word for word —
+    // the same figure twice, stacked, which is noise rather than a
+    // summary. Not "more than one club" but "more than one club that
+    // owes": three clubs where only one is unpaid has the same problem.
+    if (owing.length < 2) {
+      // Cleared, not merely hidden. getJsonSWR paints this page twice —
+      // once from cache, once from the network — so a headline written
+      // on the first pass can be wrong on the second. A hidden node
+      // still holding a figure is one accidental unhide away from
+      // showing money that is no longer true, and this is the money
+      // screen. Found by a test reading back a stale headline.
+      box.innerHTML = "";
       box.hidden = true;
       return;
     }
-    const spread = clubs.filter((c) => owes(c) < 0).length;
+    const total = owing.reduce((t, c) => t + owes(c), 0);
     box.className = "lg-total owe";
     box.innerHTML =
-      `<span>全部應繳${spread > 1 ? `（${spread} 隊）` : ""}</span>` +
+      `<span>全部應繳（${owing.length} 隊）</span>` +
       `<strong>$${Math.abs(total)}</strong>`;
     box.hidden = false;
   }
