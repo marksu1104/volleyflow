@@ -184,14 +184,25 @@
   // to report.html on 2026-09-18 — deleted here rather than left behind
   // as dead code, so there is exactly one place that can send a report.
 
-  function clubRowHtml(club, ledger) {
+  function clubRowHtml(club) {
     const roleTag = club.role === "organizer" ? '<span class="role-tag">管理員</span>' : "";
+    /* The balance rides on the club row itself now — see GET
+     * /players/{id}/clubs. It used to be fetched per club and passed in
+     * separately, which is what made this card slow.
+     *
+     * Missing is not zero, and that distinction is load-bearing here:
+     * getJsonSWR paints the *cached* list first, and a copy stored
+     * before this shipped carries no balance at all. Number(undefined)
+     * is NaN, so the obvious version of this renders 應繳 $NaN on a
+     * money row for everyone's first load after a deploy. Say nothing
+     * until the figure is real. */
+    const n = Number(club.balance);
+    const known = club.balance !== undefined && club.balance !== null && !Number.isNaN(n);
     let balHtml = "";
-    if (ledger) {
-      const n = Number(ledger.balance);
-      const cls = n === 0 ? "" : n > 0 ? "bal plus" : "bal minus";
-      const text = n === 0 ? "已結清" : n > 0 ? `餘額 $${ledger.balance}` : `應繳 $${Math.abs(n)}`;
-      balHtml = n === 0 ? "" : `<span class="${cls}">${text}</span>`;
+    if (known && n !== 0) {
+      const cls = n > 0 ? "bal plus" : "bal minus";
+      const text = n > 0 ? `餘額 $${club.balance}` : `應繳 $${Math.abs(n)}`;
+      balHtml = `<span class="${cls}">${text}</span>`;
     }
     return `
       <div class="club-row display">
@@ -211,11 +222,16 @@
    * blank space rather than a visibly busy one, and a blank space reads
    * as a page that has finished and found nothing.
    *
-   * Three changes, in the order they are felt. Something is on screen
-   * immediately; the club names paint from the last visit's copy without
-   * waiting for the network (see getJsonSWR); and the balances, which
-   * are one request per club, no longer hold the names hostage — they
-   * fill in behind. */
+   * Something is on screen immediately, and the club names paint from
+   * the last visit's copy without waiting for the network (see
+   * getJsonSWR).
+   *
+   * The balances used to arrive separately, one request per club,
+   * painted over the rows once they landed. That was the N+1 behind the
+   * original complaint, and it also meant the list rendered twice —
+   * names, then names-with-figures — so the row content shifted under
+   * the reader a moment after appearing. One request now carries both,
+   * and the rows paint once. */
   async function renderClubs() {
     const list = document.getElementById("clubs-list");
     showPageLoading(list);
@@ -226,9 +242,8 @@
           stopLoadingEscalation();
           document.getElementById("clubs-label").textContent = `我的球隊 ${clubs.length} 個`;
           list.innerHTML =
-            clubs.map((c) => clubRowHtml(c, null)).join("") ||
+            clubs.map((c) => clubRowHtml(c)).join("") ||
             '<div class="empty">尚未加入任何球隊</div>';
-          fillBalances(clubs);
         },
         { headers: authHeader() }
       );
@@ -236,23 +251,6 @@
       stopLoadingEscalation();
       showPageError(list, e.message);
     }
-  }
-
-  /** The money, one request per club, painted over the rows already up.
-   * A club whose ledger will not load keeps its row and simply shows no
-   * figure — the name is the useful part and it is already correct. */
-  async function fillBalances(clubs) {
-    if (!clubs.length) return;
-    const balances = await Promise.all(
-      clubs.map((c) =>
-        fetch(`${API_BASE}/clubs/${c.id}/players/${me.id}/ledger`, { headers: authHeader() })
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null)
-      )
-    );
-    const list = document.getElementById("clubs-list");
-    if (!list) return;
-    list.innerHTML = clubs.map((c, i) => clubRowHtml(c, balances[i])).join("");
   }
 </script>
 </body>
