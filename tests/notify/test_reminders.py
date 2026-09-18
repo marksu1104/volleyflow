@@ -372,3 +372,29 @@ def test_nobody_waiting_to_join_sends_nothing(
 
     assert clubs == 0
     assert sent_messages == []
+
+
+def test_every_message_carries_a_way_back_into_the_app(
+    db_session: Session, sent_messages: SentMessages
+) -> None:
+    """A notice that names a problem without offering a route to act on
+    it sends the reader off to find the app themselves — and the join
+    digest was worse, naming a screen it gave no way to reach.
+
+    Both push paths in one test on purpose: a third message type added
+    later without the link fails here rather than shipping quietly.
+
+    The literal address, not `reminders.APP_URL`, which would only
+    compare the constant to itself. This pins the real LIFF app, so
+    changing it has to be deliberate.
+    """
+    season = _season(db_session, minimum_roster=5, club_name="晴光館")
+    game = _short_game(db_session, season)
+    _waiting_to_join(db_session, season, "新人一")
+
+    reminders.send_game_reminder(db_session, game)
+    reminders.send_join_request_digests(db_session)
+
+    assert len(sent_messages) == 2, "a short game and a waiting joiner"
+    for _user_id, text in sent_messages:
+        assert "https://liff.line.me/2011156233-6CouG6VI" in text
