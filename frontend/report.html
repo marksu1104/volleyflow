@@ -39,7 +39,7 @@
     <div class="field">
       <label for="report-text">發生什麼事？</label>
       <textarea id="report-text" class="control" rows="5"
-        placeholder="哪個畫面、按了什麼、發生什麼事？例如：帳務頁按「已收」之後金額沒有變。"></textarea>
+        placeholder="請說明發生問題的頁面、操作步驟與結果。例如：帳務頁按「已收」後金額未更新。"></textarea>
       <p class="hint">
         身分、頁面與裝置資訊會自動附上，無須自行填寫。回報會保存在網站上，由開發者查看。
       </p>
@@ -49,7 +49,7 @@
       <label for="report-shot">截圖（選填）</label>
       <input id="report-shot" class="control" type="file" accept="image/*">
       <img id="report-preview" alt="" hidden>
-      <p class="hint">一張畫面通常比一段描述快得多。</p>
+      <p class="hint">附上截圖有助於判斷問題。</p>
     </div>
 
     <button type="button" class="btn btn-primary" id="report-btn" onclick="sendReport()">送出回報</button>
