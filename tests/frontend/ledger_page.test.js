@@ -129,6 +129,18 @@ test("owing money says how much, and being owed reads as a balance", () => {
   assert.match(clubRowHtml(club({ balance: "470" })), /餘額 \$470/);
 });
 
+test("a scaled decimal is shown as a whole figure, not as 2845.00", () => {
+  // A balance summed in SQL can arrive as "-2845.00" where the Python
+  // path gives "-2845" — the same money either way. The two pages used
+  // to disagree here, one printing the raw string and the other the
+  // number, which no test caught because none of them used a decimal
+  // with a scale. Shared now; see balanceBadgeHtml.
+  const html = clubRowHtml(club({ balance: "-2845.00" }));
+
+  assert.match(html, /應繳 \$2845/);
+  assert.ok(!/2845\.00/.test(html), "a row is no place for trailing zeroes");
+});
+
 test("a settled club says so, rather than showing nothing", () => {
   // Different from profile.html on purpose: this is the money page, so
   // "settled" is an answer worth giving rather than an absence.

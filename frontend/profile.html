@@ -195,20 +195,10 @@
      * /players/{id}/clubs. It used to be fetched per club and passed in
      * separately, which is what made this card slow.
      *
-     * Missing is not zero, and that distinction is load-bearing here:
-     * getJsonSWR paints the *cached* list first, and a copy stored
-     * before this shipped carries no balance at all. Number(undefined)
-     * is NaN, so the obvious version of this renders 應繳 $NaN on a
-     * money row for everyone's first load after a deploy. Say nothing
-     * until the figure is real. */
-    const n = Number(club.balance);
-    const known = club.balance !== undefined && club.balance !== null && !Number.isNaN(n);
-    let balHtml = "";
-    if (known && n !== 0) {
-      const cls = n > 0 ? "bal plus" : "bal minus";
-      const text = n > 0 ? `餘額 $${club.balance}` : `應繳 $${Math.abs(n)}`;
-      balHtml = `<span class="${cls}">${text}</span>`;
-    }
+     * The badge, its NaN guard and its wording live in shared.js; see
+     * balanceBadgeHtml. No `settled` label here: this page is about the
+     * reader, and "you are square with this club" is not news on it. */
+    const balHtml = balanceBadgeHtml(club.balance);
     return `
       <div class="club-row display">
         <i class="club-dot">${escapeHtml(club.name.slice(0, 1))}</i>

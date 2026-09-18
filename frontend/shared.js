@@ -2576,6 +2576,36 @@ function showPageLoading(container) {
  * for a whole screen and far too much inside a block that already has a
  * heading above it.
  */
+/** The money badge on a club row: 應繳 $N, 餘額 $N, or nothing at all.
+ *
+ * Shared because the guard is subtle and was hand-copied onto two pages.
+ * Missing is not zero, and the distinction is load-bearing: getJsonSWR
+ * paints a *cached* club list before the network answers, and a copy
+ * stored before balances shipped carries no such field. Number(undefined)
+ * is NaN, so the obvious version renders 應繳 $NaN on a money row for
+ * everyone's first load after a deploy.
+ *
+ * `settled` is the one thing the two callers genuinely disagree about,
+ * so it is a parameter rather than a second copy of everything else:
+ * 個人資料 shows nothing for a cleared balance, because a club row there
+ * is a fact about the reader; 我的帳務 says 已結清, because on the money
+ * page "you are square" is an answer worth giving.
+ *
+ * Prints the *number*, never the string it arrived as. A balance summed
+ * in SQL can come back as "470.00" where the Python path gives "470" —
+ * the same money, but $470.00 on a row is wrong. The two pages used to
+ * disagree about exactly this.
+ */
+function balanceBadgeHtml(balance, opts) {
+  const { settled = "" } = opts || {};
+  const n = Number(balance);
+  if (balance === undefined || balance === null || Number.isNaN(n)) return "";
+  if (n === 0) return settled ? `<span class="bal">${escapeHtml(settled)}</span>` : "";
+  return `<span class="bal ${n > 0 ? "plus" : "minus"}">${
+    n > 0 ? `餘額 $${n}` : `應繳 $${Math.abs(n)}`
+  }</span>`;
+}
+
 function blockLoadingHtml(text) {
   return (
     '<div class="block-state"><i class="spinner sm"></i>' +

@@ -127,22 +127,11 @@
   }
 
   function clubRowHtml(club) {
-    const n = Number(club.balance);
-    // Missing is not zero. A cached club list stored before balances
-    // shipped carries no such field, and Number(undefined) is NaN —
-    // which would read as 應繳 $NaN on a money row. Say nothing until
-    // the figure is real. Same guard as profile.html's rows.
-    const known = club.balance !== undefined && club.balance !== null && !Number.isNaN(n);
     const roleTag = club.role === "organizer" ? '<span class="role-tag">管理員</span>' : "";
-    let bal = "";
-    if (known) {
-      bal =
-        n === 0
-          ? '<span class="bal">已結清</span>'
-          : `<span class="bal ${n > 0 ? "plus" : "minus"}">${
-              n > 0 ? `餘額 $${n}` : `應繳 $${Math.abs(n)}`
-            }</span>`;
-    }
+    // Shared guard and wording — see balanceBadgeHtml in shared.js. This
+    // is the money page, so unlike 個人資料 a cleared balance gets said
+    // out loud rather than left blank.
+    const bal = balanceBadgeHtml(club.balance, { settled: "已結清" });
     return `
       <button type="button" class="club-row" onclick="openDetail(${club.id})">
         <i class="club-dot">${escapeHtml(club.name.slice(0, 1))}</i>
