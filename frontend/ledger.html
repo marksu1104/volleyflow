@@ -28,7 +28,7 @@
     <div id="owed-total" hidden></div>
     <p class="section-label" id="clubs-label">我的球隊</p>
     <div id="clubs-list"></div>
-    <p class="hint">每一隊的帳各自計算，不會互相流用。點一隊看明細。</p>
+    <p class="hint">每一隊的帳各自計算，不會互相流用。選擇球隊可查看明細。</p>
   </div>
 </div>
 
@@ -40,6 +40,11 @@
     <h3 id="dt-club"></h3>
     <div id="dt-total" class="lg-total"></div>
     <div id="dt-rows"></div>
+    <!-- In the sheet rather than on the row: the row is already a
+         button, and a button cannot contain another one. Putting it here
+         also keeps every row identical, instead of one row carrying an
+         extra control its neighbours do not have. -->
+    <button type="button" class="btn btn-quiet" id="dt-goto" style="width:100%;margin-top:14px" hidden>前往這個球隊</button>
   </div>
 </div>
 
@@ -182,6 +187,9 @@
     document.getElementById("dt-club").textContent = club ? club.name : "";
     const rows = document.getElementById("dt-rows");
     const total = document.getElementById("dt-total");
+    const goto = document.getElementById("dt-goto");
+    goto.hidden = false;
+    goto.onclick = () => goToClub(clubId);
     total.className = "lg-total";
     total.textContent = "";
     rows.innerHTML = blockLoadingHtml("載入中");
@@ -228,6 +236,18 @@
     } catch (e) {
       rows.innerHTML = `<div class="empty">讀不到這一隊的明細：${escapeHtml(e.message)}</div>`;
     }
+  }
+
+  /** Switch to this club and open its games.
+   *
+   * rememberId writes the choice the same way the club picker does
+   * (shared.js), so member.html opens on this club rather than on
+   * whichever one was looked at last. Writing both session and local
+   * storage is deliberate and matches the picker: the per-tab copy is
+   * what lets two tabs sit on different clubs. */
+  function goToClub(clubId) {
+    rememberId(CLUB_STORAGE_KEY, String(clubId));
+    location.href = "member.html";
   }
 
   function closeDetail() {
