@@ -46,6 +46,15 @@
     </defs>
     <circle cx="50" cy="50" r="38"/>
     <g clip-path="url(#ball)">
+      <!-- Three seams: one sweeping down the left, two crossing the
+           right. Not symmetric, and deliberately so — a volleyball seen
+           from any real angle is not.
+
+           A rotationally symmetric version was tried and was worse: three
+           identical arcs 120° apart all pass close to the centre, cross
+           each other there, and read as a tangle of wire rather than as
+           a ball. Symmetry is not the thing that makes this legible at
+           40px; leaving the middle of the ball open is. -->
       <path d="M50 12c-11 13-16 26-16 38s5 25 16 38"/>
       <path d="M14.5 38c16 5 30 6 41 3s22-9 31-19"/>
       <path d="M14.5 62c16-5 30-6 41-3s22 9 31 19"/>
