@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
 
 _API = "https://api.line.me/v2/bot"
 _DATA_API = "https://api-data.line.me/v2/bot"
@@ -161,6 +162,15 @@ def publish(png_path: Path, urls: list[str], replace: bool = True) -> str:
 
 
 def main() -> int:
+    # Here rather than at import, so the module docstring's promise that
+    # nothing runs on import stays literally true. Without it the token
+    # is only found in a real environment variable: `.env` — which is
+    # where this project keeps it, and where `db.engine` reads it from —
+    # would be ignored, and the first sign of that is a KeyError at the
+    # exact moment `--publish` starts talking to LINE, after a dry run
+    # has already printed a perfectly correct-looking definition.
+    load_dotenv()
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", required=True, type=Path, help="the 2500x843 PNG")
     parser.add_argument(
