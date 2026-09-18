@@ -74,6 +74,14 @@
          past on their way to say something is broken. It has its own
          page now, which is also where the LINE rich menu's third button
          lands. Moved 2026-09-18. -->
+    <!-- The permanent home for this. The join screen asks once, but it
+         disappears on approval, and LINE will not push to anyone who has
+         not added the account — so there has to be somewhere to do it
+         afterwards. -->
+    <div class="section-label">官方帳號</div>
+    <a class="btn btn-quiet" id="oa-link">加入官方帳號</a>
+    <p class="hint">通知只會發給已加入官方帳號的人。</p>
+
     <div class="section-label">回報問題</div>
     <a class="btn btn-quiet" href="report.html">回報使用上的問題</a>
 
@@ -107,6 +115,10 @@
     me = identified;
     identityEl.textContent = `已用 LINE 身分登入：${identified.name}`;
     document.getElementById("content").hidden = false;
+    // Wired here rather than hardcoded in the markup so the address
+    // lives in exactly one place (shared.js) — member.html's join screen
+    // offers the same link.
+    document.getElementById("oa-link").href = OFFICIAL_ACCOUNT_URL;
     renderProfile();
     if (me.is_developer) showDeveloperReports();
     await renderClubs();

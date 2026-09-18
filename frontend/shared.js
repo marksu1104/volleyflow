@@ -328,6 +328,21 @@ function formatSeasonLabel(season) {
 
 const CLUB_STORAGE_KEY = "vf_club";
 
+/** Adding the club's Official Account as a friend.
+ *
+ * Not decoration: LINE refuses to push to anyone who has not added the
+ * account, so an organizer who skipped the prompt never receives the
+ * short-roster alert and has no way of knowing why
+ * (docs/backlog.md §1). The LIFF consent screen offers to add it, but
+ * every LIFF app here is set to bot_prompt=normal, which makes that
+ * offer skippable.
+ *
+ * The basic id comes from GET /v2/bot/info on the Messaging channel;
+ * it is public — it is what anyone adding the account types in — so it
+ * belongs in the frontend rather than in an environment variable.
+ */
+const OFFICIAL_ACCOUNT_URL = "https://line.me/R/ti/p/@363bopii";
+
 /** Which club and season a page is looking at: remembered per *tab*,
  * defaulted from the last one this browser used.
  *

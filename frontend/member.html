@@ -333,11 +333,33 @@
     stopLoadingEscalation();
     const club = myClubs.find((c) => String(c.id) === String(currentClubId()));
     document.getElementById("season-picker").hidden = true;
-    document.getElementById("hero-wrap").innerHTML = emptyStateHtml(
-      `已送出申請：${club ? club.name : ""}`,
-      "管理員核准之後，這裡就會出現本季的場次。可以先關掉，之後從同一個連結再打開。",
-      { label: "重新整理", onclick: "location.reload()" }
-    );
+    document.getElementById("hero-wrap").innerHTML =
+      emptyStateHtml(
+        `已送出申請：${club ? club.name : ""}`,
+        "管理員核准之後，這裡就會出現本季的場次。可以先關掉，之後從同一個連結再打開。",
+        { label: "重新整理", onclick: "location.reload()" }
+      ) +
+      /* The moment to ask. Someone who has just committed to a club and
+       * been told to wait has nothing else competing for their
+       * attention, and this screen disappears the moment they are
+       * approved — after which there is no prompt anywhere, which is
+       * why profile.html carries a permanent one too.
+       *
+       * It matters more than it looks: LINE refuses to push to anyone
+       * who has not added the Official Account, so an organizer who
+       * skipped it silently never receives the short-roster alert
+       * (docs/backlog.md §1). The LIFF consent screen offers to add it,
+       * but that offer is skippable.
+       *
+       * Deliberately not liff.getFriendship(): that is a LIFF API whose
+       * behaviour cannot be verified outside the LINE app, and guessing
+       * at those cost this project two outages on 2026-09-18. A plain
+       * link is honest — somebody who has already added it just opens
+       * the account and closes it again. */
+      `<div class="empty-state" style="margin-top:10px">
+        <p>通知只會發給已加入官方帳號的人。</p>
+        <a class="btn btn-quiet" href="${OFFICIAL_ACCOUNT_URL}">加入官方帳號</a>
+      </div>`;
   }
 
   /** The invite went nowhere. Drop it and boot normally, rather than
