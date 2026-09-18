@@ -1426,54 +1426,9 @@
       .join("");
   }
 
-  /** Everything it needs is an argument, so the rule can be tested
-   * directly — the invariant below is about money and is worth pinning
-   * down without a browser. */
-  function summaryRows(ledger, season, name) {
-    const here = (e) => !!season && e.season_id === season.id;
-    const sum = (pred) =>
-      ledger.entries.filter(pred).reduce((t, e) => t + Number(e.amount), 0);
-
-    const rows = [];
-    let accounted = 0;
-    const add = (label, detail, amount) => {
-      if (amount === 0) return;
-      rows.push({ label, detail, amount });
-      accounted += amount;
-    };
-
-    if (season) {
-      const absences = season.games.filter((g) =>
-        g.absences.some((a) => a.player_name === name)
-      );
-      const covered = absences.filter((g) =>
-        g.absences.some((a) => a.player_name === name && a.covered_by)
-      );
-      const dropIns = season.games.filter((g) =>
-        g.confirmed_drop_ins.some((d) => d.player_name === name)
-      );
-
-      add("本季季費", `${season.games.length} 場`,
-        sum((e) => here(e) && e.entry_type === "season_fee_charged"));
-      add("請假退費", `請假 ${absences.length} 次・${covered.length} 次有人代打`,
-        sum((e) => here(e) && e.entry_type === "absence_refund"));
-      add("臨打費", `${dropIns.length} 場`,
-        sum((e) => here(e) && e.entry_type === "drop_in_fee_charged"));
-      add("已收付款", null, sum((e) => here(e) && e.entry_type === "payment"));
-    }
-    // Everything outside the season on screen. Not "上季": a season's
-    // fees are charged the moment it is created, so a club with the next
-    // season already booked has money here belonging to a season still
-    // to come. Same correction as the 帳務 page's splitLedger.
-    add("其他季別", null, sum((e) => !here(e)));
-
-    // The lines and the headline must never disagree: an entry type this
-    // screen doesn't know about still has to appear somewhere.
-    const rest = Number(ledger.balance) - accounted;
-    if (Math.abs(rest) >= 1) add("其他", null, rest);
-
-    return rows.length ? rows : [{ label: "尚無任何費用", detail: null, amount: 0 }];
-  }
+  // summaryRows moved to shared.js on 2026-09-18: the all-clubs money
+  // page needs the same breakdown, and a second copy of it is how two
+  // screens start disagreeing about what somebody owes.
 
   function closeLedger() { document.getElementById("ledger-backdrop").hidden = true; }
   /**

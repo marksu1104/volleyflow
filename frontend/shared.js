@@ -536,6 +536,77 @@ async function initClubAndSeasonPickers(
   }
 }
 
+/** What a member's money looks like right now, not a journal of every
+ * entry.
+ *
+ * The first version listed raw ledger rows newest-first — 季費 −$3055,
+ * 收付款 +$3055, 臨打費 −$235 — which is the accountant's view and
+ * answers a question nobody asked. What a member wants to know is how
+ * many games they signed up for, how many they took leave from, and
+ * therefore what they owe or are owed.
+ *
+ * So the counts come from the season (what actually happened to you) and
+ * the amounts come from the ledger (what it cost). Anything on the
+ * ledger these lines don't account for shows as 其他 rather than being
+ * silently dropped — the lines have to add up to the headline, or the
+ * screen is lying about money.
+ *
+ * Lives here rather than on member.html because the all-clubs money page
+ * shows the same breakdown per club. Everything it needs is an argument,
+ * so the rule can be tested without a browser — see
+ * tests/frontend/my_ledger.test.js.
+ *
+ * `season` may be null, and the result is then honest but nearly
+ * useless: every entry falls into 其他季別, because nothing is known
+ * about which games this person played. Callers that have a season
+ * should pass it.
+ */
+function summaryRows(ledger, season, name) {
+  const here = (e) => !!season && e.season_id === season.id;
+  const sum = (pred) =>
+    ledger.entries.filter(pred).reduce((t, e) => t + Number(e.amount), 0);
+
+  const rows = [];
+  let accounted = 0;
+  const add = (label, detail, amount) => {
+    if (amount === 0) return;
+    rows.push({ label, detail, amount });
+    accounted += amount;
+  };
+
+  if (season) {
+    const absences = season.games.filter((g) =>
+      g.absences.some((a) => a.player_name === name)
+    );
+    const covered = absences.filter((g) =>
+      g.absences.some((a) => a.player_name === name && a.covered_by)
+    );
+    const dropIns = season.games.filter((g) =>
+      g.confirmed_drop_ins.some((d) => d.player_name === name)
+    );
+
+    add("本季季費", `${season.games.length} 場`,
+      sum((e) => here(e) && e.entry_type === "season_fee_charged"));
+    add("請假退費", `請假 ${absences.length} 次・${covered.length} 次有人代打`,
+      sum((e) => here(e) && e.entry_type === "absence_refund"));
+    add("臨打費", `${dropIns.length} 場`,
+      sum((e) => here(e) && e.entry_type === "drop_in_fee_charged"));
+    add("已收付款", null, sum((e) => here(e) && e.entry_type === "payment"));
+  }
+  // Everything outside the season on screen. Not "上季": a season's fees
+  // are charged the moment it is created, so a club with the next season
+  // already booked has money here belonging to a season still to come.
+  // Same correction as the 帳務 page's splitLedger.
+  add("其他季別", null, sum((e) => !here(e)));
+
+  // The lines and the headline must never disagree: an entry type this
+  // screen doesn't know about still has to appear somewhere.
+  const rest = Number(ledger.balance) - accounted;
+  if (Math.abs(rest) >= 1) add("其他", null, rest);
+
+  return rows.length ? rows : [{ label: "尚無任何費用", detail: null, amount: 0 }];
+}
+
 /**
  * A real month-grid calendar. Opens on the month of the nearest
  * upcoming game, marks every day that has one, and lets you page
