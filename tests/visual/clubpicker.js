@@ -68,6 +68,25 @@ function report(name, problems) {
     report("有兩隊以上就先問要看哪一隊", asked ? [] : ["沒有出現選擇畫面"]);
 
     if (asked) {
+      // The spinner has to actually be a circle. It rendered as a
+      // zero-width sliver until 2026-09-19, because .spinner set width
+      // and height but no `display`, and an <i> is inline — where both
+      // are ignored. Measuring the box is the only way to catch that:
+      // the element is present and carries the right class either way,
+      // so every existence check passed while it looked broken.
+      const box = await page
+        .$eval("[id^=pick-when-] .spinner", (el) => {
+          const r = el.getBoundingClientRect();
+          return { w: Math.round(r.width), h: Math.round(r.height) };
+        })
+        .catch(() => null);
+      report("轉圈是圓的，不是一條線", [
+        ...(box ? [] : ["找不到轉圈"]),
+        ...(box && box.w >= 10 && box.h >= 10
+          ? []
+          : [`尺寸不對，應該接近 15x15：${JSON.stringify(box)}`]),
+      ]);
+
       // The sub-line is the reason for choosing rather than a decoration:
       // it must actually arrive, not sit on its spinner.
       await page.waitForTimeout(4000);
@@ -86,6 +105,26 @@ function report(name, problems) {
       const landed = await page.evaluate(() => localStorage.getItem("vf_club"));
       report("點了哪一隊就看哪一隊", [
         ...(landed === first ? [] : [`點了 ${first}，記住的卻是 ${landed}`]),
+      ]);
+
+      // The bug this exists for: the decision branch never consulted the
+      // remembered club, so every reload threw the picker up again even
+      // though the answer was already in localStorage. Reported
+      // 2026-09-19 as 「每次重整就一定要重選一次隊伍」. Same context on
+      // purpose — a fresh one would have empty storage and could never
+      // see it.
+      await page.reload();
+      await page.waitForFunction(
+        () =>
+          document.querySelector("[data-pick-club]") ||
+          document.querySelector("#month-cal:not([hidden])"),
+        null,
+        { timeout: 25000 }
+      );
+      await page.waitForTimeout(400);
+      const askedAgain = (await page.$$("[data-pick-club]")).length;
+      report("選過之後重新整理就不再問", [
+        ...(askedAgain === 0 ? [] : ["已經選過了，重整後又跳出選擇畫面"]),
       ]);
     }
     await ctx.close();

@@ -315,7 +315,21 @@
       history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : ""));
       rememberId(CLUB_STORAGE_KEY, namedClub);
     }
-    if (!namedClub && active.length > 1) {
+    /* A club already chosen on this device is an answer, not a guess, so
+     * asking again on every reload is friction rather than a choice —
+     * reported 2026-09-19 as 「每次重整就一定要重選一次隊伍」. The picker
+     * still owns the first visit, which is what change C was for; after
+     * that the app bar's club button opens the same list, so remembering
+     * here cannot strand anybody inside one club.
+     *
+     * Checked against `active` rather than trusted outright: a
+     * remembered club they have since left would otherwise send them
+     * straight to a screen they can no longer read. */
+    const remembered = currentClubId();
+    const remembersOneOfThese = active.some(
+      (c) => String(c.id) === String(remembered)
+    );
+    if (!namedClub && !remembersOneOfThese && active.length > 1) {
       renderClubPicker(active);
       return;
     }
@@ -413,10 +427,16 @@
           (c) => `
           <button type="button" class="club-row" data-pick-club="${c.id}">
             <i class="club-dot">${escapeHtml(c.name.slice(0, 1))}</i>
-            <span class="cr-name">${escapeHtml(c.name)}
+            <span class="cr-name">
+              <!-- The name gets its own element so it can be truncated
+                   on its own. As a bare text node beside a block child
+                   it shared a box with the sub-line, and text-overflow
+                   has nothing to act on there. -->
+              <span class="cr-title">${escapeHtml(c.name)}</span>
               <!-- The spinner inline rather than blockLoadingHtml():
                    that returns a <div>, and a div inside this span is
-                   invalid nesting. -->
+                   invalid nesting. It needs .spinner's display:inline-block
+                   to have any size at all — see shared.css. -->
               <span class="cr-sub" id="pick-when-${c.id}"><i class="spinner sm"></i> 讀取中…</span>
             </span>
             ${c.role === "organizer" ? '<span class="role-tag">管理員</span>' : ""}

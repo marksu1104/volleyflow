@@ -710,8 +710,15 @@ textarea.control { resize: vertical; min-height: 90px; }
 }
 .club-row.on { border-color: var(--accent); background: var(--accent-soft); }
 .club-row.display { cursor: default; }
-.club-row .cr-name { flex: 1; font-weight: 700; font-size: .88rem; }
-.club-row .cr-sub { font-size: .74rem; color: var(--ink-soft); font-weight: 400; display: block; margin-top: 1px; }
+/* min-width:0 is what makes the ellipsis work at all. A flex item's
+   min-width defaults to auto, which refuses to shrink below its own
+   content, so text-overflow never fires and a long club name pushes the
+   row wider or wraps to a second line instead. Same pattern as
+   .pool-who. Reported 2026-09-19: 「如果下面文字太長還會換行，會很醜」. */
+.club-row .cr-name { flex: 1; min-width: 0; font-weight: 700; font-size: .88rem; }
+.club-row .cr-title,
+.club-row .cr-sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.club-row .cr-sub { font-size: .74rem; color: var(--ink-soft); font-weight: 400; margin-top: 1px; }
 .role-tag { font-size: .68rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); }
 .guest-tag {
   font-size: .68rem; font-weight: 700; padding: 2px 7px; border-radius: 999px;
@@ -807,7 +814,18 @@ textarea.control { resize: vertical; min-height: 90px; }
   padding: 44px 20px; color: var(--ink-soft); font-size: .85rem; text-align: center;
 }
 .page-state p { margin: 0; max-width: 34ch; line-height: 1.6; }
+/* `display` matters far more here than it looks. An <i> is display:inline
+   by default, and width/height are *ignored* on an inline box — so the
+   spinner collapsed to nothing but its own 2px borders and rendered as a
+   thin vertical sliver that could not visibly rotate. Every earlier use
+   happened to sit inside .page-state or .block-state, both display:flex,
+   and a flex item is blockified automatically; that hid the bug until a
+   spinner was finally placed inside an ordinary block — the club
+   picker's sub-line — and it showed up on a phone on 2026-09-19.
+   flex:none for the same reason .club-dot and .todo-dot carry it: a flex
+   item with a fixed size still shrinks without it. */
 .spinner {
+  display: inline-block; vertical-align: middle; flex: none;
   width: 26px; height: 26px; border-radius: 50%;
   border: 2.5px solid var(--rule); border-top-color: var(--accent);
   animation: spin .8s linear infinite;
