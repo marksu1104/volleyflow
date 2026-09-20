@@ -127,12 +127,12 @@ async function statusIn(name, clubId) {
   await members.page.waitForSelector("#requests-section:not([hidden])", { timeout: 20000 }).catch(() => {});
   const row = members.page.locator("#requests-list .pool-row", { hasText: stranger });
   await row
-    .locator("button", { hasText: "核准臨打" })
+    .locator("button", { hasText: "臨打", exact: true })
     .click()
-    .catch((e) => members.errors.push(`couldn't press 核准臨打 on ${stranger}: ${String(e).slice(0, 100)}`));
+    .catch((e) => members.errors.push(`couldn't press 臨打 on ${stranger}: ${String(e).slice(0, 100)}`));
   await members.page.waitForTimeout(2500);
   const approved = await statusIn(stranger, clubId);
-  report("pressing 核准臨打 in 待核准 lets them in", [
+  report("pressing 臨打 in 待核准 lets them in", [
     ...(approved === "active" ? [] : [`their membership is ${approved}`]),
     ...members.errors,
   ]);

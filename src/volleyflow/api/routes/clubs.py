@@ -1,12 +1,13 @@
 """Clubs, their membership, and the invite link into one."""
 
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
     status,
 )
 from sqlalchemy import func
@@ -21,6 +22,7 @@ from volleyflow.api.routes._people import (
     _MY_GUESTS_LIMIT,
     _gender,
     _get_club_or_404,
+    _get_or_create_player,
     _get_player_or_404,
     _now,
     _require_club_access,
@@ -30,6 +32,7 @@ from volleyflow.api.routes._people import (
 )
 from volleyflow.api.schemas import (
     ClubCreate,
+    ClubGuestAdd,
     ClubJoin,
     ClubMemberOut,
     ClubOut,
@@ -316,21 +319,35 @@ def list_my_guests(
 @router.get("/clubs/{club_id}/members", response_model=list[ClubMemberOut])
 def list_club_members(
     club_id: int,
+    include: Literal["pending"] | None = Query(default=None),
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> list[ClubMemberOut]:
     """Everyone in the club and their role — distinct from a *season's*
     fixed roster (GET /seasons/{id} returns that). Members only: this
-    returns real names, genders and LINE profile pictures.
+    returns real names, genders and LINE profile pictures. Pending requests
+    are only included when an organizer explicitly asks for them: ordinary
+    club members must never learn who is waiting to join.
     """
     _get_club_or_404(db, club_id)
-    _require_club_access(db, club_id, current_player)
-    rows = (
+    statuses: tuple[str, ...]
+    if include == "pending":
+        _require_organizer(db, club_id, current_player)
+        statuses = ("active", "pending")
+    else:
+        _require_club_access(db, club_id, current_player)
+        statuses = ("active",)
+    query = (
         db.query(PlayerRow, ClubMemberRow)
         .join(ClubMemberRow, ClubMemberRow.player_id == PlayerRow.id)
-        .filter(ClubMemberRow.club_id == club_id, ClubMemberRow.status == "active")
-        .order_by(PlayerRow.id)
-        .all()
+        .filter(ClubMemberRow.club_id == club_id, ClubMemberRow.status.in_(statuses))
+    )
+    rows = (
+        query.order_by(
+            ClubMemberRow.status, ClubMemberRow.joined_at, PlayerRow.id
+        ).all()
+        if include == "pending"
+        else query.order_by(PlayerRow.id).all()
     )
     return [
         ClubMemberOut(
@@ -340,10 +357,54 @@ def list_club_members(
             avatar_url=player.avatar_url,
             linked=player.line_user_id is not None,
             role=membership.role,
+            status=membership.status,
             wants_fixed_membership=membership.wants_fixed_membership,
         )
         for player, membership in rows
     ]
+
+
+@router.post("/clubs/{club_id}/guests", response_model=MemberOut)
+def add_club_guest(
+    club_id: int,
+    payload: ClubGuestAdd,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> MemberOut:
+    """Add an accountless visitor to a club, but not to any season.
+
+    A club roster and a season's fixed roster answer different questions:
+    this route only records that the person belongs to the team. The
+    organizer may later add them to a season through the existing season
+    endpoint, which is the only path that creates a season-fee charge.
+    """
+    _get_club_or_404(db, club_id)
+    _require_organizer(db, club_id, current_player)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Name can't be empty")
+    existing = (
+        db.query(PlayerRow)
+        .join(ClubMemberRow, ClubMemberRow.player_id == PlayerRow.id)
+        .filter(ClubMemberRow.club_id == club_id, PlayerRow.name == name)
+        .first()
+    )
+    if existing is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Already a member of this club"
+        )
+    player = _get_or_create_player(db, club_id, name)
+    if payload.gender is not None:
+        player.gender = payload.gender
+    db.commit()
+    db.refresh(player)
+    return MemberOut(
+        id=player.id,
+        name=player.name,
+        gender=_gender(player.gender),
+        avatar_url=player.avatar_url,
+        linked=False,
+    )
 
 
 @router.post("/clubs/{club_id}/join", response_model=MemberOut)
@@ -429,6 +490,7 @@ def list_join_requests(
             avatar_url=player.avatar_url,
             linked=player.line_user_id is not None,
             role=membership.role,
+            status=membership.status,
             wants_fixed_membership=membership.wants_fixed_membership,
         )
         for player, membership in rows

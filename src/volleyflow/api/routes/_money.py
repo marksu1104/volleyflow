@@ -12,6 +12,7 @@ from fastapi import (
     HTTPException,
     status,
 )
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from volleyflow.api.conversion import (
@@ -37,6 +38,7 @@ from volleyflow.db.models import (
     SeasonRow,
 )
 from volleyflow.ledger import EntryType
+from volleyflow.schedule import GameStatus
 from volleyflow.settlement import (
     MemberSettlement,
     season_shares,
@@ -231,6 +233,73 @@ def _sync_season_fee_ledger(db: Session, season_row: SeasonRow) -> None:
                 note=f"Season {season_row.id} fee reversed — no longer a member",
             )
         )
+
+
+def _sync_member_season_fee_ledger(
+    db: Session,
+    season_row: SeasonRow,
+    player_id: int,
+    *,
+    is_member: bool,
+) -> None:
+    """Correct one member's season-fee total after a roster add/remove.
+
+    Capacity is the fee denominator, so changing the roster does not move
+    anybody else's target. The former all-member sync loaded every player,
+    absence and drop-in even though only this one ledger can change; against
+    the remote database that made a simple +/− wait several seconds.
+    """
+    target = Decimal("0")
+    if is_member:
+        game_rows = (
+            db.query(GameRow)
+            .filter(GameRow.season_id == season_row.id)
+            .order_by(GameRow.date)
+            .all()
+        )
+        season = season_from_rows(season_row, game_rows, [])
+        shares = season_shares(season)
+        fee = sum(
+            (
+                shares[game.id]
+                for game in season.games
+                if game.status != GameStatus.CANCELLED_REFUNDED
+            ),
+            Decimal("0"),
+        )
+        target = -fee
+
+    already_charged = (
+        db.query(func.coalesce(func.sum(LedgerEntryRow.amount), Decimal("0")))
+        .filter(
+            LedgerEntryRow.player_id == player_id,
+            LedgerEntryRow.season_id == season_row.id,
+            LedgerEntryRow.entry_type == EntryType.SEASON_FEE_CHARGED,
+        )
+        .scalar()
+    )
+    adjustment = target - Decimal(already_charged or 0)
+    if adjustment == 0:
+        return
+    db.add(
+        LedgerEntryRow(
+            player_id=player_id,
+            club_id=season_row.club_id,
+            entry_type=EntryType.SEASON_FEE_CHARGED,
+            amount=adjustment,
+            recorded_at=_now(),
+            season_id=season_row.id,
+            note=(
+                f"Season {season_row.id} fee"
+                if is_member and already_charged == 0
+                else (
+                    f"Season {season_row.id} fee adjustment"
+                    if is_member
+                    else f"Season {season_row.id} fee reversed — no longer a member"
+                )
+            ),
+        )
+    )
 
 
 def _member_settlement_out(ms: MemberSettlement) -> MemberSettlementOut:

@@ -81,6 +81,13 @@ def test_the_organizer_sees_who_is_waiting_and_what_they_asked_for(
     assert [c["pending_count"] for c in mine] == [2]
     members = [m["name"] for m in client.get(f"/clubs/{club['id']}/members").json()]
     assert "想固定" not in members
+    combined = client.get(f"/clubs/{club['id']}/members?include=pending").json()
+    assert [(m["name"], m["status"]) for m in combined] == [
+        ("Test Organizer", "active"),
+        ("固定甲", "active"),
+        ("想固定", "pending"),
+        ("想臨打", "pending"),
+    ]
 
 
 def test_approving_lets_them_in(client: TestClient) -> None:
@@ -108,6 +115,28 @@ def test_approved_as_fixed_they_can_be_put_on_the_roster_and_charged(
     assert added.status_code == 200
     ledger = client.get(f"/clubs/{club['id']}/players/{person['id']}/ledger").json()
     assert any(e["entry_type"] == "season_fee_charged" for e in ledger["entries"])
+
+
+def test_adding_a_visitor_only_adds_them_to_the_club(client: TestClient) -> None:
+    club, season = _club(client)
+
+    added = client.post(
+        f"/clubs/{club['id']}/guests", json={"name": "訪客", "gender": "female"}
+    )
+
+    assert added.status_code == 200
+    visitor = added.json()
+    assert visitor["name"] == "訪客"
+    assert visitor["linked"] is False
+    assert visitor["gender"] == "female"
+    roster = client.get(f"/seasons/{season['id']}").json()["members"]
+    assert "訪客" not in [member["name"] for member in roster]
+    club_members = client.get(f"/clubs/{club['id']}/members").json()
+    assert "訪客" in [member["name"] for member in club_members]
+    ledger = client.get(f"/clubs/{club['id']}/players/{visitor['id']}/ledger").json()
+    assert not any(
+        entry["entry_type"] == "season_fee_charged" for entry in ledger["entries"]
+    )
 
 
 def test_turning_somebody_away_removes_the_request(client: TestClient) -> None:
@@ -143,6 +172,33 @@ def test_only_the_organizer_can_approve(client: TestClient) -> None:
     response = client.post(
         f"/clubs/{club['id']}/members/{waiting['id']}/approve",
         json={"as_fixed": False},
+        headers=member_headers,
+    )
+
+    assert response.status_code == 403
+
+
+def test_only_the_organizer_can_include_pending_members(client: TestClient) -> None:
+    club, _season = _club(client)
+    member, member_headers, _joined = _ask(client, club, "會員")
+    _approve(client, club, member["id"], fixed=False)
+    _ask(client, club, "新人")
+
+    response = client.get(
+        f"/clubs/{club['id']}/members?include=pending", headers=member_headers
+    )
+
+    assert response.status_code == 403
+
+
+def test_only_the_organizer_can_add_a_visitor(client: TestClient) -> None:
+    club, _season = _club(client)
+    member, member_headers, _joined = _ask(client, club, "會員")
+    _approve(client, club, member["id"], fixed=False)
+
+    response = client.post(
+        f"/clubs/{club['id']}/guests",
+        json={"name": "訪客"},
         headers=member_headers,
     )
 

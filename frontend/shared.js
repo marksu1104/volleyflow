@@ -415,6 +415,20 @@ function flashSeasonContent() {
   }
 }
 
+/** Shows that a club change is still finding that club's seasons. The
+ * wrapper is optional because member.html has only a season picker; the
+ * management pages opt in with .picker-control and a loading root.
+ */
+function setSeasonPickerLoading(seasonEl, loading) {
+  if (!seasonEl) return;
+  seasonEl.disabled = loading;
+  if (seasonEl.classList) seasonEl.classList.toggle("season-picker-loading", loading);
+  const control = seasonEl.closest && seasonEl.closest(".picker-control");
+  if (control) control.classList.toggle("is-loading", loading);
+  const root = seasonEl.closest && seasonEl.closest("[data-picker-loading-root]");
+  if (root) root.classList.toggle("is-picker-loading", loading);
+}
+
 /**
  * Wires the club <select> and season <select> together: picking a club
  * reloads that club's seasons, picking a season calls onSeasonChange
@@ -445,6 +459,7 @@ async function initClubAndSeasonPickers(
   clubFilter,
   knownClubs
 ) {
+  let seasonLoad = 0;
   // Without this, a failed fetch (offline, CORS, a backend that never
   // woke up) rejected an un-awaited promise and the page just sat there
   // blank forever with nothing said. Now the caller gets to show the
@@ -514,12 +529,22 @@ async function initClubAndSeasonPickers(
   }
   rememberId(CLUB_STORAGE_KEY, clubEl.value);
 
-  async function loadSeasons() {
-    await getJsonSWR(
-      `${apiBase}/clubs/${clubEl.value}/seasons`,
-      (seasons) => applySeasons(seasons),
-      { headers: authHeader() }
-    );
+  async function loadSeasons(showLoading) {
+    const clubId = String(clubEl.value);
+    const ticket = ++seasonLoad;
+    if (showLoading) setSeasonPickerLoading(seasonEl, true);
+    try {
+      await getJsonSWR(
+        `${apiBase}/clubs/${clubId}/seasons`,
+        (seasons) => {
+          if (ticket !== seasonLoad || String(clubEl.value) !== clubId) return;
+          applySeasons(seasons);
+        },
+        { headers: authHeader() }
+      );
+    } finally {
+      if (ticket === seasonLoad) setSeasonPickerLoading(seasonEl, false);
+    }
   }
 
   function applySeasons(seasons) {
@@ -559,10 +584,13 @@ async function initClubAndSeasonPickers(
 
   clubEl.onchange = () => {
     rememberId(CLUB_STORAGE_KEY, clubEl.value);
-    loadSeasons();
+    loadSeasons(true).catch((e) => {
+      console.error("Could not load seasons:", e);
+      if (onError) onError(e);
+    });
   };
 
-  await loadSeasons();
+  await loadSeasons(false);
   }
 }
 
@@ -785,6 +813,93 @@ const TAB_ORDER = [
   { key: "queued", label: "候補" },
 ];
 
+/** Two-stage visual cue for a roster movement.
+ *
+ * The game sheet deliberately keeps the group the person chose instead
+ * of jumping to another tab after every write. That stability had an
+ * unintended cost: marking someone absent while looking at 出席 only
+ * made their row vanish, and the destination was easy to miss. Store one
+ * pending cue on the long-lived container; the first render moves the
+ * row and keeps the destination visibly busy. The server answer paints a
+ * separate completion cue in the same frame as the success message.
+ * Each paint is consumed once so unrelated renders never replay an old
+ * animation. */
+const _gameDetailChanges = new WeakMap();
+const _activeGameDetailChanges = new WeakMap();
+let _gameDetailChangeSequence = 0;
+
+function rosterChangeSurface(container) {
+  if (typeof document === "undefined") return null;
+  return document.getElementById("hero-wrap") || container;
+}
+
+function setRosterChangeSurfacePhase(container, phase, token) {
+  const surface = rosterChangeSurface(container);
+  if (!surface || !surface.classList) return;
+  surface.classList.remove("roster-surface-pending", "roster-surface-complete");
+  if (!phase) {
+    delete surface.dataset.rosterChangeToken;
+    return;
+  }
+  surface.dataset.rosterChangeToken = String(token);
+  surface.classList.add(`roster-surface-${phase}`);
+  if (phase === "complete") {
+    setTimeout(() => {
+      if (surface.dataset.rosterChangeToken !== String(token)) return;
+      surface.classList.remove("roster-surface-complete");
+      delete surface.dataset.rosterChangeToken;
+    }, 700);
+  }
+}
+
+/** Starts, or refines, one visible roster movement.
+ *
+ * The returned token ties the eventual server answer to this exact tap.
+ * If somebody taps 請假 and then 取消請假 before the first response
+ * arrives, completion of the older request must not overwrite the newer
+ * action's pending cue. Passing the token back while reconciling lets a
+ * server-discovered promotion refine the same movement instead of
+ * starting another one. */
+function markGameDetailChange(container, tab, names, token) {
+  if (!container || !TAB_ORDER.some((item) => item.key === tab)) return;
+  const active = _activeGameDetailChanges.get(container);
+  const changeToken = token && active && active.token === token
+    ? token
+    : ++_gameDetailChangeSequence;
+  const change = {
+    token: changeToken,
+    tab,
+    names: new Set((names || []).filter(Boolean)),
+    phase: "pending",
+  };
+  _activeGameDetailChanges.set(container, change);
+  _gameDetailChanges.set(container, change);
+  setRosterChangeSurfacePhase(container, "pending", changeToken);
+  return changeToken;
+}
+
+/** Turns the latest pending movement into the completion cue that is
+ * painted in the same frame as its success message. Stale responses are
+ * deliberately ignored; a newer tap owns the screen. */
+function completeGameDetailChange(container, token) {
+  const active = container && _activeGameDetailChanges.get(container);
+  if (!active || active.token !== token) return false;
+  const change = { ...active, phase: "complete" };
+  _activeGameDetailChanges.delete(container);
+  _gameDetailChanges.set(container, change);
+  setRosterChangeSurfacePhase(container, "complete", token);
+  return true;
+}
+
+function clearGameDetailChange(container, token) {
+  const active = container && _activeGameDetailChanges.get(container);
+  if (!active || active.token !== token) return false;
+  _activeGameDetailChanges.delete(container);
+  _gameDetailChanges.delete(container);
+  setRosterChangeSurfacePhase(container, null, token);
+  return true;
+}
+
 /** An empty group says so in its own words. A blank panel reads as a
  * page that failed to load — that has been reported twice. */
 function emptyPanel(text) {
@@ -943,6 +1058,145 @@ function removeDropInLocally(season, dropInId) {
   }
 }
 
+/** Applies the server-confirmed result of naming a substitute without
+ * paying for another full season read before the list can move.
+ *
+ * The response contains the new signup id and, when the court was full,
+ * who went back to the queue. That is enough to draw the consequential
+ * parts immediately. A quiet refresh may still follow to recover an old
+ * substitute's historic queue position, which is intentionally not
+ * exposed by the write response. */
+function applySubstituteLocally(
+  season,
+  gameId,
+  absenceId,
+  result,
+  { name, gender }
+) {
+  const game = season.games.find((item) => item.id === gameId);
+  if (!game) return { displacedName: null };
+  const absence = game.absences.find((item) => item.id === absenceId);
+  if (!absence) return { displacedName: null };
+
+  game.confirmed_drop_ins = game.confirmed_drop_ins.filter(
+    (dropIn) => dropIn.covering !== absence.player_name
+  );
+
+  let displaced = null;
+  if (result && result.displaced_player_id) {
+    displaced = game.confirmed_drop_ins.find(
+      (dropIn) => dropIn.player_id === result.displaced_player_id
+    );
+    if (displaced) {
+      game.confirmed_drop_ins = game.confirmed_drop_ins.filter(
+        (dropIn) => dropIn !== displaced
+      );
+      game.waitlist_entries.unshift({
+        id: -1,
+        player_id: displaced.player_id,
+        player_name: displaced.player_name,
+        gender: displaced.gender || null,
+        signed_up_by_me: displaced.signed_up_by_me === true,
+      });
+    }
+  }
+
+  const queued = game.waitlist_entries.find(
+    (entry) =>
+      (result && entry.player_id === result.player_id) || entry.player_name === name
+  );
+  game.waitlist_entries = game.waitlist_entries.filter((entry) => entry !== queued);
+  game.confirmed_drop_ins.push({
+    id: result.id,
+    player_id: result.player_id,
+    player_name: name,
+    gender: gender || (queued && queued.gender) || null,
+    covering: absence.player_name,
+    linked: queued ? queued.linked : false,
+    signed_up_by_me: true,
+  });
+  absence.covered_by = name;
+  absence.filled_by = name;
+  return { displacedName: displaced ? displaced.player_name : null };
+}
+
+/** Draws an organizer's deliberate queue promotion immediately after
+ * the write succeeds. On a full court the named replacement moves to
+ * the queue in the same frame, so the list never briefly shows nineteen
+ * people or makes one person disappear. */
+function promoteWaitlistLocally(season, gameId, entryId, replacingDropInId, result) {
+  const game = season.games.find((item) => item.id === gameId);
+  if (!game) return null;
+  const entry = game.waitlist_entries.find((item) => item.id === entryId);
+  if (!entry) return null;
+
+  game.waitlist_entries = game.waitlist_entries.filter((item) => item !== entry);
+  let replaced = null;
+  if (replacingDropInId) {
+    replaced = game.confirmed_drop_ins.find((item) => item.id === replacingDropInId);
+    game.confirmed_drop_ins = game.confirmed_drop_ins.filter(
+      (item) => item.id !== replacingDropInId
+    );
+    if (replaced) {
+      game.waitlist_entries.unshift({
+        id: -1,
+        player_id: replaced.player_id,
+        player_name: replaced.player_name,
+        gender: replaced.gender || null,
+        signed_up_by_me: replaced.signed_up_by_me === true,
+      });
+    }
+  }
+
+  game.confirmed_drop_ins.push({
+    id: result.drop_in_id,
+    player_id: result.player_id,
+    player_name: entry.player_name,
+    gender: entry.gender || null,
+    covering: null,
+    linked: entry.linked,
+    signed_up_by_me: entry.signed_up_by_me === true,
+  });
+  return { promoted: entry.player_name, replaced: replaced && replaced.player_name };
+}
+
+/** Applies the player id returned by an automatic FIFO promotion.
+ *
+ * Cancelling a signup frees a slot. The server answers with the player
+ * who took it, but not the new drop-in row id, so the local row keeps a
+ * placeholder until the quiet refresh supplies that id. The important
+ * part for the person watching is immediate: the vacancy and the
+ * promoted row appear as one completed roster change.
+ *
+ * `fallback` covers the special case where a substitute originally came
+ * from the queue. Cancelling the substitution gives that place back and
+ * the same person may immediately be first in line again.
+ */
+function applyAutomaticPromotionLocally(season, gameId, playerId, fallback) {
+  if (!playerId) return null;
+  const game = season.games.find((item) => item.id === gameId);
+  if (!game) return null;
+  const queued = game.waitlist_entries.find((item) => item.player_id === playerId);
+  const person = queued || (fallback && fallback.player_id === playerId ? fallback : null);
+  if (!person) return null;
+
+  if (queued) {
+    game.waitlist_entries = game.waitlist_entries.filter((item) => item !== queued);
+  }
+  if (!game.confirmed_drop_ins.some((item) => item.player_id === playerId)) {
+    game.confirmed_drop_ins.push({
+      id: -1,
+      player_id: playerId,
+      player_name: person.player_name,
+      gender: person.gender || null,
+      covering: null,
+      linked: person.linked,
+      signed_up_by_me: person.signed_up_by_me === true,
+    });
+  }
+  return person.player_name;
+}
+
 /** One panel for choosing a person, wherever a person has to be chosen.
  *
  * Both places that pick somebody — naming a 代打 and adding people to a
@@ -1075,6 +1329,8 @@ const GAME_SHEET_ACTIONS = [
 ];
 
 function renderGameDetail(container, season, game, options) {
+  const change = _gameDetailChanges.get(container) || null;
+  _gameDetailChanges.delete(container);
   const given = options || {};
   // A settled season is closed to everybody, the organizer included, and
   // the server refuses every one of these (_require_season_open). The
@@ -1209,7 +1465,7 @@ function renderGameDetail(container, season, game, options) {
    * width and adds no height, so a row with nothing to say is the same
    * shape as a row with plenty.
    */
-  function rosterRow({ num, person, name, tone, note, controls, guest = true }) {
+  function rosterRow({ num, person, name, tone, note, controls, guest = true, changed = false }) {
     // The note (代打 / 臨打 / 缺額 / 候補) goes *inside* the name, as an
     // inline element, and that placement is the whole fix.
     //
@@ -1225,7 +1481,9 @@ function renderGameDetail(container, season, game, options) {
     // inner att-who: with the truncation on the whole thing, a long name
     // ate the 代打 note beside it and left a blank pill.
     return `
-      <div class="att-row${tone ? " " + tone : ""}">
+      <div class="att-row${tone ? " " + tone : ""}${
+        changed ? ` just-changed roster-change-${changed}${changed === "pending" ? " roster-row-entering" : ""}` : ""
+      }">
         <span class="att-num">${num}</span>
         <span class="avatar sm">${initial(name)}</span>
         <span class="att-name"><span class="att-who">${escapeHtml(name)}</span>${genderTag(
@@ -1247,6 +1505,10 @@ function renderGameDetail(container, season, game, options) {
       name: m.name,
       tone: "",
       note: "",
+      changed:
+        change && change.tab === "attending" && change.names.has(m.name)
+          ? change.phase
+          : false,
       controls: canEdit
         ? `<button type="button" class="mini-action" data-mark-absent="${escapeHtml(m.name)}">請假</button>`
         : "",
@@ -1262,6 +1524,10 @@ function renderGameDetail(container, season, game, options) {
       person: d,
       name: d.player_name,
       tone: "dropin",
+      changed:
+        change && change.tab === "attending" && change.names.has(d.player_name)
+          ? change.phase
+          : false,
       note: d.covering
         ? `<span class="att-note sub">代 ${escapeHtml(d.covering)}</span>`
         : '<span class="att-note">臨打</span>',
@@ -1306,6 +1572,10 @@ function renderGameDetail(container, season, game, options) {
         person: season.members.find((m) => m.name === absence.player_name),
         name: absence.player_name,
         tone: "absent",
+        changed:
+          change && change.tab === "absent" && change.names.has(absence.player_name)
+            ? change.phase
+            : false,
         // The 訪客 tag says "can't record their own absence" — which is
         // moot on the list of people who are already absent, and it was
         // the content that pushed this row past the width of a phone.
@@ -1366,6 +1636,10 @@ function renderGameDetail(container, season, game, options) {
         person: w,
         name: w.player_name + (viewerName && w.player_name === viewerName ? "（你）" : ""),
         tone: "queued" + (viewerName && w.player_name === viewerName ? " me" : ""),
+        changed:
+          change && change.tab === "queued" && change.names.has(w.player_name)
+            ? change.phase
+            : false,
         note: '<span class="att-note">候補</span>',
         // 遞補 first: the organizer opens this sheet to put somebody on
         // the court far more often than to strike them off, and the
@@ -1453,7 +1727,15 @@ function renderGameDetail(container, season, game, options) {
       ${TAB_ORDER.map(
         (t) => `<button type="button" role="tab" class="gd-tab${
           t.key === activeTab ? " active" : ""
-        }" data-gd-tab="${t.key}" aria-selected="${t.key === activeTab}">${
+        }${
+          change && t.key === change.tab
+            ? ` just-changed roster-change-${change.phase}`
+            : ""
+        }" data-gd-tab="${t.key}" aria-selected="${t.key === activeTab}"${
+          change && t.key === change.tab && change.phase === "pending"
+            ? ' aria-busy="true"'
+            : ""
+        }>${
           t.label
         } <b>${counts[t.key]}</b></button>`
       ).join("")}
@@ -1806,34 +2088,6 @@ async function whileBusy(el, action) {
     return await action();
   } finally {
     done();
-  }
-}
-
-/** Runs something that has to wait on the network, with the control
- * saying so and refusing further taps until it is done.
- *
- * A spinner rather than swapped-out words: the label is what tells you
- * which button you pressed, and replacing it with "處理中…" takes that
- * away at the exact moment you are waiting to find out. The label
- * dims, a spinner appears beside it, and the button is disabled — so a
- * second tap cannot land, which is what produced duplicate requests and
- * stale-id errors before.
- *
- * Restores the button whatever happens, including on failure, because a
- * control stuck spinning forever is worse than the error it is hiding.
- * Anything the screen can show immediately should be optimistic instead
- * — this is for the rest.
- */
-async function whileBusy(el, action) {
-  if (!el || !el.classList) return action();
-  if (el.classList.contains("is-busy")) return undefined;
-  el.classList.add("is-busy");
-  if ("disabled" in el) el.disabled = true;
-  try {
-    return await action();
-  } finally {
-    el.classList.remove("is-busy");
-    if ("disabled" in el) el.disabled = false;
   }
 }
 
@@ -2235,8 +2489,12 @@ const _API_ERROR_PATTERNS = [
 
   // Capacity and the roster.
   [
-    /^No room for another member: (.+) already \d+ on court\. Cancel a signup on those games, or raise the capacity first\.$/,
-    (m) => `人數已滿：${m[1]}已經額滿。請先取消一場的報名，或調高人數上限`,
+    /^No room for another member: (.+) already \d+ on court\. Mark somebody absent or cancel a drop-in on those games first\.$/,
+    (m) => `無法加入固定名單：${m[1]}已經額滿。請先將一位固定成員設為請假，或移除該場臨打`,
+  ],
+  [
+    /^No room for another member on (.+), and there is no drop-in to move back to the waitlist\.$/,
+    (m) => `無法加入固定名單：${m[1]} 已額滿，且沒有可以移回候補的臨打`,
   ],
   [
     /^(\d+) fixed members is more than the capacity of (\d+)$/,
@@ -2324,7 +2582,10 @@ async function postJson(apiBase, path, body, method) {
   // marker beside it covers the optimistic actions, whose button is gone
   // before markBusy can reach it — see beginPendingWrite.
   const done = markBusy(_pressed);
-  const settled = beginPendingWrite();
+  // Identity resolution is a POST because it carries the LINE token, not
+  // because the visitor changed anything. Showing "儲存中…" while merely
+  // opening or refreshing a page makes a passive read look like a write.
+  const settled = identifiesOnly(path) ? () => {} : beginPendingWrite();
   let res;
   let data;
   try {

@@ -80,6 +80,30 @@ is the organizer's shortfall. Capacity is therefore a billing figure as
 much as a roster limit, and worth setting to the number the club
 actually expects on court.
 
+### Correcting the fixed roster after the season starts
+
+An organizer may correct an open season's fixed roster, up to its
+`capacity`. Adding somebody charges that person's full billable season;
+removing somebody reverses only that person's season fee. Neither action
+re-prices the other fixed members.
+
+A correction must not rewrite who could physically have been on court:
+
+- If an already-played game was full and the added person did not already
+  occupy a drop-in slot, the correction records that person as absent for
+  that game. The normal coverage rule then decides whether that absence
+  earns a refund.
+- Fixed members have priority on today and future games. If adding one
+  would overfill a game, the most recently confirmed drop-in is moved
+  back to the waitlist at their original signup time and their drop-in
+  fee is reversed. A player who already occupies a drop-in slot on that
+  game adds no new body; that drop-in is absorbed into their fixed
+  membership instead, so nobody else is displaced.
+
+This distinction lets the organizer finish a roster correction after one
+night has already happened without allowing a later game to exceed the
+hard court limit or silently deleting a drop-in's place in line.
+
 ### Air conditioning
 
 Games do not all cost the same. A night with the air conditioning on

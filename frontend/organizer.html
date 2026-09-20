@@ -34,9 +34,18 @@
     <a href="organizer-settings.html" class="org-nav-link">設定</a>
   </nav>
 
-  <div class="picker-row">
-    <select id="club-picker" class="season-picker club-picker" hidden></select>
-    <select id="season-picker" class="season-picker" hidden></select>
+  <div class="picker-row picker-row-labeled">
+    <div id="club-picker-field" class="picker-field" hidden>
+      <label for="club-picker">球隊</label>
+      <select id="club-picker" class="season-picker club-picker" hidden></select>
+    </div>
+    <div id="season-picker-field" class="picker-field" hidden>
+      <label for="season-picker">季別</label>
+      <span class="picker-control">
+        <select id="season-picker" class="season-picker" hidden></select>
+        <i class="spinner sm picker-spinner" aria-hidden="true"></i>
+      </span>
+    </div>
   </div>
   <div id="error"></div>
   <button type="button" class="todo-line" id="todo-line" hidden onclick="openTodos()">
@@ -116,7 +125,11 @@
       "vf_org_season",
       (id) => {
         stopLoadingEscalation();
-        document.getElementById("club-picker").hidden = !currentClubId();
+        const hasClub = !!currentClubId();
+        document.getElementById("club-picker-field").hidden = !hasClub;
+        document.getElementById("club-picker").hidden = !hasClub;
+        document.getElementById("season-picker-field").hidden = !id;
+        document.getElementById("season-picker").hidden = !id;
         if (id) loadDashboard(id);
         else renderNoSeason();
       },
@@ -133,6 +146,7 @@
     document.getElementById("season-meta").innerHTML = "";
     document.getElementById("meta-label").hidden = true;
     document.getElementById("month-cal").hidden = true;
+    document.getElementById("season-picker-field").hidden = true;
     document.getElementById("season-picker").hidden = true;
     document.getElementById("hero-wrap").innerHTML = currentClubId()
       ? emptyStateHtml(
@@ -183,6 +197,7 @@
         selectedGameId = upcoming ? upcoming.id : null;
       }
 
+      document.getElementById("season-picker-field").hidden = false;
       document.getElementById("season-picker").hidden = false;
       document.getElementById("meta-label").hidden = false;
       document.getElementById("month-cal").hidden = false;
@@ -509,15 +524,39 @@
   gameSheetBackdrop.addEventListener("click", (e) => {
     if (e.target === gameSheetBackdrop) closeGameSheet();
   });
-  document.querySelector(".gsheet-close").addEventListener("click", closeGameSheet);
+  // This page has more than one bottom sheet. Scoping the close button to
+  // the game sheet prevents the first sheet's ✕ from stealing this handler.
+  gameSheetBackdrop.querySelector(".gsheet-close").addEventListener("click", closeGameSheet);
+
+  function repaintRosterChange() {
+    renderHero(currentSeason);
+    renderCalendar();
+    renderSelectedGameDetail();
+  }
+
+  function settleRosterChange(token, succeeded) {
+    const detail = document.getElementById("game-detail");
+    const changed = succeeded
+      ? completeGameDetailChange(detail, token)
+      : clearGameDetailChange(detail, token);
+    if (changed) repaintRosterChange();
+  }
 
   async function assignSubstitute(absenceId, name, gender, target) {
     return whileBusy(target, async () => {
+    let changeToken = null;
     try {
       // See member.html: the id has to be turned into a name before the
       // reload takes that person off the roster.
       const game = currentSeason.games.find((g) => g.id === selectedGameId) || {};
       const playingBefore = game.confirmed_drop_ins || [];
+      const absence = (game.absences || []).find((a) => a.id === absenceId);
+      changeToken = markGameDetailChange(
+        document.getElementById("game-detail"),
+        "absent",
+        absence ? [absence.player_name] : []
+      );
+      repaintRosterChange();
       const result = await postJson(
         API_BASE,
         `/absences/${absenceId}/substitute`,
@@ -525,9 +564,15 @@
         "PUT"
       );
       const bumped = playingBefore.find((d) => d.player_id === result.displaced_player_id);
-      toast(bumped ? `${name} 上場，${bumped.player_name} 回到候補` : `已指定 ${name} 代打`);
-      await loadDashboard(currentSeason.id);
+      applySubstituteLocally(currentSeason, selectedGameId, absenceId, result, { name, gender });
+      settleRosterChange(changeToken, true);
+      toast(
+        bumped ? `${name} 上場，${bumped.player_name} 回到候補` : `已指定 ${name} 代打`,
+        "good"
+      );
+      refreshQuietly();
     } catch (e) {
+      settleRosterChange(changeToken, false);
       toast("設定代打失敗：" + e.message);
     }
     });
@@ -543,11 +588,7 @@
     setState: (s) => {
       currentSeason = s;
     },
-    repaint: () => {
-      renderHero(currentSeason);
-      renderCalendar();
-      renderSelectedGameDetail();
-    },
+    repaint: () => repaintRosterChange(),
   });
 
   /** Queued behind every pending write and collapsed to one — see
@@ -568,13 +609,37 @@
     const gameId = selectedGameId;
     const key = absenceKey(gameId, playerName);
     let announceId;
+    let promotedName = null;
+    let changeToken = null;
     pendingAbsenceId[key] = new Promise((resolve) => {
       announceId = resolve;
     });
     const result = await optimistically(
       (season) => {
         const game = season.games.find((g) => g.id === gameId);
-        game.absences.push({ id: -1, player_name: playerName, covered_by: null });
+        const promoted = game.waitlist_entries.shift() || null;
+        promotedName = promoted ? promoted.player_name : null;
+        if (promoted) {
+          game.confirmed_drop_ins.push({
+            id: -1,
+            player_id: promoted.player_id || -1,
+            player_name: promoted.player_name,
+            gender: promoted.gender || null,
+            covering: null,
+            signed_up_by_me: promoted.signed_up_by_me === true,
+          });
+        }
+        game.absences.push({
+          id: -1,
+          player_name: playerName,
+          covered_by: null,
+          filled_by: promotedName,
+        });
+        changeToken = markGameDetailChange(
+          document.getElementById("game-detail"),
+          "absent",
+          [playerName]
+        );
       },
       async () => {
         const created = await postJson(API_BASE, "/absences", {
@@ -596,9 +661,21 @@
       announceId(null);
       delete pendingAbsenceId[key];
     }
+    settleRosterChange(changeToken, !!result);
+    if (result) {
+      toast(
+        result.promoted_from_waitlist && promotedName
+          ? `已替 ${playerName} 請假；${promotedName} 已由候補遞補`
+          : `已替 ${playerName} 請假`,
+        "good"
+      );
+    }
     // Only when somebody was promoted off the queue — see
     // needsRefreshAfter. Otherwise the screen already matches the server.
-    if (needsRefreshAfter(result)) refreshQuietly();
+    if (
+      needsRefreshAfter(result) ||
+      Boolean(promotedName) !== Boolean(result && result.promoted_from_waitlist)
+    ) refreshQuietly();
   }
 
   async function cancelAbsenceFor(absenceId, btn) {
@@ -606,11 +683,31 @@
     const game = currentSeason.games.find((g) => g.id === gameId);
     const row = (game.absences || []).find((a) => a.id === absenceId);
     const playerName = row ? row.player_name : null;
+    const releasedName = row && (row.covered_by || row.filled_by);
+    let changeToken = null;
     const result = await optimistically(
       (season) => {
         for (const g of season.games) {
+          const released = releasedName
+            ? g.confirmed_drop_ins.find((d) => d.player_name === releasedName)
+            : null;
+          if (released) {
+            g.confirmed_drop_ins = g.confirmed_drop_ins.filter((d) => d !== released);
+            g.waitlist_entries.unshift({
+              id: -1,
+              player_id: released.player_id,
+              player_name: released.player_name,
+              gender: released.gender || null,
+              signed_up_by_me: released.signed_up_by_me === true,
+            });
+          }
           g.absences = g.absences.filter((a) => a.id !== absenceId);
         }
+        changeToken = markGameDetailChange(
+          document.getElementById("game-detail"),
+          "attending",
+          playerName ? [playerName] : []
+        );
       },
       async () => {
         let id = absenceId;
@@ -623,24 +720,54 @@
       },
       "取消請假失敗："
     );
+    settleRosterChange(changeToken, !!result);
+    if (result) {
+      toast(
+        result.released_player_id && releasedName
+          ? `已取消 ${playerName} 的請假；${releasedName} 已回到候補`
+          : `已取消 ${playerName} 的請假`,
+        "good"
+      );
+    }
     // Only when somebody was actually released back to the queue — see
     // needsRefreshAfter.
-    if (needsRefreshAfter(result)) refreshQuietly();
+    if (
+      needsRefreshAfter(result) ||
+      Boolean(releasedName) !== Boolean(result && result.released_player_id)
+    ) refreshQuietly();
   }
 
   async function addDropIn(name, gender, btn) {
     const gameId = selectedGameId;
-    await optimistically(
+    let predictedStatus = null;
+    let changeToken = null;
+    const result = await optimistically(
       (season) => {
         const game = season.games.find((g) => g.id === gameId);
-        game.confirmed_drop_ins.push({
-          id: -1,
-          player_id: -1,
-          player_name: name,
-          gender: gender || null,
-          covering: null,
-          linked: false,
-        });
+        predictedStatus = isGameFull(season, game) ? "waitlisted" : "confirmed";
+        if (predictedStatus === "confirmed") {
+          game.confirmed_drop_ins.push({
+            id: -1,
+            player_id: -1,
+            player_name: name,
+            gender: gender || null,
+            covering: null,
+            linked: false,
+          });
+        } else {
+          game.waitlist_entries.push({
+            id: -1,
+            player_id: -1,
+            player_name: name,
+            gender: gender || null,
+            signed_up_by_me: true,
+          });
+        }
+        changeToken = markGameDetailChange(
+          document.getElementById("game-detail"),
+          predictedStatus === "confirmed" ? "attending" : "queued",
+          [name]
+        );
       },
       async () => {
         const created = await postJson(API_BASE, "/drop-ins", {
@@ -658,22 +785,30 @@
       },
       "新增臨打失敗：",
       (created, season) => {
-        // Waitlisted rather than confirmed: the optimistic row is in the
-        // wrong list entirely, so let the refresh redraw it.
-        if (created.status !== "confirmed") return;
-        for (const game of season.games) {
-          for (const d of game.confirmed_drop_ins) {
-            if (d.id === -1) {
-              d.id = created.id;
-              d.player_id = created.player_id;
-            }
-          }
+        if (created.status !== predictedStatus) return;
+        const game = season.games.find((g) => g.id === gameId);
+        const rows = created.status === "confirmed"
+          ? game.confirmed_drop_ins
+          : game.waitlist_entries;
+        const row = rows.find((item) => item.id === -1 && item.player_name === name);
+        if (row) {
+          row.id = created.id;
+          row.player_id = created.player_id;
         }
       }
     );
+    settleRosterChange(changeToken, !!result);
     const input = document.querySelector("[data-new-dropin]");
     if (input) input.value = "";
-    refreshQuietly();
+    if (result) {
+      toast(
+        result.status === "confirmed"
+          ? `${name} 已加入出席名單`
+          : `${name} 已加入候補名單`,
+        "good"
+      );
+    }
+    if (!result || result.status !== predictedStatus) refreshQuietly();
   }
 
   /** Removing someone from the queue. Its own endpoint because a queue
@@ -681,16 +816,27 @@
    * sequences overlap — see routes.leave_waitlist. */
   async function leaveWaitlistFor(entryId, btn) {
     if (entryId < 0) return;
-    await optimistically(
+    const game = currentSeason.games.find((item) =>
+      item.waitlist_entries.some((entry) => entry.id === entryId)
+    );
+    const leaving = game && game.waitlist_entries.find((entry) => entry.id === entryId);
+    let changeToken = null;
+    const result = await optimistically(
       (season) => {
         for (const g of season.games) {
           g.waitlist_entries = g.waitlist_entries.filter((w) => w.id !== entryId);
         }
+        changeToken = markGameDetailChange(
+          document.getElementById("game-detail"),
+          "queued",
+          []
+        );
       },
       () => postJson(API_BASE, `/waitlist/${entryId}/cancel`, {}),
       "移除候補失敗："
     );
-    refreshQuietly();
+    settleRosterChange(changeToken, !!result);
+    if (result) toast(`已將 ${leaving ? leaving.player_name : "這位成員"} 移出候補`, "good");
   }
 
   /** Putting a queued person on the court, in the order you decide
@@ -716,34 +862,100 @@
       return;
     }
 
-    // The target is a button when there was room, and a row of the swap
-    // picker when there wasn't; whileBusy handles either.
-    const send = () =>
-      postJson(API_BASE, `/waitlist/${entryId}/promote`, {
+    let changeToken = null;
+    const result = await optimistically(
+      (season) => {
+        // The response ids arrive below. Move with placeholders now so
+        // a deliberate swap reads as one action, not one row vanishing
+        // and another appearing after a reload.
+        promoteWaitlistLocally(
+          season,
+          game.id,
+          entryId,
+          replacing ? replacing.id : null,
+          { player_id: entry.player_id || -1, drop_in_id: -1 }
+        );
+        changeToken = markGameDetailChange(
+          document.getElementById("game-detail"),
+          "attending",
+          [entry.player_name]
+        );
+      },
+      () => postJson(API_BASE, `/waitlist/${entryId}/promote`, {
         replacing_drop_in_id: replacing ? replacing.id : null,
-      });
-    try {
-      await whileBusy(target, send);
+      }),
+      "遞補失敗：",
+      (answer, season) => {
+        const current = season.games
+          .find((item) => item.id === game.id)
+          ?.confirmed_drop_ins.find((item) => item.id === -1 && item.player_name === entry.player_name);
+        if (current) {
+          current.id = answer.drop_in_id;
+          current.player_id = answer.player_id;
+        }
+      }
+    );
+    settleRosterChange(changeToken, !!result);
+    if (result) {
       toast(
         replacing
           ? `${entry.player_name} 上場，${replacing.player_name} 回到候補`
-          : `${entry.player_name} 已遞補上場`
+          : `${entry.player_name} 已遞補上場`,
+        "good"
       );
-      await loadDashboard(currentSeason.id);
-    } catch (e) {
-      toast("遞補失敗：" + e.message);
+      if (replacing) refreshQuietly();
     }
   }
 
   async function cancelSubstitute(dropInId, btn) {
     if (dropInId < 0) return; // still saving; the real id isn't known yet
+    const game = currentSeason.games.find((item) =>
+      item.confirmed_drop_ins.some((dropIn) => dropIn.id === dropInId)
+    );
+    const leaving = game && game.confirmed_drop_ins.find((dropIn) => dropIn.id === dropInId);
+    let promotedName = null;
+    let changeToken = null;
     const result = await optimistically(
       // Clears the absence row that named them too — see
       // removeDropInLocally.
-      (season) => removeDropInLocally(season, dropInId),
+      (season) => {
+        removeDropInLocally(season, dropInId);
+        changeToken = markGameDetailChange(
+          document.getElementById("game-detail"),
+          "attending",
+          []
+        );
+      },
       () => postJson(API_BASE, `/drop-ins/${dropInId}/cancel`, {}),
-      "移除失敗："
+      "移除失敗：",
+      (answer, season) => {
+        promotedName = applyAutomaticPromotionLocally(
+          season,
+          game && game.id,
+          answer.promoted_from_waitlist,
+          leaving
+        );
+        if (promotedName) {
+          changeToken = markGameDetailChange(
+            document.getElementById("game-detail"),
+            "attending",
+            [promotedName],
+            changeToken
+          );
+        }
+      }
     );
+    settleRosterChange(changeToken, !!result);
+    if (result) {
+      toast(
+        promotedName
+          ? `已移除 ${leaving ? leaving.player_name : "臨打"}；${promotedName} 已遞補`
+          : result.promoted_from_waitlist
+            ? `已移除 ${leaving ? leaving.player_name : "臨打"}；候補名單已遞補`
+            : `已移除 ${leaving ? leaving.player_name : "臨打"}`,
+        "good"
+      );
+    }
     // The freed slot is offered to the queue, and the answer says
     // whether anyone took it — see needsRefreshAfter.
     if (needsRefreshAfter(result)) refreshQuietly();

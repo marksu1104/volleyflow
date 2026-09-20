@@ -3,7 +3,7 @@
 // Every menu entry opens member.html with a parameter rather than a
 // path, because a liff.line.me link forwards query params to the LIFF
 // endpoint while a path depends on how that endpoint is configured. That
-// makes ?open= the whole contract between the menu and the app — and
+// makes ?open= / ?pick= the contract between the menu and the app — and
 // nothing else checks it: smoke and memberweek both load member.html
 // bare, so the handler could rot into a dead button and every existing
 // check would still pass.
@@ -93,18 +93,23 @@ const open = (page, query) =>
       ...(reportPage.button.includes("送出") ? [] : [`按鈕寫的是「${reportPage.button}」`]),
     ]);
 
-    // 場次與報名 — the plain link. Nothing should open over the top of
-    // it, which is what the first menu entry relies on.
-    await open(page, "");
-    await page.waitForSelector("#month-cal:not([hidden])", { timeout: 25000 });
-    await page.waitForTimeout(800);
-    const bare = await page.evaluate(() => ({
+    // 場次與報名 — from the rich menu this is ?pick=1, so somebody
+    // with several clubs may deliberately choose rather than being sent
+    // to the one remembered on this device. The parameter is one-shot:
+    // refreshing after choosing must not ask again.
+    await open(page, "&pick=1");
+    await page.waitForSelector("[data-pick-club]", { timeout: 25000 });
+    const picker = await page.evaluate(() => ({
+      count: document.querySelectorAll("[data-pick-club]").length,
+      url: location.search,
       ledgerOpen: !document.getElementById("ledger-backdrop").hidden,
       signupOpen: !document.getElementById("signup-backdrop").hidden,
     }));
-    report("沒有參數就只是會員頁，不會彈出東西", [
-      ...(bare.ledgerOpen ? ["帳務面板自己打開了"] : []),
-      ...(bare.signupOpen ? ["報名面板自己打開了"] : []),
+    report("?pick=1 顯示球隊選擇，不會彈出其他面板", [
+      ...(picker.count > 1 ? [] : [`只顯示 ${picker.count} 個球隊`]),
+      ...(picker.url.includes("pick=") ? [`網址還留著參數：${picker.url}`] : []),
+      ...(picker.ledgerOpen ? ["帳務面板自己打開了"] : []),
+      ...(picker.signupOpen ? ["報名面板自己打開了"] : []),
       ...errors,
     ]);
   } finally {

@@ -657,27 +657,22 @@ def cancel_drop_in(
     drop_in.cancelled_at = _now()
     _record_drop_in_charge(db, drop_in, season, reverse=True)
 
-    # A place in the queue is given up, not lost. Somebody taken off the
-    # court by another person — a member cancelling the 代打 they
-    # arranged, the organizer clearing a row — never said they couldn't
-    # come, so if they had a place in the queue they get it back, at the
-    # position they held. Naming the third person in the queue as your
-    # substitute and then changing your mind used to delete them from
-    # the game entirely.
+    # Cancelling an ordinary signup is a withdrawal, whoever is allowed
+    # to press the button on that person's behalf. In particular, a guest
+    # has no LINE account and the member who brought them is their only
+    # way to withdraw. Re-queuing that guest here immediately promoted
+    # them into the slot the cancellation had just opened, so 「移除」
+    # appeared to work and then put the same person straight back.
     #
-    # Only somebody who actually held one: a substitute typed in by name
-    # was never waiting, and putting them into a queue they never joined
-    # would resurrect them into the next open slot. That is what
-    # from_waitlist_at records, because it cannot be inferred.
-    #
-    # Cancelling your own signup is a withdrawal and never re-queues you.
-    #
-    # Re-queued *before* the promotion below, not after, so the freed
-    # slot still goes to whoever is genuinely first. If that turns out
-    # to be this same person, they simply keep playing — as an ordinary
-    # 臨打 rather than somebody's arranged substitute, which is exactly
-    # what they now are.
-    if current_player.id != drop_in.player_id:
+    # An arranged substitute is different: cancelling the arrangement
+    # takes somebody else's assigned slot away from them; it does not say
+    # that the substitute has withdrawn their earlier request to play.
+    # If they came from the queue, give that place back. The substitute
+    # cancelling themselves is still an ordinary withdrawal.
+    returning_arranged_substitute = (
+        drop_in.covers_absence_id is not None and current_player.id != drop_in.player_id
+    )
+    if returning_arranged_substitute:
         _give_back_queue_place(db, drop_in)
 
     promoted = _promote_from_waitlist(db, drop_in.game_id)

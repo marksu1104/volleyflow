@@ -131,7 +131,7 @@ function inDays(days) {
     });
 
     const waitingRow = page.locator("#requests-list .pool-row", { hasText: NEWCOMER });
-    await waitingRow.locator("button", { hasText: "核准臨打" }).click();
+    await waitingRow.locator("button", { hasText: "臨打", exact: true }).click();
     // Asked of the person themselves, the way join.js does it: a
     // membership is pending or active, and the club's roster is not
     // where that shows.

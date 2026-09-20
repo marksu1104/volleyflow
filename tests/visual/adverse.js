@@ -18,7 +18,9 @@
 const { chromium } = require("playwright");
 
 const BASE = "http://localhost:5500";
+const API = "http://localhost:8000";
 const as = (name) => encodeURIComponent(name);
+let seededClubId = null;
 
 /** What the hero says about the viewer right now. */
 const STANCE = `(() => {
@@ -36,7 +38,21 @@ const TAP_LEAVE = `(() => {
 })()`;
 
 async function open(browser, who, page_name) {
+  if (!seededClubId) {
+    const clubs = await (
+      await fetch(`${API}/clubs`, {
+        headers: { Authorization: `Bearer dev:${as(who)}` },
+      })
+    ).json();
+    const seeded = clubs.find((club) => club.name === "測試球隊（seed）");
+    if (!seeded) throw new Error("請先執行 scripts/seed_dev.py");
+    seededClubId = seeded.id;
+  }
   const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  await page.addInitScript(
+    (id) => localStorage.setItem("vf_club", String(id)),
+    seededClubId
+  );
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e).slice(0, 140)));
   page.on("dialog", (d) => d.accept("1"));

@@ -7,7 +7,14 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { load, makeElement } = require("./harness.js");
 
-const { renderGameDetail } = load();
+const {
+  applyAutomaticPromotionLocally,
+  applySubstituteLocally,
+  completeGameDetailChange,
+  markGameDetailChange,
+  promoteWaitlistLocally,
+  renderGameDetail,
+} = load();
 
 function fixture() {
   return {
@@ -317,6 +324,91 @@ test("the chosen group survives a repaint", () => {
   assert.equal(el.dataset.gdActiveTab, "queued");
   assert.match(el.innerHTML, /data-gd-panel="queued"(?![^>]*hidden)/);
   assert.match(el.innerHTML, /data-gd-panel="attending"[^>]*hidden/);
+});
+
+test("a roster movement points to its destination without switching tabs", () => {
+  const { season, game } = fixture();
+  const el = makeElement();
+  el.dataset.gdActiveTab = "attending";
+  const token = markGameDetailChange(el, "absent", ["林書妤"]);
+
+  renderGameDetail(el, season, game, { viewerName: "周安" });
+
+  assert.equal(el.dataset.gdActiveTab, "attending", "the reader stays on the chosen group");
+  assert.match(el.innerHTML, /gd-tab just-changed roster-change-pending/);
+  assert.match(el.innerHTML, /att-row absent just-changed roster-change-pending roster-row-entering/);
+
+  renderGameDetail(el, season, game, { viewerName: "周安" });
+  assert.doesNotMatch(el.innerHTML, /just-changed/, "the cue is consumed after one render");
+
+  assert.equal(completeGameDetailChange(el, token), true);
+  renderGameDetail(el, season, game, { viewerName: "周安" });
+  assert.match(el.innerHTML, /gd-tab just-changed roster-change-complete/);
+  assert.match(el.innerHTML, /att-row absent just-changed roster-change-complete/);
+});
+
+test("an older roster response cannot complete a newer movement", () => {
+  const el = makeElement();
+  const older = markGameDetailChange(el, "absent", ["林書妤"]);
+  const newer = markGameDetailChange(el, "attending", ["林書妤"]);
+
+  assert.equal(completeGameDetailChange(el, older), false);
+  assert.equal(completeGameDetailChange(el, newer), true);
+});
+
+test("a substitute result moves every affected person in the local roster", () => {
+  const { season, game } = fixture();
+  season.games = [game];
+  const result = { id: 901, player_id: 99, displaced_player_id: 8 };
+
+  const moved = applySubstituteLocally(season, game.id, 101, result, {
+    name: "新代打",
+    gender: "female",
+  });
+
+  assert.equal(moved.displacedName, "Momo");
+  assert.deepEqual(
+    game.confirmed_drop_ins.map((item) => item.player_name),
+    ["Jason", "新代打"]
+  );
+  assert.deepEqual(
+    game.waitlist_entries.map((item) => item.player_name),
+    ["Momo", "芷若"]
+  );
+  assert.equal(game.absences.find((item) => item.id === 101).covered_by, "新代打");
+});
+
+test("a manual promotion swaps the two rows locally without overfilling", () => {
+  const { season, game } = fixture();
+  season.games = [game];
+
+  const moved = promoteWaitlistLocally(season, game.id, 300, 201, {
+    player_id: 7,
+    drop_in_id: 902,
+  });
+
+  assert.deepEqual(moved, { promoted: "芷若", replaced: "Momo" });
+  assert.deepEqual(
+    game.confirmed_drop_ins.map((item) => item.player_name),
+    ["Jason", "芷若"]
+  );
+  assert.deepEqual(game.waitlist_entries.map((item) => item.player_name), ["Momo"]);
+});
+
+test("an automatic promotion fills a cancelled signup without a blank roster", () => {
+  const { season, game } = fixture();
+  season.games = [game];
+  game.waitlist_entries[0].player_id = 7;
+  game.confirmed_drop_ins = game.confirmed_drop_ins.filter((item) => item.player_id !== 8);
+
+  const promoted = applyAutomaticPromotionLocally(season, game.id, 7, null);
+
+  assert.equal(promoted, "芷若");
+  assert.deepEqual(
+    game.confirmed_drop_ins.map((item) => item.player_name),
+    ["Jason", "芷若"]
+  );
+  assert.deepEqual(game.waitlist_entries, []);
 });
 
 test("a tab that no longer makes sense falls back to who's playing", () => {

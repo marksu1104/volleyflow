@@ -51,6 +51,18 @@ class ClubJoin(BaseModel):
     """What they ask to be: a fixed member, or here for single games."""
 
 
+class ClubGuestAdd(BaseModel):
+    """An accountless person the organizer wants to keep in the club.
+
+    This deliberately does not name a season. A visitor can later be put
+    on a fixed roster, but creating them must not create a season-fee
+    charge as a side effect.
+    """
+
+    name: str
+    gender: Gender | None = None
+
+
 class ClubOut(BaseModel):
     id: int
     name: str
@@ -120,6 +132,9 @@ class ClubMemberOut(BaseModel):
     linked: bool
     """See MemberOut.linked."""
     role: str
+    status: Literal["active", "pending"] = "active"
+    """Active club members are returned normally; pending rows only appear
+    for an organizer who explicitly requests them."""
     wants_fixed_membership: bool | None = None
     """See ClubMemberRow.wants_fixed_membership. Shown to the organizer so
     the join pool distinguishes "waiting to be put on the roster" from
@@ -374,6 +389,20 @@ class MemberOut(BaseModel):
     they can't record their own absence, sign themselves up, or set their
     own gender, and somebody has to do it for them. Worth showing on a
     roster rather than leaving the organizer to guess."""
+
+
+class DisplacedDropInOut(BaseModel):
+    player_id: int
+    player_name: str
+    game_id: int
+    game_date: date
+
+
+class SeasonMemberAddOut(MemberOut):
+    displaced_drop_ins: list[DisplacedDropInOut] = Field(default_factory=list)
+    """Future signups moved back to the waitlist because this fixed member
+    took priority. Returned so the organizer sees who moved instead of a
+    row silently disappearing from a later game's attendance list."""
 
 
 class GenderUpdate(BaseModel):

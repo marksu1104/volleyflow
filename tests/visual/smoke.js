@@ -215,7 +215,24 @@ async function auditPage(browser, path) {
   // run. A 5xx or a JS exception always is.
   page.on("response", async (r) => {
     if (!r.url().includes(":8000") || r.status() < 400) return;
-    const line = `${r.status()} ${r.request().method()} ${r.url().replace(/^https?:\/\/[^/]+/, "")}`;
+    const method = r.request().method();
+    const pathname = new URL(r.url()).pathname;
+    const line = `${r.status()} ${method} ${r.url().replace(/^https?:\/\/[^/]+/, "")}`;
+    // These two screens deliberately explain that their developer-only
+    // server feature is not configured. A local API without
+    // DEVELOPER_LINE_USER_ID answers 503 so the page can distinguish that
+    // state from a forbidden identity. That is the expected empty state
+    // described in PAGES above, not an application crash. Keep the
+    // exception exact so any other 5xx still fails the audit.
+    const expectedUnconfigured =
+      r.status() === 503 &&
+      method === "GET" &&
+      ((path === "reports.html" && pathname === "/reports") ||
+        (path === "developer.html" && pathname === "/developer/overview"));
+    if (expectedUnconfigured) {
+      notes.push(`${line}（本機未設定開發者權限）`);
+      return;
+    }
     if (r.status() >= 500) {
       const body = await r.text().catch(() => "?");
       errors.push(line + " -- " + body.slice(0, 300));

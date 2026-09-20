@@ -87,6 +87,34 @@ def test_taking_a_place_back_releases_the_substitute_that_was_arranged(
     assert _game(client, season)["confirmed_drop_ins"] == []
 
 
+def test_organizer_removing_an_ordinary_promotion_does_not_requeue_it(
+    client: TestClient,
+) -> None:
+    """「移除」is a withdrawal, even when the signup originally came
+    from the queue. Returning that old queue place immediately promoted
+    the same person into the slot the organizer had just opened."""
+    season = start_season(client, member_names=["Alice"], capacity=1)
+    game_id = season["games"][0]["id"]
+    queued = client.post(
+        "/drop-ins", json={"player_name": "Carol", "game_id": game_id}
+    ).json()
+    assert queued["status"] == "waitlisted"
+    client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
+    promoted = next(
+        d
+        for d in _game(client, season)["confirmed_drop_ins"]
+        if d["player_name"] == "Carol"
+    )
+
+    response = client.post(f"/drop-ins/{promoted['id']}/cancel")
+
+    assert response.status_code == 200
+    assert response.json()["promoted_from_waitlist"] is None
+    game = _game(client, season)
+    assert all(d["player_name"] != "Carol" for d in game["confirmed_drop_ins"])
+    assert all(w["player_name"] != "Carol" for w in game["waitlist_entries"])
+
+
 def test_taking_a_place_back_never_releases_somebody_elses_substitute(
     client: TestClient,
 ) -> None:

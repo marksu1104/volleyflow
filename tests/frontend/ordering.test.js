@@ -275,6 +275,25 @@ test("identifying yourself does not throw the response cache away", async () => 
   assert.equal(painted[0], false, "the first paint must come from cache");
 });
 
+test("identifying yourself never presents as a pending save", async () => {
+  // /players/identify is POST only because its LINE token belongs in a
+  // request body. It must not show the global 儲存中… chip while opening
+  // an otherwise untouched page.
+  const { postJson, elements } = load();
+  let answer;
+  globalThis.fetch = () =>
+    new Promise((resolve) => {
+      answer = () => resolve({ ok: true, status: 200, json: async () => ({ id: 7 }) });
+    });
+
+  const identifying = postJson("http://api", "/players/identify", { id_token: "x" });
+  await after(1300);
+  const chip = elements["vf-pending"];
+  assert.equal(!!chip && chip.classList.contains("shown"), false);
+  answer();
+  await identifying;
+});
+
 test("an ordinary write still throws the response cache away", async () => {
   const { postJson, getJsonSWR } = load();
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ v: 1 }) });

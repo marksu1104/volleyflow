@@ -1,6 +1,7 @@
 """Seasons: creating one, pricing it, its roster, and settling it."""
 
 from collections import defaultdict
+from datetime import date
 
 from fastapi import (
     APIRouter,
@@ -20,9 +21,9 @@ from volleyflow.api.routes._attendance import (
     _absorb_drop_ins_into_membership,
     _close_absences_of_former_member,
     _delete_season_rows,
+    _displace_latest_drop_in,
     _expected_on_court,
     _games_with_no_room,
-    _is_signed_up,
     _offer_freed_slots_to_the_queue,
     _restore_absorbed_drop_ins,
     _restore_retired_absences,
@@ -32,6 +33,7 @@ from volleyflow.api.routes._attendance import (
 from volleyflow.api.routes._money import (
     _gather_member_settlements,
     _member_settlement_out,
+    _sync_member_season_fee_ledger,
     _sync_season_fee_ledger,
 )
 from volleyflow.api.routes._people import (
@@ -41,11 +43,13 @@ from volleyflow.api.routes._people import (
     _now,
     _require_club_access,
     _require_organizer,
+    _today_in_taiwan,
     get_current_player,
 )
 from volleyflow.api.schemas import (
     AbsenceDetailOut,
     ClubMemberOut,
+    DisplacedDropInOut,
     DropInDetailOut,
     DropInSummary,
     GameDetailOut,
@@ -56,6 +60,7 @@ from volleyflow.api.schemas import (
     PaidOutMemberOut,
     SeasonCreate,
     SeasonDetailOut,
+    SeasonMemberAddOut,
     SeasonOut,
     SeasonSettleOut,
     SeasonSummaryOut,
@@ -331,20 +336,21 @@ def update_season(
     return _season_out(db, season)
 
 
-@router.post("/seasons/{season_id}/members", response_model=MemberOut)
+@router.post("/seasons/{season_id}/members", response_model=SeasonMemberAddOut)
 def add_member(
     season_id: int,
     payload: MemberAdd,
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
-) -> MemberOut:
-    """Adding a member changes everyone's per-game share for the whole
-    season, same reasoning as changing the venue cost — the frontend
-    warns before calling this. Blocked once settled: the ledger already
-    reflects the season fee computed from the roster at that time. The
-    new member is charged their full season fee immediately, and every
-    other current member's charge is corrected for the new, lower share
-    — see _sync_season_fee_ledger.
+) -> SeasonMemberAddOut:
+    """Add one fixed member and charge only that person's season fee.
+
+    A share is divided by the season's capacity, not its current roster,
+    so this never re-prices the existing members. On a full upcoming game,
+    fixed membership takes priority and the latest confirmed drop-in goes
+    back to the waitlist with their charge reversed. Blocked once settled:
+    the ledger is already final. See docs/billing-rules.md, "Who the cost
+    is split between".
 
     Locks the season row for the rest of the transaction, same reasoning
     as _get_game_or_404 and found the same way — by two requests racing
@@ -353,10 +359,10 @@ def add_member(
     calls for the same name each read no and each wrote: with the name
     already known to the club, that was a duplicate key and a 500; with
     a brand new name, far worse and completely silent — two Player rows
-    for one person, both on the roster, both charged a season fee. The
-    roster screen produces the overlap by itself, since adding somebody
-    reloads the whole roster and a second tap lands on the redrawn
-    button while the first request is still in the air.
+    for one person, both on the roster, both charged a season fee. An
+    older roster screen could produce the overlap by redrawing the same
+    button while the first request was still in the air; the API still
+    has to be safe for retries and other clients.
     """
     season = (
         db.query(SeasonRow).filter(SeasonRow.id == season_id).with_for_update().first()
@@ -400,10 +406,11 @@ def add_member(
             "off the roster first.",
         )
 
-    # And every game needs a free slot right now as well, since a drop-in
-    # may be standing in one that the new member would claim. Two kinds of
-    # game don't count, because on both of them this player adds nobody to
-    # the court:
+    # A full game needs one slot handed back before this member is added.
+    # On a future date the latest drop-in yields that slot; on a past date
+    # the new member is recorded away so history does not gain a body who
+    # was never there. Two kinds of game need neither treatment, because
+    # on both of them this player adds nobody to the court:
     #
     #  - one they already hold a signup for. Those are absorbed into the
     #    membership below rather than sitting beside it.
@@ -416,23 +423,45 @@ def add_member(
     #    stand on. Reported from real use on 2026-09-12 — 18 members,
     #    remove one, 17 on the roster and still "raise the capacity to
     #    19" when adding them back.
-    away_again = {
-        game_id for game_id in _retired_absence_game_ids(db, season, player.id)
-    }
-    full = [
+    away_again = _retired_absence_game_ids(db, season, player.id)
+    full_games = _games_with_no_room(db, season, member_count=roster_size)
+    full_game_ids = [game.id for game in full_games]
+    signed_up_for = (
+        {
+            int(game_id)
+            for (game_id,) in db.query(DropInRow.game_id).filter(
+                DropInRow.player_id == player.id,
+                DropInRow.game_id.in_(full_game_ids),
+                DropInRow.cancelled_at.is_(None),
+            )
+        }
+        if full_game_ids
+        else set()
+    )
+    would_add_a_body = [
         game
-        for game in _games_with_no_room(db, season)
-        if not _is_signed_up(db, game, player.id) and game.id not in away_again
+        for game in full_games
+        if game.id not in signed_up_for and game.id not in away_again
     ]
-    if full:
-        dates = ", ".join(str(game.date) for game in full[:3])
-        more = f" (and {len(full) - 3} more)" if len(full) > 3 else ""
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"No room for another member: {dates}{more} "
-            f"already {season.capacity} on court. Cancel a signup on "
-            "those games, or raise the capacity first.",
-        )
+
+    # A correction made after a game has happened must not invent a person
+    # on that night's court. If the game was already full, keep its actual
+    # attendance unchanged by recording the newly-added fixed member as
+    # away. Their full-season charge is still correct, and the ordinary
+    # coverage rules decide later whether the drop-in earns them a refund.
+    today = _today_in_taiwan()
+    past_full_games = [game for game in would_add_a_body if game.date < today]
+    future_full_games = [game for game in would_add_a_body if game.date >= today]
+    displaced: list[tuple[int, date, int]] = []
+    for game in future_full_games:
+        displaced_player_id = _displace_latest_drop_in(db, game, season)
+        if displaced_player_id is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"No room for another member on {game.date}, and there is no "
+                "drop-in to move back to the waitlist.",
+            )
+        displaced.append((game.id, game.date, displaced_player_id))
 
     db.add(SeasonMemberRow(season_id=season_id, player_id=player.id))
     try:
@@ -444,12 +473,11 @@ def add_member(
         # member of this season — so it is the same 400 that check gives,
         # not a 500.
         #
-        # It takes two overlapping requests, which is exactly what the
-        # roster screen produces: adding somebody reloads the whole
-        # roster, the reload redraws the buttons, and a second tap lands
-        # on the redrawn one while the first request is still in the air.
-        # Found by tests/visual/smoke.js pressing every button on that
-        # page (2026-09-12) — reported three times before that as an
+        # It takes two overlapping requests. An older roster screen
+        # produced that overlap by reloading and redrawing the button
+        # while the first write was still in flight. Found by
+        # tests/visual/smoke.js pressing every button on that page
+        # (2026-09-12) — reported three times before that as an
         # unexplained 500.
         db.rollback()
         raise HTTPException(
@@ -459,15 +487,42 @@ def add_member(
     # this member's leave already back where it was.
     _restore_retired_absences(db, season, player.id)
     _absorb_drop_ins_into_membership(db, season, player.id)
-    _sync_season_fee_ledger(db, season)
+    recorded_at = _now()
+    for game in past_full_games:
+        db.add(
+            AbsenceRow(
+                player_id=player.id,
+                game_id=game.id,
+                recorded_at=recorded_at,
+            )
+        )
+    _sync_member_season_fee_ledger(db, season, player.id, is_member=True)
+    displaced_ids = {player_id for _, _, player_id in displaced}
+    displaced_names = (
+        {
+            row.id: row.name
+            for row in db.query(PlayerRow).filter(PlayerRow.id.in_(displaced_ids)).all()
+        }
+        if displaced_ids
+        else {}
+    )
     db.commit()
     db.refresh(player)
-    return MemberOut(
+    return SeasonMemberAddOut(
         id=player.id,
         name=player.name,
         gender=_gender(player.gender),
         avatar_url=player.avatar_url,
         linked=player.line_user_id is not None,
+        displaced_drop_ins=[
+            DisplacedDropInOut(
+                player_id=player_id,
+                player_name=displaced_names[player_id],
+                game_id=game_id,
+                game_date=game_date,
+            )
+            for game_id, game_date, player_id in displaced
+        ],
     )
 
 
@@ -478,9 +533,10 @@ def remove_member(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> None:
-    """Same retroactive-share caveat as adding one. Their season-fee
-    charge is reversed to zero and every remaining member's charge is
-    corrected for the new, higher share — see _sync_season_fee_ledger.
+    """Remove one fixed member and reverse only that person's season fee.
+
+    Capacity stays fixed, so the remaining members' season charges do not
+    move. See docs/billing-rules.md, "Who the cost is split between".
 
     Their outstanding absences are closed. Leaving them open was fine for
     settlement, which only ever walks the current member list, and wrong
@@ -539,7 +595,7 @@ def remove_member(
     # restore is: the promoted drop-ins' charges belong in the ledger the
     # sync then reads.
     _offer_freed_slots_to_the_queue(db, season)
-    _sync_season_fee_ledger(db, season)
+    _sync_member_season_fee_ledger(db, season, player_id, is_member=False)
     db.commit()
 
 

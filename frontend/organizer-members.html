@@ -10,13 +10,6 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
 <link rel="stylesheet" href="shared.css">
 <style>
-  .add-member-row { display: flex; gap: 6px; margin: 12px 0; }
-  .add-member-row[hidden] { display: none; }
-  .add-member-row input { flex: 1; }
-  .add-member-row button {
-    padding: 0 16px; border: none; border-radius: 9px; background: var(--accent); color: var(--surface);
-    font-size: .86rem; font-weight: 700; cursor: pointer; white-space: nowrap; font-family: var(--font-cjk);
-  }
   .member-list { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
   .member-row {
     display: flex; justify-content: space-between; align-items: center; gap: 8px;
@@ -30,10 +23,37 @@
     font-size: .74rem; padding: 4px 9px; border-radius: 7px; cursor: pointer;
   }
   .mini-gender button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+  .request-tree { margin: 0 0 0 8px; padding: 10px; border-radius: 12px; background: var(--surface-2); }
+  .request-tree.empty { padding-block: 9px; }
+  .request-empty { color: var(--ink-faint); font-size: .74rem; }
+  .request-group { padding: 0; }
+  .request-group + .request-group { margin-top: 13px; }
+  .request-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; margin-bottom: 5px; }
+  .request-title strong { color: var(--ink-soft); font-size: .74rem; letter-spacing: .02em; }
+  .request-title strong small { margin-left: 5px; color: var(--ink-faint); font-size: .74rem; font-weight: 500; letter-spacing: 0; }
+  .request-title span { color: var(--ink-faint); font-size: .74rem; }
+  .members-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .members-section-head .section-label { margin-bottom: 0; }
+  .roster-edit {
+    display: inline-flex; flex: none; min-height: 32px; padding: 6px 10px; align-items: center;
+    gap: 5px; border: 1px solid var(--rule-strong); border-radius: 8px; background: var(--surface);
+    color: var(--accent); font-size: .74rem; font-weight: 700; cursor: pointer;
+  }
+  .roster-edit[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .roster-groups { margin-top: 11px; padding: 10px; border-radius: 12px; background: var(--surface-2); }
+  .roster-subsection-label { color: var(--ink-soft); font-size: .74rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .roster-subsection-label span { margin-left: 3px; color: var(--ink-faint); font-weight: 500; letter-spacing: 0; text-transform: none; }
+  #pool-section { margin-top: 13px; }
+  #pool-section .hint { margin: 4px 0 7px; }
+  #pool-section .btn { margin-top: 11px; }
+  .guest-sheet .hint { margin: 0 0 14px; }
+  .guest-sheet .picker-manual { margin-top: 12px; }
+  .guest-sheet .btn-row { margin-top: 14px; }
+  .roster-write-state { display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; flex: none; }
 </style>
 </head>
 <body>
-<div class="wrap wide">
+<div class="wrap wide" id="members-page" data-picker-loading-root>
   <div class="app-bar">
     <span class="app-bar-left">
       <button type="button" class="back-btn" onclick="location.href='member.html'">‹ 會員頁</button>
@@ -56,11 +76,27 @@
     <a href="organizer-settings.html" class="org-nav-link">設定</a>
   </nav>
 
-  <div class="picker-row">
-    <select id="club-picker" class="season-picker club-picker" hidden></select>
-    <select id="season-picker" class="season-picker" hidden></select>
+  <div class="picker-row picker-row-labeled">
+    <div id="club-picker-field" class="picker-field" hidden>
+      <label for="club-picker">球隊</label>
+      <select id="club-picker" class="season-picker club-picker" hidden></select>
+    </div>
+    <div id="season-picker-field" class="picker-field" hidden>
+      <label for="season-picker">季別</label>
+      <span class="picker-control">
+        <select id="season-picker" class="season-picker" hidden></select>
+        <i class="spinner sm picker-spinner" aria-hidden="true"></i>
+      </span>
+    </div>
   </div>
   <div id="error"></div>
+
+  <div id="members-loader" class="page-state" role="status" aria-live="polite">
+    <i class="spinner" aria-hidden="true"></i>
+    <p id="members-loader-text">載入中…</p>
+  </div>
+
+  <div id="members-content" hidden>
 
   <!-- Back at the top, 2026-09-18. It was moved to the bottom the day
        before on the reasoning that a link you copy once a month should
@@ -69,8 +105,8 @@
        好比較順眼」. Using a thing beats looking at a picture of it. -->
   <div id="join-link-section" hidden>
     <div class="section-label">加入連結</div>
-    <div id="join-link-body"></div>
     <p class="hint">用 LINE 開啟這個連結，會自動選到這個球隊並提示加入。</p>
+    <div id="join-link-body"></div>
   </div>
 
   <div id="settled-note" class="settled-note" hidden>
@@ -79,40 +115,43 @@
 
   <div id="no-season"></div>
 
-  <!-- 待核准 leads, whenever there is anybody in it. Someone who pressed
-       the invite link cannot see a single thing about the club until
-       they are approved — they are waiting on a person, which is the
-       only thing on this page with a clock running. The roster is here
-       every day and is not going anywhere. This section hides itself
-       when it is empty, so on an ordinary week it costs nothing and
-       本季固定成員 is still the first thing on screen. Moved 2026-09-17;
-       the organizer declined moving 等待加入本季 up with it, so that one
-       stays where it was. -->
   <div id="requests-section" hidden>
-    <div class="section-label">待核准</div>
-    <!-- Hidden while the list is still coming: three lines explaining
-         what the two approve buttons do is noise beside a spinner, and
-         the whole point of the loading state is to stay short. -->
-    <p class="hint" id="requests-hint" style="margin-top:0">
-      用邀請連結申請加入的人，核准前看不到球隊的任何資料。按「核准固定」會直接加入本季名單並記上季費；按「核准臨打」只讓他加入球隊。
-    </p>
-    <div id="requests-list" class="member-list"></div>
+    <div class="section-label">待核准 <span id="requests-count"></span></div>
+    <div id="requests-list"></div>
   </div>
 
   <!-- 本季固定成員 is what the organizer opens this page to read, so it
        leads once nobody is waiting. Everyone else collapses behind a
        toggle, since most weeks there is nothing to do with them. -->
-  <div id="roster-section" hidden data-season-content>
-    <div class="section-label">本季固定成員</div>
+  <div id="roster-section" hidden>
+    <div class="members-section-head">
+      <div class="section-label">本季名單</div>
+      <button type="button" id="roster-edit" class="roster-edit" aria-pressed="false" hidden>✎ 更正名單</button>
+    </div>
     <p id="warn-note" class="hint" style="color: var(--warn)">
-      新增或移除成員會重新計算整季每人每場的金額，包含已經打過的場次。
+      更正會追溯整季，並改變該成員的季費。
     </p>
-    <p class="hint">
-      用 LINE 加入過的人從下面的「其他球隊成員」挑，他們可以自己請假；沒有帳號的人用「新增訪客」。
-      只來單場的人不必加進這裡，在該場次直接新增臨打即可。
+    <p id="roster-hint" class="hint">
+      本季固定成員依整季計費；單場是否參加請在場次中設定。
     </p>
 
-    <div id="member-list" class="member-list"></div>
+    <div class="roster-groups">
+      <div class="roster-subsection">
+        <div class="roster-subsection-label">固定成員 <span id="roster-count"></span></div>
+        <div id="member-list" class="member-list"></div>
+      </div>
+
+      <div id="pool-section" hidden>
+        <button type="button" class="collapse-toggle" id="pool-toggle" aria-expanded="false" aria-controls="pool-content">
+          <span class="chev">▾</span> 其他成員 <span class="collapse-count" id="pool-count"></span>
+        </button>
+        <div id="pool-content" hidden>
+          <p class="hint">在球隊裡，但不在本季固定名單上。</p>
+          <div id="pool-list" class="member-list"></div>
+          <button type="button" id="guest-button" class="btn btn-quiet" onclick="openGuestDialog()">＋ 新增訪客</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="dup-section" hidden>
@@ -123,38 +162,27 @@
     <div id="dup-list" class="member-list"></div>
   </div>
 
-  <div id="waiting-section" hidden>
-    <div class="section-label">等待加入本季</div>
-    <p class="hint" style="margin-top:0">
-      已經加入球隊、表示自己是固定成員，正等你確認加入名單的人。
-    </p>
-    <div id="waiting-list" class="member-list"></div>
   </div>
+</div>
 
-  <div id="guest-section" hidden>
-    <div class="section-label">新增訪客</div>
-    <p class="hint" style="margin-top:0">
-      沒有 LINE、或不想自己操作的人。他們沒辦法自己請假或報名，都要由你代為處理。
-      加進來之後一樣算本季固定成員，季費照算。
-    </p>
-    <div class="add-member-row">
-      <input id="new-member-name" class="control" type="text" placeholder="訪客姓名">
-      <select id="new-member-gender" class="control" style="flex:0 0 84px">
+<div id="guest-backdrop" class="gsheet-backdrop" hidden>
+  <section class="gsheet guest-sheet" role="dialog" aria-modal="true" aria-labelledby="guest-dialog-title">
+    <button type="button" class="gsheet-close" aria-label="關閉" onclick="closeGuestDialog()">✕</button>
+    <h3 id="guest-dialog-title">新增訪客</h3>
+    <p class="hint">新增後只會加入球隊；需要固定出席時，再加入本季名單。</p>
+    <div class="picker-manual">
+      <input id="new-member-name" type="text" placeholder="輸入姓名" autocomplete="off">
+      <select id="new-member-gender" aria-label="性別">
         <option value="">性別</option>
         <option value="male">男</option>
         <option value="female">女</option>
       </select>
-      <button type="button" onclick="addGuest()">新增</button>
     </div>
-  </div>
-
-  <div id="pool-section" hidden>
-    <button type="button" class="collapse-toggle" id="pool-toggle" aria-expanded="false">
-      <span class="chev">▾</span> 其他球隊成員 <span class="collapse-count" id="pool-count"></span>
-    </button>
-    <div id="pool-list" class="member-list" hidden></div>
-  </div>
-
+    <div class="btn-row">
+      <button type="button" class="btn btn-quiet" onclick="closeGuestDialog()">取消</button>
+      <button type="button" class="btn btn-primary" onclick="addGuest(this)">新增</button>
+    </div>
+  </section>
 </div>
 
 <script src="shared.js"></script>
@@ -175,15 +203,59 @@
     location.href = "profile.html";
   });
 
-  showPageLoading(document.getElementById("no-season"));
-  document.getElementById("roster-section").hidden = true;
+  let selectedContext = null;
+  let loaderTimer = null;
+  let rosterEditing = false;
+  let movingPlayerId = null;
+  let movingPlayerTimer = null;
+  const rosterWrites = new Set();
 
-  // Every club-scoped read carries the caller's token now, so nothing may
-  // fetch before LIFF identity has resolved — otherwise authHeader() is
-  // empty and the server correctly says 401.
+  function setMembersLoading(loading) {
+    const loader = document.getElementById("members-loader");
+    const content = document.getElementById("members-content");
+    const text = document.getElementById("members-loader-text");
+    clearTimeout(loaderTimer);
+    loaderTimer = null;
+    loader.hidden = !loading;
+    content.hidden = loading;
+    if (!loading) return;
+    text.textContent = "載入中…";
+    loaderTimer = setTimeout(() => {
+      text.textContent = "資料較多，仍在載入…";
+    }, 4000);
+  }
+
+  function showMembersError(message) {
+    setMembersLoading(false);
+    document.getElementById("members-content").hidden = false;
+    document.getElementById("join-link-section").hidden = true;
+    document.getElementById("requests-section").hidden = true;
+    document.getElementById("roster-section").hidden = true;
+    document.getElementById("dup-section").hidden = true;
+    showPageError(document.getElementById("no-season"), message);
+  }
+
+  async function readPageJson(path) {
+    const response = await fetch(`${API_BASE}${path}`, {
+      headers: authHeader(),
+      cache: "no-store",
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (identityLapsed(response.status, body.detail)) {
+        restartLineSession(response.status === 401);
+      }
+      throw new Error(translateApiError(body.detail || response.statusText));
+    }
+    return body;
+  }
+
+  // The data below the pickers intentionally arrives as one page, rather
+  // than as several independent sections with their own loading spinners.
   identityReady.then((identified) => {
     if (!identified) {
-      stopLoadingEscalation();
+      setMembersLoading(false);
+      document.getElementById("members-content").hidden = false;
       document.getElementById("no-season").innerHTML = signInFailureHtml(identified);
       return;
     }
@@ -192,78 +264,48 @@
       document.getElementById("club-picker"),
       document.getElementById("season-picker"),
       "vf_org_season",
-      (id) => {
-      stopLoadingEscalation();
-      document.getElementById("club-picker").hidden = !currentClubId();
-      renderJoinLink();
-      loadRequests();
-      // The join link stays useful with no season (people can join the club
-      // and wait in the pool), so only the season roster half is swapped
-      // out for the empty state here.
-      // Revealed by loadMembers once the roster is in hand, not here —
-      // otherwise the section's headings and empty boxes sit on screen
-      // for the length of two requests, looking broken rather than busy.
-      if (!id) {
-        document.getElementById("roster-section").hidden = true;
-        document.getElementById("guest-section").hidden = true;
-      }
-      document.getElementById("season-picker").hidden = !id;
-      document.getElementById("no-season").innerHTML = id
-        ? ""
-        : currentClubId()
-          ? emptyStateHtml(
-              "這個球隊尚未開季",
-              "固定成員名單是跟著一季走的。可以先把上面的連結分享出去讓大家加入球隊，等開季時再從待加入名單挑人。",
-              { label: "建立第一季", href: "organizer-settings.html" }
-            )
-          : noClubYetHtml();
-        if (id) loadMembers(id);
+      (seasonId) => {
+        const clubId = currentClubId();
+        const context = `${clubId || "none"}:${seasonId || "none"}`;
+        // Cached picker data is followed by a fresh copy. If it retained
+        // the same selection, do not flash the already-current page.
+        if (context === selectedContext) return;
+        selectedContext = context;
+        rosterEditing = false;
+        const hasClub = !!clubId;
+        document.getElementById("club-picker-field").hidden = !hasClub;
+        document.getElementById("club-picker").hidden = !hasClub;
+        document.getElementById("season-picker-field").hidden = !seasonId;
+        document.getElementById("season-picker").hidden = !seasonId;
+        loadPage(seasonId);
       },
-      (e) => showPageError(document.getElementById("no-season"), e.message),
-      // Only the clubs this person actually organizes — see
-      // initClubAndSeasonPickers. A club they merely belong to used to
-      // appear here and open a management screen they cannot use.
-      (c) => c.role === "organizer"
+      (error) => showMembersError(error.message),
+      (club) => club.role === "organizer"
     );
   });
 
-  /** Hidden until there is a link to show. It used to be on screen from
-   * the first paint with an empty box under its heading, which is the
-   * same "looks broken rather than busy" problem as the empty forms.
-   *
-   * Needs a round trip now, unlike the plain club id this used to embed
-   * directly: the link carries an unguessable token instead (see
-   * src/volleyflow/api/invites.py), and only the organizer may ask the
-   * server for one. Fire-and-forget — the section stays hidden until it
-   * lands, same as before. */
-  async function renderJoinLink() {
-    const clubId = currentClubId();
+  function renderJoinLink(invite) {
     const section = document.getElementById("join-link-section");
     const body = document.getElementById("join-link-body");
-    if (!clubId) {
+    if (!invite) {
       body.innerHTML = "";
       section.hidden = true;
       return;
     }
-    // Holds its place with a spinner instead of arriving later and
-    // shoving the roster down — and now that this section leads the
-    // page again, arriving late would move everything below it.
+    const url = `https://liff.line.me/${LIFF_ID}?invite=${invite.token}`;
     section.hidden = false;
-    body.innerHTML = blockLoadingHtml("正在取得連結");
-    try {
-      const res = await fetch(`${API_BASE}/clubs/${clubId}/invite`, {
-        headers: authHeader(),
-      });
-      if (!res.ok) throw new Error(res.statusText);
-      const invite = await res.json();
-      const url = `https://liff.line.me/${LIFF_ID}?invite=${invite.token}`;
-      body.innerHTML =
-        `<div class="link-box"><code id="join-link">${escapeHtml(url)}</code>` +
-        '<button type="button" onclick="copyJoinLink()">複製</button></div>';
-    } catch (e) {
-      section.hidden = true;
-    }
+    body.innerHTML =
+      `<div class="link-box"><code id="join-link">${escapeHtml(url)}</code>` +
+      '<button type="button" onclick="copyJoinLink()">複製</button></div>';
   }
+
+  // A club switch first has to replace the season picker. Hide the old
+  // club's roster at the start of that wait, rather than briefly letting
+  // yesterday's selection look like it belongs to the newly chosen club.
+  document.getElementById("club-picker").addEventListener("change", () => {
+    rosterEditing = false;
+    setMembersLoading(true);
+  });
 
   function copyJoinLink() {
     const text = document.getElementById("join-link").textContent;
@@ -274,159 +316,133 @@
       .catch(() => toast("複製失敗，請手動選取文字"));
   }
 
-  const membersLoad = staleGuard();
+  let joinRequests = [];
+  let allClubMembers = [];
+  let currentPool = [];
+  const pageLoad = staleGuard();
 
-  async function loadMembers(seasonId) {
-    const ticket = membersLoad.take();
-    // See localRevision in shared.js: a read that set off before the
-    // organizer's latest tap describes a roster older than the screen.
-    const askedAt = localRevision();
-    const errorEl = document.getElementById("error");
-    errorEl.textContent = "";
-    // Only on the first load. Every action on this page ends by calling
-    // it again, and a full-page spinner flashing after each one is worse
-    // than the wait it replaces.
-    const firstLoad = document.getElementById("roster-section").hidden;
-    if (firstLoad) showPageLoading(document.getElementById("no-season"));
-    // Paints the pool's spinner before the reads go out. renderJoinPool
-    // is otherwise only reached once `extras` resolves, which is the
-    // moment the spinner would stop being useful.
-    renderJoinPool();
-    // Sent now, read later. These two feed the sections *below* the
-    // roster, so they no longer hold it up — but there is no reason for
-    // them to start any later than they used to. Parsed here rather than
-    // where they are used: getJsonSWR calls its callback twice, and a
-    // Response body can only be read once, so passing the raw responses
-    // down would throw on the second pass.
-    const extras = Promise.all([
-      fetch(`${API_BASE}/seasons/${seasonId}/join-pool`, { headers: authHeader() })
-        .then((r) => (r.ok ? r.json() : []))
-        .catch(() => []),
-      fetch(`${API_BASE}/clubs/${currentClubId()}/members`, { headers: authHeader() })
-        .then((r) => (r.ok ? r.json() : []))
-        .catch(() => []),
-    ]);
-
+  async function loadPage(seasonId) {
+    const clubId = currentClubId();
+    const ticket = pageLoad.take();
+    document.getElementById("error").textContent = "";
+    setPoolExpanded(false);
+    setMembersLoading(true);
     try {
-      // Cached copy first, network second. This was the last of the four
-      // management pages still reading its season through a bare fetch,
-      // and the slowest warm page because of it — the same conversion
-      // organizer-settings.html and organizer-ledger.html already made.
-      // A 404 reports through the catch now rather than its own branch,
-      // matching those two.
-      await getJsonSWR(`${API_BASE}/seasons/${seasonId}`, (season) => {
-        paint(season).catch((e) => {
-          if (!membersLoad.current(ticket)) return;
-          errorEl.textContent = "連不上伺服器：" + e.message;
-        });
-      }, { headers: authHeader() });
-    } catch (e) {
-      if (!membersLoad.current(ticket)) return;
-      document.getElementById("no-season").innerHTML = "";
-      errorEl.textContent = "連不上伺服器：" + e.message;
-    }
+      if (!clubId) {
+        if (!pageLoad.current(ticket)) return;
+        currentSeason = null;
+        currentPool = [];
+        allClubMembers = [];
+        joinRequests = [];
+        renderJoinLink(null);
+        document.getElementById("requests-section").hidden = true;
+        document.getElementById("roster-section").hidden = true;
+        document.getElementById("dup-section").hidden = true;
+        document.getElementById("no-season").innerHTML = noClubYetHtml();
+        setMembersLoading(false);
+        return;
+      }
 
-    async function paint(season) {
-      if (!membersLoad.current(ticket)) return;
-      // Somebody changed something after this read set off, so painting
-      // it would undo their tap. The change queues its own reload.
-      if (currentSeason && currentSeason.id === season.id && localRevision() !== askedAt) return;
-      currentSeason = season;
-      // The roster goes up on the season alone — renderMembers reads
-      // nothing but its argument — so the page shows the thing it exists
-      // to show without waiting on the two lists underneath it.
-      renderMembers(currentSeason);
-      document.getElementById("no-season").innerHTML = "";
-      document.getElementById("roster-section").hidden = false;
-      document.getElementById("guest-section").hidden = false;
+      const requests = readPageJson(`/clubs/${clubId}/members?include=pending`);
+      const invite = readPageJson(`/clubs/${clubId}/invite`);
+      const season = seasonId ? readPageJson(`/seasons/${seasonId}`) : Promise.resolve(null);
+      const pool = seasonId
+        ? readPageJson(`/seasons/${seasonId}/join-pool`)
+        : Promise.resolve([]);
+      const [clubMembers, inviteData, seasonData, poolData] = await Promise.all([
+        requests,
+        invite,
+        season,
+        pool,
+      ]);
+      if (!pageLoad.current(ticket) || currentClubId() !== String(clubId)) return;
 
-      const [pool, members] = await extras;
-      if (!membersLoad.current(ticket)) return;
-      currentPool = pool;
-      allClubMembers = members;
-      poolLoaded = true;
-      renderJoinPool();
-      renderDuplicates();
+      allClubMembers = clubMembers.filter((member) => member.status === "active");
+      joinRequests = clubMembers.filter((member) => member.status === "pending");
+      currentSeason = seasonData;
+      currentPool = poolData;
+      document.getElementById("no-season").innerHTML = seasonData
+        ? ""
+        : emptyStateHtml(
+            "這個球隊尚未開季",
+            "固定成員名單是跟著一季走的。可以先分享加入連結，開季後再建立本季名單。",
+            { label: "建立第一季", href: "organizer-settings.html" }
+          );
+      renderJoinLink(inviteData);
+      renderRequests();
+      document.getElementById("roster-section").hidden = !seasonData;
+      if (seasonData) {
+        renderMembers(seasonData);
+        renderJoinPool();
+        renderDuplicates();
+      } else {
+        document.getElementById("dup-section").hidden = true;
+      }
+      setMembersLoading(false);
+    } catch (error) {
+      if (!pageLoad.current(ticket)) return;
+      showMembersError(error.message || "暫時無法載入資料");
     }
   }
 
-  let joinRequests = [];
-  /** False until the join-requests read has answered once. Without it
-   * "still coming" and "nobody is waiting" are the same empty array. */
-  let requestsLoaded = false;
+  function reloadCurrentPage() {
+    rosterEditing = false;
+    loadPage(currentSeason ? currentSeason.id : null);
+  }
 
-  /** Who is waiting to be let in.
-   *
-   * Cached copy first, network second. This was the last bare fetch left
-   * on the page — loadMembers was converted on 2026-09-17 and this one
-   * was missed — and moving 待核准 to the top of the page made the miss
-   * far more obvious: the section now arrives *above* the roster, so a
-   * late answer shoves everything down under the reader's eyes rather
-   * than appearing quietly below them. Reported as 「待核准還是出現的太慢
-   * 了」 on 2026-09-18.
-   *
-   * Approving or declining goes through postJson, which drops the whole
-   * response cache, so the copy painted here can never outlive a
-   * decision made on it.
-   */
-  async function loadRequests() {
-    const clubId = currentClubId();
-    if (!clubId) return;
-    // Says "still looking" before the request goes out, not after it
-    // lands. This read cannot start until the club id is known, which is
-    // three hops in (LIFF, identify, /clubs), and a cached copy is
-    // dropped by every write — so the wait is real and often several
-    // seconds. Saying so is the honest fix; pretending otherwise is what
-    // made it look like a gap that filled itself.
-    renderRequests();
-    try {
-      await getJsonSWR(
-        `${API_BASE}/clubs/${clubId}/join-requests`,
-        (rows) => {
-          joinRequests = rows;
-          requestsLoaded = true;
-          renderRequests();
-        },
-        { headers: authHeader() }
-      );
-    } catch (e) {
-      // No cached copy and the network refused: show the section as
-      // empty rather than leaving whatever was on screen before.
-      joinRequests = [];
-      requestsLoaded = true;
-      renderRequests();
-    }
+  function requestGroups() {
+    return [
+      {
+        rows: joinRequests.filter((person) => person.wants_fixed_membership === true),
+        title: "申請固定成員",
+        detail: "核准後加入本季名單並計入季費",
+      },
+      {
+        rows: joinRequests.filter((person) => person.wants_fixed_membership === false),
+        title: "申請臨打",
+        detail: "核准後只加入球隊",
+      },
+      {
+        rows: joinRequests.filter((person) => person.wants_fixed_membership == null),
+        title: "申請加入球隊",
+        detail: "尚未指定加入方式",
+      },
+    ].filter((group) => group.rows.length > 0);
+  }
+
+  function requestRowHtml(person) {
+    return `
+      <div class="pool-row">
+        <span class="pool-who">
+          <span class="avatar sm">${escapeHtml((person.name || "?").slice(0, 1))}</span>
+          <span>${escapeHtml(person.name)}${genderTag(person.gender)}</span>
+        </span>
+        <button type="button" class="mini-action" onclick="approveRequest(${person.id}, true, this)">固定</button>
+        <button type="button" class="mini-action" onclick="approveRequest(${person.id}, false, this)">臨打</button>
+        <button type="button" class="icon-btn remove" title="拒絕" aria-label="拒絕 ${escapeHtml(person.name)}" onclick="declineRequest(${person.id})">−</button>
+      </div>`;
   }
 
   function renderRequests() {
     const section = document.getElementById("requests-section");
-    // Three states, not two. "Still coming" used to be drawn the same as
-    // "nobody is waiting" — both hidden — which is exactly why the
-    // section seemed to appear out of nowhere seconds after the page.
-    if (!requestsLoaded) {
-      section.hidden = false;
-      document.getElementById("requests-hint").hidden = true;
-      document.getElementById("requests-list").innerHTML =
-        blockLoadingHtml("正在看有沒有人在等核准");
+    const count = document.getElementById("requests-count");
+    const list = document.getElementById("requests-list");
+    section.hidden = false;
+    count.textContent = `${joinRequests.length} 人`;
+    if (joinRequests.length === 0) {
+      list.innerHTML = '<div class="request-tree empty"><span class="request-empty">目前沒有待核准的申請</span></div>';
       return;
     }
-    document.getElementById("requests-hint").hidden = false;
-    section.hidden = joinRequests.length === 0;
-    if (section.hidden) return;
-    document.getElementById("requests-list").innerHTML = joinRequests
+    const groups = requestGroups();
+    list.innerHTML = `<div class="request-tree">${groups
       .map(
-        (p) => `
-          <div class="pool-row">
-            <span class="pool-who">
-              <span class="avatar sm">${escapeHtml((p.name || "?").slice(0, 1))}</span>
-              <span>${escapeHtml(p.name)}${genderTag(p.gender)}<span class="guest-tag">${p.wants_fixed_membership ? "想固定打" : "想臨打"}</span></span>
-            </span>
-            <button type="button" class="mini-action" onclick="approveRequest(${p.id}, true, this)">核准固定</button>
-            <button type="button" class="mini-action" onclick="approveRequest(${p.id}, false, this)">核准臨打</button>
-            <button type="button" class="icon-btn remove" title="拒絕" aria-label="拒絕" onclick="declineRequest(${p.id})">−</button>
-          </div>`
+        (group) => `
+          <section class="request-group">
+            <div class="request-title"><strong>${group.title}<small>${group.rows.length} 人</small></strong><span>${group.detail}</span></div>
+            <div class="member-list">${group.rows.map(requestRowHtml).join("")}</div>
+          </section>`
       )
-      .join("");
+      .join("")}</div>`;
   }
 
   async function approveRequest(playerId, asFixed, btn) {
@@ -436,7 +452,7 @@
     if (
       toRoster &&
       seasonHasStarted(currentSeason) &&
-      !confirm(`把「${person.name}」加入固定名單會重新計算整季每人每場的金額，包含已經打過的場次，確定要加入嗎？`)
+      !confirm(`把「${person.name}」加入本季固定名單後，會為他記入完整本季季費。確定要繼續嗎？`)
     ) {
       return;
     }
@@ -462,33 +478,33 @@
     } else {
       toast(`已核准 ${person.name}`, "good");
     }
-    loadRequests();
-    if (currentSeason) loadMembers(currentSeason.id);
+    reloadCurrentPage();
   }
 
   async function declineRequest(playerId) {
     const person = joinRequests.find((p) => p.id === playerId);
-    if (!person || !confirm(`不讓「${person.name}」加入球隊嗎？`)) return;
+    if (!person || !confirm(`確定要拒絕「${person.name}」加入球隊嗎？`)) return;
     try {
       await deleteJson(API_BASE, `/clubs/${currentClubId()}/members/${playerId}`);
       toast("已拒絕", "good");
     } catch (e) {
       toast("拒絕失敗：" + e.message);
     }
-    loadRequests();
+    reloadCurrentPage();
   }
 
-  let currentPool = [];
-  let allClubMembers = [];
-
   function renderDuplicates() {
+    const section = document.getElementById("dup-section");
+    if (!currentSeason) {
+      section.hidden = true;
+      return;
+    }
     const byName = new Map();
     for (const m of allClubMembers) {
       const key = m.name.trim();
       byName.set(key, [...(byName.get(key) || []), m]);
     }
     const groups = [...byName.values()].filter((g) => g.length > 1);
-    const section = document.getElementById("dup-section");
     section.hidden = groups.length === 0;
     if (section.hidden) return;
     document.getElementById("dup-list").innerHTML = groups
@@ -535,7 +551,7 @@
     } catch (e) {
       toast("合併失敗：" + e.message);
     }
-    loadMembers(currentSeason.id);
+    reloadCurrentPage();
   }
 
 
@@ -544,138 +560,142 @@
   // label) do, since a LINE display name is attacker-supplied once
   // anyone can land in this pool via the join link.
   function poolRowHtml(p) {
+    const controls = rosterWrites.has(p.id)
+      ? '<span class="roster-write-state"><i class="spinner sm" aria-label="儲存中"></i></span>'
+      : canEditRoster()
+      ? `
+        <button type="button" class="icon-btn add" title="加入本季固定名單" aria-label="加入本季固定名單" onclick="promoteFromPool(${p.id})">＋</button>
+        <button type="button" class="icon-btn remove" title="移出球隊" aria-label="移出球隊" onclick="removeFromClub(${p.id})">−</button>`
+      : "";
     return `
-      <div class="pool-row">
+      <div class="pool-row${movingPlayerId === p.id ? " roster-row-entering" : ""}" data-player-id="${p.id}">
         <span class="pool-who">
           ${p.avatar_url
             ? `<img class="avatar sm" src="${escapeHtml(p.avatar_url)}" alt="">`
             : `<span class="avatar sm">${escapeHtml((p.name || "?").slice(0, 1))}</span>`}
           <span>${escapeHtml(p.name)}${genderTag(p.gender)}${guestTag(p)}</span>
         </span>
-        <button type="button" class="icon-btn add" title="加入本季" aria-label="加入本季" onclick="promoteFromPool(${p.id})">＋</button>
-        ${p.linked ? `<button type="button" class="icon-btn link" title="已在名單上，合併至現有成員" aria-label="已在名單上" onclick="linkToRosterEntry(${p.id})">⇄</button>` : ""}
-        <button type="button" class="icon-btn remove" title="移出球隊" aria-label="移出球隊" onclick="removeFromClub(${p.id}, '${p.name.replace(/'/g, "\'")}')">−</button>
+        ${controls}
       </div>
     `;
   }
 
-  /** Splits the club-but-not-this-season pool into the one group worth
-   * surfacing on its own — somebody who already said "I'm a fixed
-   * member" and is waiting on a decision — and everyone else, who stays
-   * collapsed: most weeks
-   * there is nothing to do with that second list, and it used to sit
-   * above 本季固定成員 itself, which is what the organizer actually
-   * opens this page to read.
-   */
-  /** False until the join-pool read has answered once — the same三態
-   * problem as 待核准: an empty list and a list still on its way are not
-   * the same thing, and drawing both as "hidden" is what makes a section
-   * appear from nowhere seconds after the page. */
-  let poolLoaded = false;
-
   function renderJoinPool() {
-    if (!poolLoaded) {
-      const poolSection = document.getElementById("pool-section");
-      poolSection.hidden = false;
-      document.getElementById("pool-toggle").hidden = true;
-      const list = document.getElementById("pool-list");
-      list.hidden = false;
-      list.innerHTML = blockLoadingHtml("正在讀球隊成員");
-      return;
-    }
-    document.getElementById("pool-toggle").hidden = false;
-    const waiting = currentPool.filter((p) => p.wants_fixed_membership === true);
-    const others = currentPool.filter((p) => p.wants_fixed_membership !== true);
-    const settled = currentSeason.settled_at !== null;
-
-    const waitingSection = document.getElementById("waiting-section");
-    waitingSection.hidden = waiting.length === 0 || settled;
-    if (!waitingSection.hidden) {
-      document.getElementById("waiting-list").innerHTML = waiting.map(poolRowHtml).join("");
-    }
-
     const poolSection = document.getElementById("pool-section");
-    poolSection.hidden = others.length === 0 || settled;
-    if (!poolSection.hidden) {
-      document.getElementById("pool-count").textContent = `(${others.length})`;
-      document.getElementById("pool-list").innerHTML = others.map(poolRowHtml).join("");
-    }
+    const list = document.getElementById("pool-list");
+    const others = currentPool || [];
+    // Before the first game, and while correcting an open season, retain
+    // an empty "其他成員" group so there is an honest place to add a visitor.
+    // In ordinary read-only mode an empty group adds no useful information.
+    poolSection.hidden = !currentSeason || currentSeason.settled_at !== null ||
+      (others.length === 0 && !canEditRoster());
+    if (poolSection.hidden) return;
+    document.getElementById("pool-count").textContent = `(${others.length})`;
+    list.innerHTML = others.length ? others.map(poolRowHtml).join("") : '<div class="empty">尚無其他成員</div>';
+    document.getElementById("guest-button").hidden = !canEditRoster();
   }
 
   const poolToggle = document.getElementById("pool-toggle");
   poolToggle.addEventListener("click", () => {
-    const list = document.getElementById("pool-list");
-    list.hidden = !list.hidden;
-    poolToggle.setAttribute("aria-expanded", String(!list.hidden));
+    setPoolExpanded(poolToggle.getAttribute("aria-expanded") !== "true");
   });
 
-  /** add_member refuses with no room the same way whether the roster
-   * itself is already the size of the capacity, or a game just has
-   * nobody free — see routes.add_member. Either way the message tells
-   * the organizer to go raise it in 設定 and come back, which is two
-   * screens for what could be one. This does it in place: raise it here,
-   * then retry the add that just failed, so the tap that started this
-   * finishes instead of being abandoned halfway.
-   *
-   * Detected on `error.rawMessage`, the untranslated English detail —
-   * not the Chinese text shown on screen, which is free to be reworded
-   * without breaking this. */
-  async function offerToRaiseCapacity(error, retry) {
-    if (!error.rawMessage || !/capacity/i.test(error.rawMessage)) {
-      toast(error.message);
-      return;
+  function setPoolExpanded(expanded) {
+    document.getElementById("pool-content").hidden = !expanded;
+    poolToggle.setAttribute("aria-expanded", String(expanded));
+  }
+
+  /** Keep roster corrections in the current view. The server remains the
+   * source of truth, but a successful write already returns enough data to
+   * move the affected row without replacing the whole page and closing edit
+   * mode. A later page visit still fetches a fresh copy as usual. */
+  function renderRosterLists(enteringId = null) {
+    movingPlayerId = enteringId;
+    renderMembers(currentSeason);
+    renderJoinPool();
+    renderDuplicates();
+    if (rosterEditing) setPoolExpanded(true);
+    clearTimeout(movingPlayerTimer);
+    if (enteringId === null) return;
+    movingPlayerTimer = setTimeout(() => {
+      movingPlayerId = null;
+      document.querySelectorAll(".roster-row-entering").forEach((row) => {
+        row.classList.remove("roster-row-entering");
+      });
+    }, 220);
+  }
+
+  function addToRosterLocally(member) {
+    currentSeason.members = [
+      ...currentSeason.members.filter((person) => person.id !== member.id),
+      member,
+    ];
+    currentPool = currentPool.filter((person) => person.id !== member.id);
+    renderRosterLists(member.id);
+  }
+
+  function returnToPoolLocally(member) {
+    currentSeason.members = currentSeason.members.filter((person) => person.id !== member.id);
+    if (!currentPool.some((person) => person.id === member.id)) {
+      currentPool = [...currentPool, member];
     }
-    const answer = prompt(
-      `${error.message}\n\n要把人數上限調成多少？`,
-      String(currentSeason.capacity + 1)
-    );
-    if (!answer) return;
-    const next = Number(answer);
-    if (!Number.isInteger(next) || next <= 0) {
-      toast("請輸入正整數");
-      return;
-    }
-    try {
-      await postJson(
-        API_BASE,
-        `/seasons/${currentSeason.id}`,
-        { capacity: next },
-        "PATCH"
-      );
-    } catch (e) {
-      toast("調整人數上限失敗：" + e.message);
-      return;
-    }
-    try {
-      await retry();
-    } catch (e) {
-      toast(e.message);
-    }
+    renderRosterLists(member.id);
+  }
+
+  function addGuestToPoolLocally(member) {
+    currentPool = [
+      ...currentPool.filter((person) => person.id !== member.id),
+      member,
+    ];
+    allClubMembers = [
+      ...allClubMembers.filter((person) => person.id !== member.id),
+      { ...member, role: "member", status: "active" },
+    ];
+    renderRosterLists(member.id);
   }
 
   async function promoteFromPool(playerId) {
     const player = currentPool.find((p) => p.id === playerId);
-    if (!player) return;
-    // Free and silent before the season starts
-    // — there is no charge yet to warn about. Once a game has
-    // been played, adding somebody moves money on their ledger right
-    // away, so this asks first.
+    if (!player || !canEditRoster() || rosterWrites.has(playerId)) return;
     if (
       seasonHasStarted(currentSeason) &&
       !confirm(
-        `把「${player.name}」加入固定名單會重新計算整季每人每場的金額，包含已經打過的場次，確定要加入嗎？`
+        `把「${player.name}」加入本季固定名單後，會為他記入完整本季季費。確定要更正嗎？`
       )
     ) {
       return;
     }
-    const attempt = () =>
-      postJson(API_BASE, `/seasons/${currentSeason.id}/members`, {
-        player_name: player.name,
-      }).then(() => loadMembers(currentSeason.id));
+    rosterWrites.add(playerId);
+    addToRosterLocally(player);
+    bumpLocalRevision();
     try {
-      await attempt();
+      const added = await enqueueRequest(() => postJson(
+        API_BASE,
+        `/seasons/${currentSeason.id}/members`,
+        { player_name: player.name }
+      ));
+      currentSeason.members = currentSeason.members.map((member) =>
+        member.id === playerId ? added : member
+      );
+      rosterWrites.delete(playerId);
+      renderRosterLists();
+      const displaced = added.displaced_drop_ins || [];
+      const moved = displaced.map((dropIn) =>
+        `${describeDate(dropIn.game_date).label}的 ${dropIn.player_name}`
+      );
+      toast(
+        moved.length
+          ? `已將 ${added.name} 加入固定名單；${moved.join("、")}已移至候補`
+          : `已將 ${added.name} 加入本季固定名單`,
+        "good"
+      );
     } catch (e) {
-      await offerToRaiseCapacity(e, attempt);
+      currentSeason.members = currentSeason.members.filter((member) => member.id !== playerId);
+      if (!currentPool.some((member) => member.id === playerId)) currentPool = [...currentPool, player];
+      rosterWrites.delete(playerId);
+      bumpLocalRevision();
+      renderRosterLists(playerId);
+      toast(e.message);
     }
   }
 
@@ -688,7 +708,7 @@
   }
 
   function genderButtons(m) {
-    if (m.linked) return "";  // has a LINE account -> theirs to set
+    if (m.linked || !canEditRoster()) return "";
     return `
       <span class="mini-gender">
         <button type="button" class="${m.gender === "male" ? "on" : ""}" onclick="setGender(${m.id}, 'male')">男</button>
@@ -701,6 +721,7 @@
    * trip to redraw a two-state toggle is the difference between a
    * control that feels like a switch and one that feels broken. */
   async function setGender(playerId, gender) {
+    if (!canEditRoster()) return;
     const member = (currentSeason.members || []).find((m) => m.id === playerId);
     const previous = member ? member.gender : null;
     // Already set that way: the button is showing the state it sets, so
@@ -714,11 +735,11 @@
     renderMembers(currentSeason);
     try {
       await postJson(API_BASE, `/players/${playerId}/gender`, { gender }, "PUT");
-      await loadMembers(currentSeason.id);
+      renderRosterLists();
     } catch (e) {
       if (member) member.gender = previous;
       bumpLocalRevision();
-      renderMembers(currentSeason);
+      renderRosterLists();
       toast("設定性別失敗：" + e.message);
     }
   }
@@ -755,60 +776,115 @@
       await postJson(API_BASE, `/clubs/${currentClubId()}/players/${picked.id}/link`, {
         line_player_id: linePlayerId,
       });
-      await loadMembers(currentSeason.id);
+      reloadCurrentPage();
     } catch (e) {
       toast("合併失敗：" + e.message);
     }
   }
 
-  async function removeFromClub(playerId, name) {
+  async function removeFromClub(playerId) {
+    const member = currentPool.find((person) => person.id === playerId);
+    if (!member || !canEditRoster() || rosterWrites.has(playerId)) return;
+    const name = member.name;
     if (!confirm(`要把「${name}」移出球隊嗎？
 
 他們之後可以再用邀請連結加入。`)) return;
+    rosterWrites.add(playerId);
+    currentPool = currentPool.filter((person) => person.id !== playerId);
+    allClubMembers = allClubMembers.filter((person) => person.id !== playerId);
+    bumpLocalRevision();
+    renderRosterLists();
     try {
-      await deleteJson(API_BASE, `/clubs/${currentClubId()}/members/${playerId}`);
-      await loadMembers(currentSeason.id);
+      await enqueueRequest(() => deleteJson(
+        API_BASE,
+        `/clubs/${currentClubId()}/members/${playerId}`
+      ));
+      rosterWrites.delete(playerId);
+      renderRosterLists();
+      toast(`已將 ${name} 移出球隊`, "good");
     } catch (e) {
+      if (!currentPool.some((person) => person.id === playerId)) currentPool = [...currentPool, member];
+      if (!allClubMembers.some((person) => person.id === playerId)) allClubMembers = [...allClubMembers, member];
+      rosterWrites.delete(playerId);
+      bumpLocalRevision();
+      renderRosterLists(playerId);
       toast("移出球隊失敗：" + e.message);
     }
   }
 
 
+  function canEditRoster() {
+    return !!currentSeason && currentSeason.settled_at === null &&
+      (!seasonHasStarted(currentSeason) || rosterEditing);
+  }
+
   function renderMembers(season) {
     const settled = season.settled_at !== null;
+    const started = seasonHasStarted(season);
+    const editButton = document.getElementById("roster-edit");
     document.getElementById("settled-note").hidden = !settled;
-    document.getElementById("guest-section").hidden = settled;
-    // Nothing to warn about before the first game: nobody has been
-    // charged for a game yet, and add/remove is free and silent here.
-    // The warning is exactly true
-    // once a game has been played, which is also when it starts asking
-    // for confirmation — see promoteFromPool, addGuest, removeMember.
-    document.getElementById("warn-note").hidden = settled || !seasonHasStarted(season);
+    editButton.hidden = settled || !started;
+    editButton.setAttribute("aria-pressed", String(rosterEditing));
+    editButton.textContent = rosterEditing ? "完成" : "✎ 更正名單";
+    document.getElementById("warn-note").hidden = !started || !rosterEditing || settled;
+    document.getElementById("roster-hint").textContent =
+      "本季固定成員依整季計費；單場是否參加請在場次中設定。";
+    document.getElementById("roster-count").textContent = `${season.members.length} 人`;
 
     const list = document.getElementById("member-list");
     if (season.members.length === 0) {
-      list.innerHTML = '<div class="empty">尚無成員</div>';
+      list.innerHTML = '<div class="empty">尚無固定成員</div>';
       return;
     }
     list.innerHTML = season.members
       .map(
-        (m) => `
-          <div class="member-row">
-            <span>${escapeHtml(m.name)}${genderTag(m.gender)}${guestTag(m)}</span>
+        (member) => {
+          const actions = rosterWrites.has(member.id)
+            ? '<span class="roster-write-state"><i class="spinner sm" aria-label="儲存中"></i></span>'
+            : `${genderButtons(member)}
+               ${canEditRoster() ? `<button type="button" class="icon-btn remove" title="從本季固定名單移除" aria-label="從本季固定名單移除 ${escapeHtml(member.name)}" onclick="removeMember(${member.id})">−</button>` : ""}`;
+          return `
+          <div class="member-row${movingPlayerId === member.id ? " roster-row-entering" : ""}" data-player-id="${member.id}">
+            <span>${escapeHtml(member.name)}${genderTag(member.gender)}${guestTag(member)}</span>
             <span class="row-actions">
-              ${settled ? "" : genderButtons(m)}
-              ${settled ? "" : `<button type="button" class="action cancel sm" onclick="removeMember(${m.id})">移除</button>`}
+              ${actions}
             </span>
           </div>
-        `
+        `;
+        }
       )
       .join("");
   }
 
+  document.getElementById("roster-edit").addEventListener("click", () => {
+    rosterEditing = !rosterEditing;
+    if (rosterEditing) setPoolExpanded(true);
+    else setPoolExpanded(false);
+    renderMembers(currentSeason);
+    renderJoinPool();
+  });
+
+  function openGuestDialog() {
+    if (!canEditRoster()) return;
+    const input = document.getElementById("new-member-name");
+    input.value = "";
+    document.getElementById("new-member-gender").value = "";
+    document.getElementById("guest-backdrop").hidden = false;
+    input.focus();
+  }
+
+  function closeGuestDialog() {
+    document.getElementById("guest-backdrop").hidden = true;
+  }
+
+  document.getElementById("guest-backdrop").addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeGuestDialog();
+  });
 
   async function addGuest() {
+    if (!canEditRoster()) return;
     const input = document.getElementById("new-member-name");
-    const genderSelect = document.getElementById("new-member-gender");
+    const genderInput = document.getElementById("new-member-gender");
     const name = input.value.trim();
     // Checked here rather than left to the server: an empty name got a
     // 400 back, which reaches the reader as nothing at all happening.
@@ -817,46 +893,53 @@
       input.focus();
       return;
     }
-    if (
-      seasonHasStarted(currentSeason) &&
-      !confirm(`新增「${name}」會重新計算整季每人每場的金額，包含已經打過的場次。要繼續嗎？`)
-    ) {
-      return;
-    }
-    const attempt = () =>
-      postJson(API_BASE, `/seasons/${currentSeason.id}/members`, {
-        player_name: name,
-        gender: genderSelect.value || null,
-      }).then(() => {
-        input.value = "";
-        genderSelect.value = "";
-        return loadMembers(currentSeason.id);
-      });
     try {
-      await attempt();
+      const added = await postJson(API_BASE, `/clubs/${currentClubId()}/guests`, {
+        name,
+        gender: genderInput.value || null,
+      });
+      input.value = "";
+      genderInput.value = "";
+      closeGuestDialog();
+      addGuestToPoolLocally(added);
+      toast(`已將 ${added.name} 加入其他成員`, "good");
     } catch (e) {
-      await offerToRaiseCapacity(e, attempt);
+      toast("新增訪客失敗：" + e.message);
     }
   }
 
   async function removeMember(playerId) {
     const member = currentSeason.members.find((m) => m.id === playerId);
-    if (!member) return;
+    if (!member || !canEditRoster() || rosterWrites.has(playerId)) return;
     if (
       seasonHasStarted(currentSeason) &&
       !confirm(
-        `移除「${member.name}」會重新計算整季每人每場的金額，包含已經打過的場次，確定要移除嗎？`
+        `把「${member.name}」從本季固定名單移除後，會沖銷他的本季季費。確定要更正嗎？`
       )
     ) {
       return;
     }
+    rosterWrites.add(playerId);
+    returnToPoolLocally(member);
+    bumpLocalRevision();
     try {
-      await deleteJson(API_BASE, `/seasons/${currentSeason.id}/members/${playerId}`);
+      await enqueueRequest(() => deleteJson(
+        API_BASE,
+        `/seasons/${currentSeason.id}/members/${playerId}`
+      ));
+      rosterWrites.delete(playerId);
+      renderRosterLists();
+      toast(`已將 ${member.name} 移回其他成員`, "good");
     } catch (e) {
+      currentPool = currentPool.filter((person) => person.id !== playerId);
+      if (!currentSeason.members.some((person) => person.id === playerId)) {
+        currentSeason.members = [...currentSeason.members, member];
+      }
+      rosterWrites.delete(playerId);
+      bumpLocalRevision();
+      renderRosterLists(playerId);
       toast("移除失敗：" + e.message);
-      return;
     }
-    loadMembers(currentSeason.id);
   }
 </script>
 </body>

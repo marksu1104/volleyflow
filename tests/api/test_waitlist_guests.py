@@ -88,7 +88,12 @@ def test_a_guest_promoted_from_the_queue_is_still_theirs_to_cancel(
     promoted = [d for d in game["confirmed_drop_ins"] if d["player_name"] == "朋友丙"]
     assert promoted and promoted[0]["signed_up_by_me"] is True
     cancel = client.post(f"/drop-ins/{promoted[0]['id']}/cancel", headers=member)
+
     assert cancel.status_code == 200
+    assert cancel.json()["promoted_from_waitlist"] is None
+    after = client.get(f"/seasons/{season['id']}", headers=member).json()["games"][0]
+    assert all(d["player_name"] != "朋友丙" for d in after["confirmed_drop_ins"])
+    assert all(w["player_name"] != "朋友丙" for w in after["waitlist_entries"])
 
 
 def test_people_you_have_brought_leave_out_anyone_no_longer_in_the_club(

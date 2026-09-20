@@ -4,6 +4,9 @@ that path), and lowering capacity itself. Per the attendance rules: "Nothing may
 put more people on court than Season.capacity, including the organizer."
 """
 
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 from fastapi.testclient import TestClient
 
 from tests.api.factories import create_club, start_season
@@ -151,6 +154,147 @@ def test_a_member_who_cancelled_their_own_leave_does_not_get_it_back(
 
     game = client.get(f"/seasons/{season['id']}").json()["games"][0]
     assert game["absences"] == []
+
+
+def test_a_past_full_game_does_not_prevent_filling_the_fixed_roster(
+    client: TestClient,
+) -> None:
+    """A roster correction today must not claim the new member was also
+    on an already-full court yesterday. Record them away on that date and
+    let the fixed roster reach its intended capacity."""
+    today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+    yesterday = (today - timedelta(days=1)).isoformat()
+    season = start_season(
+        client,
+        game_dates=[yesterday],
+        member_names=["Alice"],
+        capacity=2,
+    )
+    game_id = season["games"][0]["id"]
+    drop_in = client.post(
+        "/drop-ins", json={"player_name": "Visitor", "game_id": game_id}
+    )
+    assert drop_in.status_code == 200
+
+    added = client.post(f"/seasons/{season['id']}/members", json={"player_name": "Bob"})
+
+    assert added.status_code == 200, added.json()
+    detail = client.get(f"/seasons/{season['id']}").json()
+    assert len(detail["members"]) == detail["capacity"] == 2
+    game = detail["games"][0]
+    assert [absence["player_name"] for absence in game["absences"]] == ["Bob"]
+    assert len(game["confirmed_drop_ins"]) == 1
+
+
+def test_a_fixed_member_moves_a_future_drop_in_back_to_the_waitlist(
+    client: TestClient,
+) -> None:
+    today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+    tomorrow = (today + timedelta(days=1)).isoformat()
+    season = start_season(
+        client,
+        game_dates=[tomorrow],
+        member_names=["Alice"],
+        capacity=2,
+    )
+    game_id = season["games"][0]["id"]
+    signup = client.post(
+        "/drop-ins", json={"player_name": "Visitor", "game_id": game_id}
+    ).json()
+    waiting = client.post(
+        "/drop-ins", json={"player_name": "Already waiting", "game_id": game_id}
+    ).json()
+    assert waiting["status"] == "waitlisted"
+
+    added = client.post(f"/seasons/{season['id']}/members", json={"player_name": "Bob"})
+
+    assert added.status_code == 200, added.json()
+    assert added.json()["displaced_drop_ins"] == [
+        {
+            "player_id": signup["player_id"],
+            "player_name": "Visitor",
+            "game_id": game_id,
+            "game_date": tomorrow,
+        }
+    ]
+    detail = client.get(f"/seasons/{season['id']}").json()
+    game = detail["games"][0]
+    assert game["confirmed_drop_ins"] == []
+    assert [person["player_name"] for person in game["waitlist_entries"]] == [
+        "Visitor",
+        "Already waiting",
+    ], "the displaced signup keeps its earlier place in line"
+    ledger = client.get(
+        f"/clubs/{season['club_id']}/players/{signup['player_id']}/ledger"
+    ).json()
+    assert ledger["balance"] == "0", "being displaced must reverse the drop-in fee"
+
+
+def test_the_most_recent_future_drop_in_is_displaced_first(client: TestClient) -> None:
+    today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+    tomorrow = (today + timedelta(days=1)).isoformat()
+    season = start_season(
+        client,
+        game_dates=[tomorrow],
+        member_names=["Alice"],
+        capacity=3,
+    )
+    game_id = season["games"][0]["id"]
+    client.post("/drop-ins", json={"player_name": "Earlier", "game_id": game_id})
+    later = client.post(
+        "/drop-ins", json={"player_name": "Later", "game_id": game_id}
+    ).json()
+
+    added = client.post(f"/seasons/{season['id']}/members", json={"player_name": "Bob"})
+
+    assert added.status_code == 200, added.json()
+    assert [row["player_id"] for row in added.json()["displaced_drop_ins"]] == [
+        later["player_id"]
+    ]
+    game = client.get(f"/seasons/{season['id']}").json()["games"][0]
+    assert [person["player_name"] for person in game["confirmed_drop_ins"]] == [
+        "Earlier"
+    ]
+    assert [person["player_name"] for person in game["waitlist_entries"]] == ["Later"]
+
+    filled = client.post(
+        f"/seasons/{season['id']}/members", json={"player_name": "Carol"}
+    )
+
+    assert filled.status_code == 200, filled.json()
+    detail = client.get(f"/seasons/{season['id']}").json()
+    assert len(detail["members"]) == detail["capacity"] == 3
+    game = detail["games"][0]
+    assert game["confirmed_drop_ins"] == []
+    assert [person["player_name"] for person in game["waitlist_entries"]] == [
+        "Earlier",
+        "Later",
+    ]
+
+
+def test_a_future_drop_in_can_become_fixed_without_taking_an_extra_slot(
+    client: TestClient,
+) -> None:
+    today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+    tomorrow = (today + timedelta(days=1)).isoformat()
+    season = start_season(
+        client,
+        game_dates=[tomorrow],
+        member_names=["Alice"],
+        capacity=2,
+    )
+    game_id = season["games"][0]["id"]
+    client.post("/drop-ins", json={"player_name": "Visitor", "game_id": game_id})
+
+    added = client.post(
+        f"/seasons/{season['id']}/members", json={"player_name": "Visitor"}
+    )
+
+    assert added.status_code == 200, added.json()
+    assert added.json()["displaced_drop_ins"] == []
+    detail = client.get(f"/seasons/{season['id']}").json()
+    assert len(detail["members"]) == detail["capacity"] == 2
+    assert detail["games"][0]["confirmed_drop_ins"] == []
 
 
 def test_capacity_cannot_drop_below_the_current_roster(client: TestClient) -> None:

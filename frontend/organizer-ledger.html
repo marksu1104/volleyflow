@@ -41,9 +41,18 @@
     <a href="organizer-settings.html" class="org-nav-link">設定</a>
   </nav>
 
-  <div class="picker-row">
-    <select id="club-picker" class="season-picker club-picker" hidden></select>
-    <select id="season-picker" class="season-picker" hidden></select>
+  <div class="picker-row picker-row-labeled">
+    <div id="club-picker-field" class="picker-field" hidden>
+      <label for="club-picker">球隊</label>
+      <select id="club-picker" class="season-picker club-picker" hidden></select>
+    </div>
+    <div id="season-picker-field" class="picker-field" hidden>
+      <label for="season-picker">季別</label>
+      <span class="picker-control">
+        <select id="season-picker" class="season-picker" hidden></select>
+        <i class="spinner sm picker-spinner" aria-hidden="true"></i>
+      </span>
+    </div>
   </div>
   <div id="error"></div>
 
@@ -161,11 +170,14 @@
       "vf_org_season",
       (id) => {
         stopLoadingEscalation();
-        document.getElementById("club-picker").hidden = !currentClubId();
+        const hasClub = !!currentClubId();
+        document.getElementById("club-picker-field").hidden = !hasClub;
+        document.getElementById("club-picker").hidden = !hasClub;
         if (id) {
           // The tabs stay hidden until loadLedger has the numbers.
           // Revealing them here put an empty 季費已收 card on screen for
           // the length of the fetch, which reads as broken, not busy.
+          document.getElementById("season-picker-field").hidden = false;
           document.getElementById("season-picker").hidden = false;
           loadLedger(id);
         } else {
@@ -188,6 +200,7 @@
     // and its empty white bar sit under the spinner while the numbers
     // are still on their way.
     document.getElementById("ledger-tabs").hidden = !hasSeason;
+    document.getElementById("season-picker-field").hidden = !hasSeason;
     document.getElementById("season-picker").hidden = !hasSeason;
     document.querySelectorAll(".tab").forEach((el) => {
       if (!hasSeason) el.hidden = true;

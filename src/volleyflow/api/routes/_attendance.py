@@ -13,7 +13,7 @@ from fastapi import (
     HTTPException,
     status,
 )
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from volleyflow.api.conversion import (
@@ -201,7 +201,9 @@ def _is_signed_up(db: Session, game: GameRow, player_id: int) -> bool:
     ) is not None
 
 
-def _games_with_no_room(db: Session, season: SeasonRow) -> list[GameRow]:
+def _games_with_no_room(
+    db: Session, season: SeasonRow, *, member_count: int | None = None
+) -> list[GameRow]:
     """The games where one more expected body wouldn't fit.
 
     Adding a fixed member adds them to *every* game in the season, so the
@@ -216,9 +218,64 @@ def _games_with_no_room(db: Session, season: SeasonRow) -> list[GameRow]:
         db.query(GameRow)
         .filter(GameRow.season_id == season.id, GameRow.status == GameStatus.SCHEDULED)
         .order_by(GameRow.date)
+        .with_for_update()
         .all()
     )
-    return [game for game in games if not _has_open_slot(db, game, season)]
+    if not games:
+        return []
+
+    # This used to call _expected_on_court once per game. That is three
+    # database round trips for every date (members, absences, drop-ins),
+    # so adding one roster member to a 13-game season took more than forty
+    # queries before it could answer. Read each count once for the whole
+    # season instead. The formula remains exactly _expected_on_court's.
+    if member_count is None:
+        member_count = (
+            db.query(func.count(SeasonMemberRow.player_id))
+            .filter(SeasonMemberRow.season_id == season.id)
+            .scalar()
+            or 0
+        )
+    game_ids = [game.id for game in games]
+    absence_counts = (
+        db.query(AbsenceRow.game_id, func.count(AbsenceRow.id))
+        .join(
+            SeasonMemberRow,
+            and_(
+                SeasonMemberRow.player_id == AbsenceRow.player_id,
+                SeasonMemberRow.season_id == season.id,
+            ),
+        )
+        .filter(
+            AbsenceRow.game_id.in_(game_ids),
+            AbsenceRow.cancelled_at.is_(None),
+        )
+        .group_by(AbsenceRow.game_id)
+        .all()
+    )
+    absences_by_game: dict[int, int] = {
+        int(game_id): int(count) for game_id, count in absence_counts
+    }
+    drop_in_counts = (
+        db.query(DropInRow.game_id, func.count(DropInRow.id))
+        .filter(
+            DropInRow.game_id.in_(game_ids),
+            DropInRow.cancelled_at.is_(None),
+        )
+        .group_by(DropInRow.game_id)
+        .all()
+    )
+    drop_ins_by_game: dict[int, int] = {
+        int(game_id): int(count) for game_id, count in drop_in_counts
+    }
+    return [
+        game
+        for game in games
+        if member_count
+        - int(absences_by_game.get(game.id, 0))
+        + int(drop_ins_by_game.get(game.id, 0))
+        >= season.capacity
+    ]
 
 
 def _within_change_deadline(game: GameRow, season: SeasonRow) -> bool:
@@ -339,6 +396,50 @@ def _give_back_queue_place(db: Session, drop_in: DropInRow) -> None:
         )
     )
     db.flush()
+
+
+def _displace_latest_drop_in(
+    db: Session, game: GameRow, season: SeasonRow
+) -> int | None:
+    """Move the latest confirmed drop-in back to this game's waitlist.
+
+    Fixed members have priority when the organizer corrects an open
+    season's roster. If the extra member would overfill an upcoming game,
+    the latest signup yields first (last in, first out), keeps their
+    original place in the queue, and gets the exact charge for that signup
+    reversed. Named substitutes are included: the organizer explicitly
+    chose that fixed membership outranks every kind of drop-in.
+
+    Returns the displaced player's id, or None when there is no active
+    drop-in to move. The latter should be impossible while the roster is
+    below capacity and the attendance invariants hold, but lets the caller
+    fail safely instead of overfilling a legacy-inconsistent game.
+    """
+    displaced = (
+        db.query(DropInRow)
+        .filter(
+            DropInRow.game_id == game.id,
+            DropInRow.cancelled_at.is_(None),
+        )
+        .order_by(DropInRow.signed_up_at.desc(), DropInRow.id.desc())
+        .with_for_update()
+        .first()
+    )
+    if displaced is None:
+        return None
+
+    displaced.cancelled_at = _now()
+    _record_drop_in_charge(db, displaced, season, reverse=True)
+    db.add(
+        WaitlistEntryRow(
+            player_id=displaced.player_id,
+            game_id=game.id,
+            queued_at=displaced.from_waitlist_at or displaced.signed_up_at,
+            brought_by_player_id=displaced.brought_by_player_id,
+        )
+    )
+    db.flush()
+    return int(displaced.player_id)
 
 
 def _release_whoever_is_covering(
@@ -574,12 +675,14 @@ def _offer_freed_slots_to_the_queue(db: Session, season: SeasonRow) -> list[int]
     # removals take the games in the same sequence and queue up behind
     # one another rather than deadlocking. SQLite ignores the clause;
     # only the postgres-marked tests exercise it.
+    queued_game_ids = db.query(WaitlistEntryRow.game_id)
     games = (
         db.query(GameRow)
         .filter(
             GameRow.season_id == season.id,
             GameRow.status == GameStatus.SCHEDULED,
             GameRow.date >= today,
+            GameRow.id.in_(queued_game_ids),
         )
         .order_by(GameRow.date)
         .with_for_update()
