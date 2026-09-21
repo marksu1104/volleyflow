@@ -6,7 +6,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { load } = require("./harness.js");
 
-test("申請臨打 sends the invite link's token and asks for single games", async () => {
+test("臨打成員 sends the invite link's token and asks for single games", async () => {
   const { joinFromPrompt } = load("member.html", { search: "?invite=12.abcdef0123456789abcd" });
   const sent = [];
   globalThis.fetch = async (url, opts = {}) => {

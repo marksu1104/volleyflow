@@ -132,6 +132,7 @@ class ClubMemberOut(BaseModel):
     linked: bool
     """See MemberOut.linked."""
     role: str
+    """"organizer" or "member" — see ClubMemberRow."""
     status: Literal["active", "pending"] = "active"
     """Active club members are returned normally; pending rows only appear
     for an organizer who explicitly requests them."""
@@ -139,7 +140,6 @@ class ClubMemberOut(BaseModel):
     """See ClubMemberRow.wants_fixed_membership. Shown to the organizer so
     the join pool distinguishes "waiting to be put on the roster" from
     "here for the odd game"."""
-    """"organizer" or "member" — see ClubMemberRow."""
 
 
 class SeasonCreate(BaseModel):

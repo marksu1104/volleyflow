@@ -122,6 +122,39 @@ check("標題列的球隊名、品牌、頭像不會疊在一起", (m) => {
   return problems.length ? problems.join("、") : null;
 });
 
+// How close a button's label is to breaking, not whether it has broken.
+//
+// Reported 2026-09-19 from an Android narrower than the organizer's
+// iPhone: 申請當固定成員 broke after 申請當固定成 while 申請臨打 beside
+// it stayed on one line. Nothing else here catches that — the button
+// grows to fit a second line, so it never overflows and never trips
+// 沒有元素超出畫面.
+//
+// The first version of this rule asked `lines > 1` and was measured at
+// 390, which is worthless: the long labels fill 0.77 of their box at 390
+// and 0.87 at 360, so they stay on one line with or without
+// white-space:nowrap, and the rule would have passed no matter what.
+// Measured at 320 they fill exactly 1.00 — no slack at all. A font a
+// shade wider than desktop Chromium's, or a phone with text scaling on,
+// is all it takes. That is why it broke on Android and not on an iPhone.
+//
+// So the useful question is the ratio, and the threshold is about slack
+// rather than about wrapping: below 0.92 a label survives a font that
+// renders ~8% wider; at 1.00 it is already over on some real device.
+const FILL_LIMIT = 0.92;
+check(`按鈕文字在最窄手機上留有餘裕（文字寬 ÷ 可用寬 < ${FILL_LIMIT}）`, (m) => {
+  // Never silently pass: an empty list means the measure found nothing
+  // and the rule is guarding air. Same failure mode the app-bar note
+  // below warns about.
+  if (!m.buttons || !m.buttons.length) return "沒有量到任何按鈕";
+  const tight = m.buttons.filter((b) => b.fill >= FILL_LIMIT);
+  return tight.length
+    ? `太擠（請縮短文字）: ${tight
+        .map((b) => `${b.label} ${b.fill.toFixed(2)}`)
+        .join("、")}`
+    : null;
+});
+
 (async () => {
   let measured;
   const browser = await chromium.launch({ channel: "msedge" });
@@ -338,6 +371,89 @@ check("標題列的球隊名、品牌、頭像不會疊在一起", (m) => {
       bar.remove();
       return measurement;
     });
+
+    // Long labels in the layout that actually breaks them: two .btn
+    // sharing a .btn-row inside an .empty-state, which is how the invite
+    // screen and the season wizard lay their buttons out. Built here
+    // rather than found, for the same reason as the app bar above — the
+    // scratch page carries no .btn at all, so a rule written against
+    // querySelectorAll(".btn") would report nothing forever.
+    //
+    // Measured at 320 rather than this page's 390: at 390 these labels
+    // fill 0.77 of their box and at 360 only 0.87, so nothing shows there
+    // however long they get. 320 is the narrowest phone still worth
+    // supporting, and it is where the fill ratio reaches 1.00.
+    //
+    // white-space is forced to nowrap for the measure, and that direction
+    // matters: measuring with it set to *normal* inverts the rule. A
+    // Range over wrapped text reports the widest line, not the text's
+    // natural width, so at 320 a label that breaks measures 86px against
+    // 96px of box (0.90 — passing) while the same label kept on one line
+    // measures 101 against 101 (1.00 — failing). The worse the layout,
+    // the healthier the number looked. Written the wrong way round first
+    // and caught only because the rule passed when it was expected to
+    // fail.
+    //
+    // Forced explicitly rather than relying on .btn already carrying
+    // nowrap: if that declaration is ever removed, this measure must not
+    // quietly start reporting wrapped widths again.
+    //
+    // Text width via Range rather than clientHeight ÷ lineHeight: .btn
+    // sets no line-height, so getComputedStyle returns "normal" and
+    // parseFloat gives NaN.
+    //
+    // The pairs are real: each is a .btn-row that exists in the app, with
+    // the longest label of the moment beside the one it actually sits
+    // next to. Shortening a label is a fix; deleting it from this list is
+    // not.
+    await page.setViewportSize({ width: 320, height: 900 });
+    measured.buttons = await page.evaluate(() => {
+      const pairs = [
+        ["固定成員", "臨打成員"],
+        ["上一步", "下一步"],
+        ["連結加入", "建立球隊"],
+      ];
+      const host = document.createElement("div");
+      host.className = "empty-state";
+      host.style.textAlign = "left";
+      host.innerHTML = pairs
+        .map(
+          ([a, b]) =>
+            '<div class="btn-row" style="margin-top:12px">' +
+            `<button type="button" class="btn btn-primary">${a}</button>` +
+            `<button type="button" class="btn btn-quiet">${b}</button>` +
+            "</div>"
+        )
+        .join("");
+      document.querySelector(".wrap").prepend(host);
+
+      // children.length === 0 keeps this to plain-text buttons: a control
+      // holding several spans (.todo-line) would measure its spans, not
+      // its text.
+      const out = [...host.querySelectorAll("button")]
+        .filter((b) => b.children.length === 0)
+        .map((b) => {
+          b.style.whiteSpace = "nowrap";
+          const range = document.createRange();
+          range.selectNodeContents(b);
+          const cs = getComputedStyle(b);
+          const avail =
+            b.clientWidth -
+            parseFloat(cs.paddingLeft) -
+            parseFloat(cs.paddingRight);
+          // On one forced line this is the width the label actually
+          // needs. No line count here: under nowrap it is always 1, and
+          // reporting it would invite the same inverted reasoning again.
+          const textW = range.getBoundingClientRect().width;
+          return {
+            label: b.textContent,
+            fill: avail > 0 ? textW / avail : 99,
+          };
+        });
+      host.remove();
+      return out;
+    });
+    await page.setViewportSize({ width: 390, height: 900 });
 
     fs.mkdirSync(OUT, { recursive: true });
     await page.screenshot({ path: path.join(OUT, "game-detail.png"), fullPage: true });

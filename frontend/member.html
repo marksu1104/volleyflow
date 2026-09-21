@@ -66,7 +66,7 @@
     <h3>球隊</h3>
     <div id="club-rows"></div>
     <div class="club-sheet-actions">
-      <button type="button" class="btn btn-quiet" onclick="promptJoinClub()">用連結加入球隊</button>
+      <button type="button" class="btn btn-quiet" onclick="promptJoinClub()">連結加入</button>
       <button type="button" class="btn btn-primary" onclick="createClub()">建立球隊</button>
     </div>
   </div>
@@ -151,7 +151,7 @@
   // renderIntentAsk; see the comment there.
   let seasonLoaded = false;
 
-  // A club's "用連結加入球隊" link carries ?invite=<token> — LIFF forwards
+  // A club's "連結加入" link carries ?invite=<token> — LIFF forwards
   // query params from the liff.line.me URL through to this page, so
   // opening a shared link picks the right club without the visitor
   // having to find it in a list themselves.
@@ -372,8 +372,8 @@
         <h3>加入「${escapeHtml(pendingInviteClubName)}」？</h3>
         <p>選一個送出申請。管理員核准之後，就能看到場次、請假和帳務。</p>
         <div class="btn-row" style="margin-top:12px">
-          <button type="button" class="btn btn-primary" onclick="joinFromPrompt(true, this)">申請當固定成員</button>
-          <button type="button" class="btn btn-quiet" onclick="joinFromPrompt(false, this)">申請臨打</button>
+          <button type="button" class="btn btn-primary" onclick="joinFromPrompt(true, this)">固定成員</button>
+          <button type="button" class="btn btn-quiet" onclick="joinFromPrompt(false, this)">臨打成員</button>
         </div>
       </div>
     `;
@@ -810,7 +810,7 @@
 
   function promptJoinClub() {
     toast(
-      "請向管理員索取「用連結加入球隊」的網址，用 LINE 打開即可自動加入該球隊。"
+      "請向管理員索取「連結加入」的網址，用 LINE 打開即可自動加入該球隊。"
     );
   }
 

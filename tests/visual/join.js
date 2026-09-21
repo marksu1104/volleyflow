@@ -82,17 +82,21 @@ async function statusIn(name, clubId) {
   const { page, errors } = await open(browser, link);
   await waitForText(page, /加入「/);
   const first = await heroSays(page);
-  report("an invite link names the club and offers 申請當固定成員 / 申請臨打", [
+  report("an invite link names the club and offers 固定成員 / 臨打成員", [
     ...(first.includes(`加入「${CLUB}」`) ? [] : [`the screen says: ${first.slice(0, 80)}`]),
-    ...(first.includes("申請臨打") && first.includes("申請當固定成員") ? [] : ["the two buttons aren't both there"]),
+    ...(first.includes("臨打成員") && first.includes("固定成員") ? [] : ["the two buttons aren't both there"]),
   ]);
 
   // 2. Asking says it's been sent, and the server has them waiting.
-  await page.click("text=申請臨打");
+  // text= is a substring match, so this must stay distinct from
+  // 固定成員 beside it — renaming either button means editing here too,
+  // or this line stops finding anything and the check dies on a timeout
+  // instead of reporting what changed.
+  await page.click("text=臨打成員");
   await waitForText(page, /已送出申請/);
   const asked = await heroSays(page);
   const waiting = await statusIn(stranger, clubId);
-  report("申請臨打 says the request is in, and the server has them waiting", [
+  report("臨打成員 says the request is in, and the server has them waiting", [
     ...(asked.includes("已送出申請") ? [] : [`the screen says: ${asked.slice(0, 80)}`]),
     ...(waiting === "pending" ? [] : [`their membership is ${waiting}`]),
     ...errors,
