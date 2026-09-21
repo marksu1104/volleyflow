@@ -1,12 +1,23 @@
-// Where the LINE rich menu's buttons actually land.
+// Where the LINE rich menu's 場次與報名 button actually lands.
 //
-// Every menu entry opens member.html with a parameter rather than a
-// path, because a liff.line.me link forwards query params to the LIFF
-// endpoint while a path depends on how that endpoint is configured. That
-// makes ?open= / ?pick= the contract between the menu and the app — and
-// nothing else checks it: smoke and memberweek both load member.html
-// bare, so the handler could rot into a dead button and every existing
-// check would still pass.
+// This file used to check `?open=ledger` and `?open=report` as well,
+// from when one LIFF app opened member.html and a parameter chose the
+// destination. Since 2026-09-18 each destination has its own LIFF app,
+// so those two parameters have pointed at nothing — the checks stayed
+// green while guarding a path no button takes. Removed 2026-09-22, the
+// same cleanup rootredirect.js got at the time and this missed.
+//
+// What remains is the one half of the contract a desktop browser can
+// still answer: `?pick=1`, which the menu's first column carries. The
+// other half — that the three liff.line.me apps land on the three right
+// pages — cannot be tested from here at all and must be opened inside
+// LINE (see the LIFF note in docs/HANDOFF.md §3.1).
+//
+// clubpicker.js covers whether the chooser appears and what choosing
+// does. This covers something it does not: that arriving with ?pick=1
+// opens the chooser *and nothing else* — the ledger and signup sheets
+// live on the same page and are one stray branch away from popping up
+// over it.
 //
 // A dead menu button is a failure nobody reports as a bug. They just
 // stop using it.
@@ -49,50 +60,6 @@ const open = (page, query) =>
   });
 
   try {
-    // 我的帳務 — the sheet must open *and* have its figures. Opening it
-    // before the ledger lands leaves it on 載入中 forever, because
-    // openLedger does not repaint when the answer arrives; waiting for
-    // the backdrop alone would call that a pass.
-    await open(page, "&open=ledger");
-    await page.waitForSelector("#ledger-backdrop:not([hidden])", { timeout: 25000 });
-    await page.waitForTimeout(1200);
-    const ledger = await page.evaluate(() => ({
-      total: (document.getElementById("lg-total") || {}).textContent || "",
-      body: (document.getElementById("lg-entries") || {}).innerText || "",
-      url: location.search,
-    }));
-    report("?open=ledger 打開帳務，而且裡面有數字", [
-      ...(ledger.total.trim() ? [] : ["帳務面板打開了，但金額是空的"]),
-      ...(ledger.body.includes("載入中") ? ["面板卡在「載入中」"] : []),
-      ...(ledger.url.includes("open=") ? [`網址還留著參數：${ledger.url}`] : []),
-      ...(ledger.url.includes("as=") ? [] : ["?as= 被一起清掉了，本機身分會掉"]),
-    ]);
-
-    // Reloading must not reopen it. The parameter is stripped for exactly
-    // this reason — otherwise a refresh drags the reader back to a sheet
-    // they closed.
-    await page.reload();
-    await page.waitForTimeout(2000);
-    const afterReload = await page.evaluate(
-      () => document.getElementById("ledger-backdrop").hidden
-    );
-    report("重新整理不會又把帳務面板打開", [
-      ...(afterReload ? [] : ["重新整理之後面板又自己打開了"]),
-    ]);
-
-    // 問題回報 — a different page entirely, reached by redirect.
-    await open(page, "&open=report");
-    await page.waitForURL(/report\.html/, { timeout: 25000 });
-    await page.waitForSelector("#content:not([hidden])", { timeout: 25000 });
-    const reportPage = await page.evaluate(() => ({
-      textarea: !!document.getElementById("report-text"),
-      button: (document.getElementById("report-btn") || {}).textContent || "",
-    }));
-    report("?open=report 帶到回報頁，而且表單在", [
-      ...(reportPage.textarea ? [] : ["回報頁上沒有輸入框"]),
-      ...(reportPage.button.includes("送出") ? [] : [`按鈕寫的是「${reportPage.button}」`]),
-    ]);
-
     // 場次與報名 — from the rich menu this is ?pick=1, so somebody
     // with several clubs may deliberately choose rather than being sent
     // to the one remembered on this device. The parameter is one-shot:

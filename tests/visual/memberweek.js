@@ -183,11 +183,21 @@ function inDays(days) {
       open: !document.getElementById("ledger-backdrop").hidden,
       total: (document.getElementById("lg-total") || {}).innerText || "",
       entries: document.querySelectorAll("#lg-entries .set-row, #lg-entries .m-row, #lg-entries > div").length,
+      // openLedger paints 載入中 when myLedger has not arrived and does
+      // not repaint when it does, so a panel opened too early stays on
+      // the spinner for ever. The row count cannot see that: the spinner
+      // is itself one div, so `entries > 0` passes while the sheet says
+      // nothing. This assertion lived in richmenulinks.js on the
+      // ?open=ledger path until 2026-09-22; that path was removed as
+      // dead, and this came with it rather than being lost — it was
+      // never guarding the parameter, it was guarding the panel.
+      body: (document.getElementById("lg-entries") || {}).innerText || "",
     }));
     report("自己的帳看得到季費", [
       ...(ledger.open ? [] : ["帳務面板沒有打開"]),
       ...(ledger.total.includes("$") ? [] : [`總額看不到金額: ${ledger.total}`]),
       ...(ledger.entries > 0 ? [] : ["一筆紀錄都沒有"]),
+      ...(ledger.body.includes("載入中") ? ["面板卡在「載入中」"] : []),
       ...errors,
     ]);
   } finally {
