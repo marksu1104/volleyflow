@@ -27,6 +27,7 @@ from volleyflow.api.schemas import (
     PlayerIdentifyOut,
 )
 from volleyflow.db.models import (
+    ClubMemberRow,
     PlayerRow,
 )
 from volleyflow.notify import line_client
@@ -44,7 +45,8 @@ def identify_player(
     visit, so identity has to come from the token directly. Two cases:
 
     1. This line_user_id has been seen before — this is a returning
-       player. Sync their display name/avatar (LINE names can change).
+       player. Sync their avatar, but preserve the name they chose in
+       VolleyFlow. LINE's display name is only the initial suggestion.
     2. Never seen before — a genuinely new person. Create them; they
        exist but aren't a fixed member of any season until the organizer
        promotes them from a season's join-pool (see list_join_pool).
@@ -65,10 +67,6 @@ def identify_player(
 
     player = db.query(PlayerRow).filter(PlayerRow.line_user_id == line_user_id).first()
     if player is not None:
-        if player.name != payload.display_name:
-            player.name = _unique_display_name(
-                db, payload.display_name, exclude_player_id=player.id
-            )
         player.avatar_url = payload.picture_url
         db.commit()
         db.refresh(player)
@@ -80,7 +78,9 @@ def identify_player(
             is_developer=is_developer(player),
         )
 
-    name = _unique_display_name(db, payload.display_name)
+    name = payload.display_name.strip()
+    if not name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Name can't be empty")
     new_player = PlayerRow(
         name=name, line_user_id=line_user_id, avatar_url=payload.picture_url
     )
@@ -178,9 +178,9 @@ def set_player_name(
     membership key off player_id, never off this string, so renaming
     never touches billing history — the domain model's "one person, one
     name, for life" tracks the id; this is just the label. Runs through
-    _unique_display_name so a rename can't collide with someone else's
-    current name (excluding the player's own row, so keeping the name
-    they already have is always allowed).
+    Names only need disambiguating inside clubs the player actively belongs
+    to. A same-named person elsewhere in VolleyFlow is unrelated and must not
+    force a global ``(2)`` suffix.
     """
     player = _get_player_or_404(db, player_id)
     if current_player.id != player_id and not _may_edit_accountless_player(
@@ -198,7 +198,19 @@ def set_player_name(
     name = payload.name.strip()
     if not name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Name can't be empty")
-    player.name = _unique_display_name(db, name, exclude_player_id=player.id)
+    club_ids = [
+        club_id
+        for (club_id,) in db.query(ClubMemberRow.club_id).filter(
+            ClubMemberRow.player_id == player.id,
+            ClubMemberRow.status == "active",
+        )
+    ]
+    player.name = _unique_display_name(
+        db,
+        name,
+        exclude_player_id=player.id,
+        club_ids=club_ids,
+    )
     db.commit()
     db.refresh(player)
     return MemberOut(

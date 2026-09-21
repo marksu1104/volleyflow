@@ -70,20 +70,40 @@ def _get_or_create_player(db: Session, club_id: int, name: str) -> PlayerRow:
 
 
 def _unique_display_name(
-    db: Session, display_name: str, exclude_player_id: int | None = None
+    db: Session,
+    display_name: str,
+    exclude_player_id: int | None = None,
+    club_ids: list[int] | None = None,
 ) -> str:
-    """Two different LINE accounts can share a display name — since
-    identify_player operates globally, not per club (a Player's LINE
-    identity isn't club-scoped), a collision here isn't even between two
-    people in the same club necessarily. Disambiguate with a numeric
-    suffix rather than fail the request. exclude_player_id lets a
-    returning player keep their own current name without tripping over
-    themselves.
+    """Keep names distinct only where the UI uses them as a club-local key.
+
+    Player names are not globally unique: two unrelated clubs can both have
+    a Mark, and a brand-new LINE account does not belong to any club yet.
+    Adding ``(2)`` merely because either of those people exists was both
+    surprising and inconsistent with the database model.
+
+    Within an active club, a few attendance routes still accept a name as
+    their human-readable identity, so an explicit profile rename does avoid
+    introducing an ambiguous label there. ``club_ids`` names exactly those
+    scopes. With no clubs there is no collision to resolve. Pending join
+    requests deliberately keep the original LINE name: that lets an organizer
+    explicitly link one to an existing accountless roster entry instead of the
+    server guessing that two equal strings are the same person.
     """
+    if not club_ids:
+        return display_name
     candidate = display_name
     suffix = 2
     while True:
-        query = db.query(PlayerRow).filter(PlayerRow.name == candidate)
+        query = (
+            db.query(PlayerRow)
+            .join(ClubMemberRow, ClubMemberRow.player_id == PlayerRow.id)
+            .filter(
+                ClubMemberRow.club_id.in_(club_ids),
+                ClubMemberRow.status == "active",
+                PlayerRow.name == candidate,
+            )
+        )
         if exclude_player_id is not None:
             query = query.filter(PlayerRow.id != exclude_player_id)
         if query.first() is None:

@@ -1,5 +1,6 @@
 """Clubs, their membership, and the invite link into one."""
 
+import re
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -735,6 +736,12 @@ def merge_players(
     db.delete(duplicate_membership)
     if keep.gender is None:
         keep.gender = duplicate.gender
+    # Repair the label produced by the old global collision rule while the
+    # organizer is explicitly confirming that these two rows are one person.
+    # A naturally numbered name is untouched unless it is exactly the old
+    # row's name plus the generated suffix.
+    if re.fullmatch(rf"{re.escape(duplicate.name)} \(\d+\)", keep.name):
+        keep.name = duplicate.name
     db.commit()
     return MemberOut(
         id=keep.id,

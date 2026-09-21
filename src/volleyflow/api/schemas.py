@@ -486,9 +486,8 @@ class PlayerIdentify(BaseModel):
 class PlayerIdentifyOut(BaseModel):
     id: int
     name: str
-    """May differ from the display_name that was sent, if that name
-    collided with a different existing Player — see
-    routes._unique_display_name."""
+    """The player's VolleyFlow name. LINE supplies the initial value, but a
+    name edited in the app remains authoritative on later visits."""
     avatar_url: str | None = None
     gender: Gender | None = None
     is_developer: bool = False

@@ -54,6 +54,24 @@ test("an empty pending list keeps the same subordinate container", () => {
   assert.match(requests, /目前沒有待核准的申請/);
 });
 
+test("a matching pending LINE account is explicitly linked to the roster", () => {
+  const approval = between("async function approveRequest", "async function declineRequest");
+
+  assert.match(approval, /球隊名單已有/);
+  assert.match(approval, /這個 LINE 帳號就是同一位成員嗎/);
+  assert.match(approval, /line_player_id: person\.id/);
+  assert.match(approval, /existing\.id.*\/link/s);
+  assert.match(approval, /請先請申請者在個人資料使用可辨識的名稱/);
+});
+
+test("old generated number suffixes are included in duplicate review", () => {
+  const duplicates = between("function renderDuplicates", "function keeperOf");
+
+  assert.match(duplicates, /m\.status === "active"/);
+  assert.match(duplicates, /const numbered = name\.match/);
+  assert.match(duplicates, /exactNames\.has\(numbered\[1\]\)/);
+});
+
 test("guest entry uses the same name and gender select row as drop-in entry", () => {
   assert.match(html, /<div class="picker-manual">[\s\S]*id="new-member-name"[\s\S]*<select id="new-member-gender"/);
   assert.match(html, /<option value="male">男<\/option>/);

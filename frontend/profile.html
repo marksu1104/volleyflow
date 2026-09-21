@@ -104,6 +104,12 @@
 
   (async function init() {
     const identityEl = document.getElementById("identity");
+    // This page edits the Player row itself, so its id must be authoritative.
+    // An organizer may have linked this LINE account to an older roster row
+    // since the tab cached its identity; using that deleted id makes every
+    // profile write miss the real person. Other pages may keep the fast
+    // session cache, but profile deliberately re-identifies once on entry.
+    sessionStorage.removeItem("vf_identity");
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
     if (!identified) {
       identityEl.textContent = "";

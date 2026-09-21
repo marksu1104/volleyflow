@@ -21,10 +21,14 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { load } = require("./harness.js");
+const { inlineScript, load } = require("./harness.js");
 
 const page = load("profile.html");
 const { clubRowHtml } = page;
+
+test("profile refreshes identity before editing the player row", () => {
+  assert.match(inlineScript("profile.html"), /sessionStorage\.removeItem\("vf_identity"\)/);
+});
 
 const club = (over) => ({ id: 1, name: "晴光館", role: "member", ...over });
 

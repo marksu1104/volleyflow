@@ -788,9 +788,28 @@ def test_set_player_name_updates_it(client: TestClient) -> None:
     assert response.json()["name"] == "阿安"
 
 
-def test_set_player_name_disambiguates_a_collision(client: TestClient) -> None:
+def test_set_player_name_allows_a_collision_outside_any_shared_club(
+    client: TestClient,
+) -> None:
     identify(client, "Bob")
     alice = identify(client, "Alice")
+
+    response = client.put(
+        f"/players/{alice['id']}/name",
+        json={"name": "Bob"},
+        headers=auth_headers(alice["token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Bob"
+
+
+def test_set_player_name_disambiguates_inside_a_shared_club(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["Bob"])
+    alice = identify(client, "Alice")
+    join_club(client, season["club_id"], auth_headers(alice["token"]))
 
     response = client.put(
         f"/players/{alice['id']}/name",
@@ -897,7 +916,7 @@ def test_identify_never_auto_claims_an_existing_name_only_player(
     """Alice was entered by name only (e.g. from a screenshot) before
     she ever opened the LIFF. Her first identify call must not silently
     guess that she's the same person and hand over that row's history —
-    it should create a distinct, disambiguated Player instead, leaving
+    it should create a distinct Player instead, leaving
     reconciliation to the organizer.
     """
     season = _start_season(client, member_names=["Alice"])
@@ -911,7 +930,7 @@ def test_identify_never_auto_claims_an_existing_name_only_player(
     assert response.status_code == 200
     body = response.json()
     assert body["id"] != alice_id
-    assert body["name"] == "Alice (2)"
+    assert body["name"] == "Alice"
 
 
 def test_identify_does_not_reclaim_an_already_claimed_player(
@@ -919,8 +938,8 @@ def test_identify_does_not_reclaim_an_already_claimed_player(
 ) -> None:
     """A different real person can happen to share a LINE display name
     with someone already bound — this must not silently hand them
-    someone else's identity and ledger history, and each collision gets
-    its own distinct disambiguated name.
+    someone else's identity and ledger history. The name is only a label;
+    the distinct LINE user ids remain the identities.
     """
     season = _start_season(client, member_names=["Alice"])
     alice_id = season["member_ids"][0]
@@ -935,11 +954,11 @@ def test_identify_does_not_reclaim_an_already_claimed_player(
     assert response.status_code == 200
     body = response.json()
     assert body["id"] not in (alice_id, first["id"])
-    assert first["name"] == "Alice (2)"
-    assert body["name"] == "Alice (3)"
+    assert first["name"] == "Alice"
+    assert body["name"] == "Alice"
 
 
-def test_identify_disambiguates_a_name_collision_on_create(
+def test_identify_allows_a_name_collision_on_create(
     client: TestClient,
 ) -> None:
     first = client.post(
@@ -951,11 +970,11 @@ def test_identify_disambiguates_a_name_collision_on_create(
     ).json()
 
     assert first["name"] == "Bob"
-    assert second["name"] == "Bob (2)"
+    assert second["name"] == "Bob"
     assert second["id"] != first["id"]
 
 
-def test_identify_syncs_display_name_and_avatar_on_return_visit(
+def test_identify_preserves_app_name_but_syncs_avatar_on_return_visit(
     client: TestClient,
 ) -> None:
     first = client.post(
@@ -975,8 +994,26 @@ def test_identify_syncs_display_name_and_avatar_on_return_visit(
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == first["id"]
-    assert body["name"] == "Caroline"
+    assert body["name"] == "Carol"
     assert body["avatar_url"] == "new.jpg"
+
+
+def test_an_edited_name_survives_the_next_identify(client: TestClient) -> None:
+    player = identify(client, "LINE name", token="U1")
+    renamed = client.put(
+        f"/players/{player['id']}/name",
+        json={"name": "Roster name"},
+        headers=auth_headers("U1"),
+    )
+    assert renamed.status_code == 200
+
+    returned = client.post(
+        "/players/identify",
+        json={"id_token": "U1", "display_name": "LINE name"},
+    )
+
+    assert returned.status_code == 200
+    assert returned.json()["name"] == "Roster name"
 
 
 def test_join_pool_lists_club_members_not_on_the_season_roster(
@@ -2469,8 +2506,8 @@ def test_link_refuses_when_the_line_account_has_its_own_history(
     with_line = identify(client, "陳品妍")
     join_club(client, season["club_id"], auth_headers(with_line["token"]))
     client.post(
-        "/drop-ins",
-        json={"player_name": with_line["name"], "game_id": season["games"][0]["id"]},
+        f"/clubs/{season['club_id']}/players/{with_line['id']}/payments",
+        json={"amount": "100"},
     )
 
     response = client.post(

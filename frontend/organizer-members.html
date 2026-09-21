@@ -448,6 +448,37 @@
   async function approveRequest(playerId, asFixed, btn) {
     const person = joinRequests.find((p) => p.id === playerId);
     if (!person) return;
+    const originalName = person.name.replace(/ \(\d+\)$/, "");
+    const accountlessMatches = allClubMembers.filter(
+      (member) => member.id !== person.id && member.status === "active" && !member.linked &&
+        (member.name === person.name || member.name === originalName)
+    );
+    // Never join identities by name automatically: two real people can
+    // share one. Here the organizer knows who requested access, so offer an
+    // explicit reconciliation before approving a second copy.
+    if (accountlessMatches.length === 1) {
+      const existing = accountlessMatches[0];
+      if (confirm(`球隊名單已有「${existing.name}」。\n\n這個 LINE 帳號就是同一位成員嗎？確認後會沿用原有名單與帳務。`)) {
+        const done = markBusy(btn);
+        try {
+          await postJson(
+            API_BASE,
+            `/clubs/${currentClubId()}/players/${existing.id}/link`,
+            { line_player_id: person.id }
+          );
+          toast(`已將 ${existing.name} 的 LINE 帳號連結到原有名單`, "good");
+          reloadCurrentPage();
+        } catch (e) {
+          done();
+          toast("連結失敗：" + e.message);
+        }
+        return;
+      }
+      if (existing.name === person.name) {
+        toast("兩位成員目前同名。請先請申請者在個人資料使用可辨識的名稱，再重新核准。");
+        return;
+      }
+    }
     const toRoster = asFixed && currentSeason && currentSeason.settled_at === null;
     if (
       toRoster &&
@@ -499,9 +530,19 @@
       section.hidden = true;
       return;
     }
+    // Pending requests are reconciled by approveRequest. Merging one here
+    // would move the existing roster onto a membership that is still pending.
+    const activeMembers = allClubMembers.filter((m) => m.status === "active");
+    const exactNames = new Set(activeMembers.map((m) => m.name.trim()));
     const byName = new Map();
-    for (const m of allClubMembers) {
-      const key = m.name.trim();
+    for (const m of activeMembers) {
+      const name = m.name.trim();
+      const numbered = name.match(/^(.*) \((\d+)\)$/);
+      // Older versions added a global "(2)" suffix before the person had
+      // even joined a club. Treat that as the original name only when the
+      // unsuffixed row actually exists here; merging still requires the
+      // organizer's confirmation below.
+      const key = numbered && exactNames.has(numbered[1]) ? numbered[1] : name;
       byName.set(key, [...(byName.get(key) || []), m]);
     }
     const groups = [...byName.values()].filter((g) => g.length > 1);

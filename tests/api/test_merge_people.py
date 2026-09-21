@@ -110,6 +110,22 @@ def test_someone_with_their_own_account_cannot_be_merged_away(
     assert response.status_code == 400
 
 
+def test_merging_repairs_an_old_generated_name_suffix(client: TestClient) -> None:
+    club, season = _club(client)
+    duplicate = _bring(client, season["games"][0]["id"], "Alice")["player_id"]
+    linked = identify(client, "Alice (2)")
+    join_club(client, club["id"], auth_headers(linked["token"]))
+
+    response = client.post(
+        f"/clubs/{club['id']}/players/{linked['id']}/merge",
+        json={"duplicate_id": duplicate},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Alice"
+    assert _member_names(client, club["id"]).count("Alice") == 1
+
+
 def test_only_the_organizer_can_merge(client: TestClient) -> None:
     club, season = _club(client)
     first_game, second_game = (g["id"] for g in season["games"])
