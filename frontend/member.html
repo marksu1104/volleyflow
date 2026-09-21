@@ -86,6 +86,11 @@
     <p class="su-when" id="lg-sub"></p>
     <div id="lg-total" class="lg-total"></div>
     <div id="lg-entries"></div>
+    <!-- Below the breakdown and outside it, on purpose: this figure is
+         not on the ledger, and summaryRows reconciles its rows against
+         the ledger balance. Put through there it would invent an 其他
+         row worth exactly the estimate. -->
+    <div id="lg-estimate" class="lg-estimate" hidden></div>
   </div>
 </div>
 
@@ -1708,6 +1713,64 @@
           </div>`
       )
       .join("");
+
+    renderRefundEstimate();
+  }
+
+  /** What this season would refund if it settled right now.
+   *
+   * A member's absence is refunded only when somebody actually fills the
+   * slot (CLAUDE.md 2.4), and that money lands on the ledger at
+   * settlement — so mid-season the breakdown above shows the season fee
+   * charged in full and says nothing about what is coming back. A member
+   * who took two nights off and had both covered is owed money that no
+   * screen mentions.
+   *
+   * Computed here rather than asked for: the server has already decided
+   * which absences refund, and says so in `filled_by` — "having a name
+   * here is what makes the share come back", per AbsenceDetailOut. So
+   * this adds up the shares of games where this member is away and
+   * somebody is standing in. It deliberately does not re-run the FIFO
+   * pairing from settlement.covered_absences: that is the server's
+   * decision, and a second implementation of it is how two screens start
+   * disagreeing about money.
+   *
+   * Read fresh from currentSeason on every open, never cached. Arranging
+   * or cancelling a substitute writes filled_by locally before the server
+   * answers (see optimisticRunner), and a cached figure would contradict
+   * the card the reader just tapped.
+   *
+   * Never added to the headline. That figure is ledger.balance — money
+   * that exists — and summaryRows reconciles its rows against it. An
+   * estimate folded in would invent an 其他 row worth exactly the
+   * estimate; the sheet would be lying about money.
+   */
+  function renderRefundEstimate() {
+    const box = document.getElementById("lg-estimate");
+    const me = playerName();
+    if (!currentSeason || !me) {
+      box.hidden = true;
+      return;
+    }
+    // A refunded-and-cancelled game costs nobody anything, so there is
+    // nothing to give back for it — same exclusion settle_member makes.
+    const covered = (currentSeason.games || []).filter(
+      (g) =>
+        g.status !== "cancelled_refunded" &&
+        (g.absences || []).some((a) => a.player_name === me && a.filled_by)
+    );
+    const amount = covered.reduce((sum, g) => sum + Number(g.share || 0), 0);
+    box.hidden = false;
+    box.innerHTML =
+      '<span class="est-what">預估退費' +
+      `<span class="est-note">${
+        amount > 0
+          ? `${covered.length} 場請假有人遞補，結算後才入帳。補的人取消就會取消退費。`
+          : "請假且有人遞補才退費，結算後入帳。"
+      }</span></span>` +
+      `<span class="est-amt${amount > 0 ? "" : " none"}">${
+        amount > 0 ? `+$${amount}` : "$0"
+      }</span>`;
   }
 
   // summaryRows moved to shared.js on 2026-09-18: the all-clubs money

@@ -1217,6 +1217,22 @@ textarea {
 .lg-amt { font-family: var(--font-num); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .lg-amt.plus { color: var(--good); }
 .lg-amt.minus { color: var(--ink); }
+/* 預估退費 — deliberately not styled like .lg-total. That block is the
+   headline and states money that exists; this one is a forecast that can
+   go down again when a stand-in cancels, so it reads as a note under the
+   breakdown rather than as a second balance competing with the first. */
+.lg-estimate {
+  margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--rule);
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+}
+.lg-estimate .est-what { display: flex; flex-direction: column; gap: 2px; font-size: .85rem; font-weight: 600; }
+.lg-estimate .est-note { font-size: .72rem; font-weight: 400; color: var(--ink-faint); line-height: 1.5; }
+.lg-estimate .est-amt {
+  font-family: var(--font-num); font-weight: 800; font-size: 1.05rem;
+  font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--good);
+}
+.lg-estimate .est-amt.none { color: var(--ink-faint); }
+
 .bc-chev { color: var(--ink-faint); margin-left: 5px; font-weight: 600; }
 
 /* ---- a season's terms on the management screen ----

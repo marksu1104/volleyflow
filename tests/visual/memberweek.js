@@ -118,6 +118,33 @@ function inDays(days) {
       ...(awayNames.includes(MEMBER) ? [] : [`伺服器上的請假名單是 ${awayNames.join("、") || "空的"}`]),
     ]);
 
+    // 請假了，但還沒有人遞補 — 所以還是不退費。
+    //
+    // This is the state that makes the rule visible, and the only one in
+    // the walk that does: an absence exists and nothing fills it. Neither
+    // of the other two panel checks can see it — later on the absence has
+    // a stand-in (so the figure is right either way), and at the end the
+    // absence has been withdrawn (so there is nothing to count at all).
+    // Without this step, dropping the `filled_by` condition from the
+    // estimate changes nothing anywhere and the rule goes unguarded.
+    //
+    // CLAUDE.md 2.4: 「A member's Absence is refunded one game's share
+    // *only if* a DropIn actually covers it」.
+    await page.waitForSelector("#balance-chip:not([hidden])", { timeout: 20000 });
+    await page.click("#balance-chip");
+    await page.waitForSelector("#ledger-backdrop:not([hidden])", { timeout: 15000 });
+    await page.waitForTimeout(1000);
+    const noCover = await page.evaluate(
+      () => (document.getElementById("lg-estimate") || {}).innerText || ""
+    );
+    report("請假但沒人遞補時，預估退費是 $0", [
+      ...(noCover.includes("$0")
+        ? []
+        : [`沒人遞補就不該退，畫面寫的是「${noCover.replace(/\s+/g, " ")}」`]),
+    ]);
+    await page.click("#ledger-backdrop .gsheet-close");
+    await page.waitForSelector("#ledger-backdrop", { state: "hidden", timeout: 10000 });
+
     // 指定代打, from the game sheet. Never swallow the click that opens
     // it: a missed open leaves every later click hammering a hidden
     // element for thirty seconds and blames the wrong thing.
@@ -163,6 +190,49 @@ function inDays(days) {
       ...(covering.cancelsSub ? [] : ["沒有取消代打的按鈕"]),
     ]);
 
+    // 預估退費 — checked here, with exactly one absence and somebody
+    // standing in it, because this is the only moment in the walk where
+    // the right answer is a known number rather than "more than zero".
+    //
+    // The figure must equal that one game's share and nothing else. An
+    // assertion of `> 0` would pass the likeliest way to get this wrong:
+    // counting every absence instead of only the ones with filled_by
+    // set. Season here is 1200 over two games at capacity 4, so a share
+    // is 150 — read from the server rather than written down, so a
+    // change to the pricing rules moves the expectation with it.
+    //
+    // The second half matters more than the first: the estimate is not
+    // on the ledger, so the headline must not move when it appears.
+    // summaryRows reconciles its lines against ledger.balance and adds
+    // an 其他 row for any difference — an estimate counted into the
+    // total would invent a phantom 其他 worth exactly the estimate, and
+    // the sheet would be lying about money.
+    await page.waitForSelector("#balance-chip:not([hidden])", { timeout: 20000 });
+    await page.click("#balance-chip");
+    await page.waitForSelector("#ledger-backdrop:not([hidden])", { timeout: 15000 });
+    await page.waitForTimeout(1200);
+    const withRefund = await page.evaluate(() => ({
+      estimate: (document.getElementById("lg-estimate") || {}).innerText || "",
+      total: (document.getElementById("lg-total") || {}).innerText || "",
+    }));
+    const ledgerNow = await get(`/clubs/${club.id}/players/${member.id}/ledger`);
+    // withSub, not `season`: POST /clubs/{id}/seasons answers with
+    // SeasonOut, whose games are GameOut — id, date and status only.
+    // `share` lives on GameDetailOut, which is what GET /seasons/{id}
+    // returns, and withSub is already one of those.
+    const share = String(Math.abs(Number(withSub.games[0].share)));
+    report("有人補上的請假，帳務面板說得出預估退費", [
+      ...(withRefund.estimate ? [] : ["面板上沒有預估退費那一塊"]),
+      ...(withRefund.estimate.includes(`$${share}`)
+        ? []
+        : [`預估應該是 $${share}，畫面寫的是「${withRefund.estimate.replace(/\s+/g, " ")}」`]),
+      ...(withRefund.total.includes(`$${Math.abs(Number(ledgerNow.balance))}`)
+        ? []
+        : [`總額被預估動到了: ${withRefund.total.replace(/\s+/g, " ")}`]),
+    ]);
+    await page.click("#ledger-backdrop .gsheet-close");
+    await page.waitForSelector("#ledger-backdrop", { state: "hidden", timeout: 10000 });
+
     // 取消代打, then 取消請假 — the way back is the way in, reversed.
     await page.click('#hero-wrap button[onclick^="cancelDropIn"]');
     await page.waitForSelector('#hero-wrap button[onclick^="cancelAbsence"]', { timeout: 15000 });
@@ -183,6 +253,14 @@ function inDays(days) {
       open: !document.getElementById("ledger-backdrop").hidden,
       total: (document.getElementById("lg-total") || {}).innerText || "",
       entries: document.querySelectorAll("#lg-entries .set-row, #lg-entries .m-row, #lg-entries > div").length,
+      // The zero case, reached only here: by now the stand-in has been
+      // cancelled and the leave withdrawn, so nothing is refundable. The
+      // block still shows, saying $0 and why — an absence nobody filled
+      // is not refunded (CLAUDE.md 2.4), and "I took the night off, why
+      // is nothing coming back" is the question this answers. Checked
+      // because the earlier assertion only ever sees the paying case.
+      estimate: (document.getElementById("lg-estimate") || {}).innerText || "",
+      estimateShown: !(document.getElementById("lg-estimate") || {}).hidden,
       // openLedger paints 載入中 when myLedger has not arrived and does
       // not repaint when it does, so a panel opened too early stays on
       // the spinner for ever. The row count cannot see that: the spinner
@@ -198,6 +276,11 @@ function inDays(days) {
       ...(ledger.total.includes("$") ? [] : [`總額看不到金額: ${ledger.total}`]),
       ...(ledger.entries > 0 ? [] : ["一筆紀錄都沒有"]),
       ...(ledger.body.includes("載入中") ? ["面板卡在「載入中」"] : []),
+      // 沒有可退時仍要說話，而且要說 $0 —— 不是藏起來。
+      ...(ledger.estimateShown ? [] : ["沒有可退時，預估那一塊整個不見了"]),
+      ...(ledger.estimate.includes("$0")
+        ? []
+        : [`沒有人遞補，預估應該是 $0，畫面寫的是「${ledger.estimate.replace(/\s+/g, " ")}」`]),
       ...errors,
     ]);
   } finally {
