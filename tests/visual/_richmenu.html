@@ -19,7 +19,7 @@
   }
   .cell {
     display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 46px;
+    align-items: center; justify-content: center; gap: 58px;
     border-right: 3px solid #dde2ea;
     background: #ffffff;
   }
@@ -35,19 +35,30 @@
      principle as the 帳務 tabs holding their width: a row of peer
      controls should look like peers. Colour lives in the icons. */
 
+  /* Enlarged 2026-09-22: 「字跟圖案都要大一點」. The first version used
+     190px tiles holding a 104px icon — the icon filled barely half its
+     own tile, so the strip read as small even where it wasn't, and the
+     grey rounded square looked like a mistake rather than a frame. The
+     icon now fills ~60% of the tile, which is what a tile is for.
+
+     Room left over at this size: the tallest column uses about 60% of
+     the 843px height, and 場次與報名 — the longest label — takes 76% of
+     a 833px column, leaving roughly 100px of air each side. There is
+     one more step available if it is ever wanted; past that the labels
+     start crowding the dividers. */
   .glyph {
-    width: 190px; height: 190px; border-radius: 46px;
+    width: 290px; height: 290px; border-radius: 70px;
     display: flex; align-items: center; justify-content: center;
     background: #f6f8fa;
   }
-  .glyph svg { width: 104px; height: 104px; }
+  .glyph svg { width: 176px; height: 176px; }
 
   /* One label per cell, and nothing under it. There was an English
      sub-label — GAMES / BALANCE / REPORT — which carried no information
      the Chinese did not already carry, and 「不要太多可以按的功能都用文字」
      was said about precisely that kind of decoration. */
   .label {
-    font-size: 84px; font-weight: 700; color: #151b26; letter-spacing: .02em;
+    font-size: 126px; font-weight: 700; color: #151b26; letter-spacing: .02em;
   }
 </style>
 
