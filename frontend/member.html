@@ -131,6 +131,16 @@
   let myPlayerId = null;
   let allClubs = [];
   let myClubs = [];
+  /** True while 要看哪一隊 is on screen.
+   *
+   * Everything keyed to "the current club" has to stay quiet until one is
+   * chosen. Without this, a club id left in localStorage by an earlier
+   * visit makes renderManageButton unhide 會員／管理 and renderClubChip
+   * print that club's name in the top bar — while the page is still
+   * asking which club to look at. Reported 2026-09-22; the 「有時候」 in
+   * that report is exactly whether storage happened to hold a club the
+   * reader organises. */
+  let pickingClub = false;
   // Whether myClubs came back from the server on this load, as opposed
   // to being the empty list this page starts with. The pickers are told,
   // because "no clubs" is only worth acting on when the server said so.
@@ -433,6 +443,20 @@
    */
   function renderClubPicker(clubs) {
     stopLoadingEscalation();
+    // Set before anything paints, and read by renderManageButton and
+    // renderClubChip rather than acted on here: both of them run *again*
+    // after this screen is drawn (startPickers' onSeasonChange calls
+    // them), so hiding their elements from here would be undone a moment
+    // later and the fix would look right while doing nothing.
+    pickingClub = true;
+    // Repainted here, and this is the whole point: initIdentity already
+    // ran both of these — before this screen was decided on, while the
+    // flag was still false — and this branch returns without calling
+    // startPickers, so nothing else would ever run them again. Setting
+    // the flag alone changed nothing at all; the first attempt at this
+    // fix failed for exactly that reason, with both symptoms unmoved.
+    renderClubChip();
+    renderManageButton();
     document.getElementById("season-picker").hidden = true;
     document.getElementById("cal-label").hidden = true;
     document.getElementById("month-cal").hidden = true;
@@ -465,6 +489,11 @@
     wrap.querySelectorAll("[data-pick-club]").forEach((btn) => {
       btn.addEventListener("click", () => {
         rememberId(CLUB_STORAGE_KEY, btn.dataset.pickClub);
+        // Cleared before startPickers, not after: its onSeasonChange
+        // callback is what repaints the nav and the chip, and it has to
+        // find the flag already down or the club just chosen stays
+        // invisible in the top bar.
+        pickingClub = false;
         startPickers();
       });
     });
@@ -664,7 +693,10 @@
   function renderManageButton() {
     const clubId = currentClubId();
     const mine = myClubs.find((c) => String(c.id) === String(clubId));
-    const organizes = !!(mine && mine.role === "organizer");
+    // A remembered club is not a chosen one. See pickingClub: this reads
+    // currentClubId(), so without the guard an id left over from an
+    // earlier visit decides the nav while 要看哪一隊 is still on screen.
+    const organizes = !pickingClub && !!(mine && mine.role === "organizer");
     document.getElementById("context-switch").hidden = !organizes;
     // People waiting to be let in: a count on the way in, and the way in leads to them.
     const waiting = organizes ? mine.pending_count || 0 : 0;
@@ -676,7 +708,11 @@
 
   function renderClubChip() {
     const clubId = currentClubId();
-    const club = allClubs.find((c) => String(c.id) === String(clubId));
+    // Same reasoning as renderManageButton: while 要看哪一隊 is up, the
+    // top bar must not already answer the question the page is asking.
+    const club = pickingClub
+      ? null
+      : allClubs.find((c) => String(c.id) === String(clubId));
     document.getElementById("club-chip-name").textContent = club ? club.name : "選擇球隊";
     document.getElementById("club-dot").textContent = club ? club.name.slice(0, 1) : "-";
   }

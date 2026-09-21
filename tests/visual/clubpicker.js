@@ -157,6 +157,57 @@ function report(name, problems) {
     ]);
     await ctx.close();
 
+    // --- while still choosing, the screen must not belong to a club yet ---
+    //
+    // Reported 2026-09-22: 「有時候如果之前開過管理頁面，會員頁面跟管理
+    // 頁面的切換鈕就會在下次開啟這個網址的時候存在」.
+    //
+    // The "sometimes" is not the management page — it is the club id that
+    // visiting it left in localStorage. renderManageButton keys off
+    // currentClubId(), so a club you organise sitting in storage unhides
+    // the nav while the page is still asking which club to look at, and
+    // renderClubChip prints that club's name in the top bar at the same
+    // time. Both repaint after the picker is drawn (startPickers'
+    // onSeasonChange calls them), so hiding them inside renderClubPicker
+    // would be undone a moment later — the guard has to live in those two
+    // functions.
+    //
+    // A fresh context cannot see any of this: with empty storage `mine` is
+    // undefined, organizes is false, and the nav stays hidden however
+    // broken the page is. The remembered club has to be planted first,
+    // which is why this gets a context of its own.
+    const organised = clubs.find((c) => c.role === "organizer") || clubs[0];
+    ctx = await browser.newContext({ viewport: { width: 390, height: 900 } });
+    await ctx.addInitScript(
+      (id) => localStorage.setItem("vf_club", String(id)),
+      organised.id
+    );
+    page = await ctx.newPage();
+    page.on("pageerror", (e) => errors.push(`JS: ${String(e).slice(0, 140)}`));
+    await page.goto(`${BASE}/member.html?as=${encodeURIComponent(WHO)}&pick=1`);
+    await page.waitForSelector("[data-pick-club]", { timeout: 25000 });
+    // Long enough for the late repaint: the nav and the chip are drawn
+    // again once the season callback fires, which is the moment this bug
+    // actually appears.
+    await page.waitForTimeout(2500);
+    const leftover = await page.evaluate(() => {
+      const shown = (id) => {
+        const el = document.getElementById(id);
+        return !!el && !el.hidden && el.getBoundingClientRect().height > 0;
+      };
+      return {
+        nav: shown("context-switch"),
+        chip: (document.getElementById("club-chip-name") || {}).textContent || "",
+      };
+    });
+    report("還在問要看哪一隊的時候，畫面上不該有某一隊的東西", [
+      ...(leftover.nav ? ["會員／管理切換列還在"] : []),
+      ...(leftover.chip && leftover.chip !== "選擇球隊"
+        ? [`上方球隊按鈕已經寫著「${leftover.chip}」`]
+        : []),
+    ]);
+    await ctx.close();
+
     report("沒有 console 錯誤", errors);
   } finally {
     await browser.close();
