@@ -1606,7 +1606,33 @@
               : `報名成功，${confirmedCount} 位已加入出席名單`;
       toast(message, "good");
     }
-    if (!result || !guessHeld) refreshSeasonQuietly();
+    // A signup can settle somebody else's absence, and the guess above
+    // cannot know it. The server pairs unarranged drop-ins to unfilled
+    // absences in FIFO order (settlement.covered_absences), so the fee
+    // this person just took on may be the thing that refunds a member
+    // who is away — and that shows up only as `filled_by` on the
+    // *absence*, which the reconcile above never writes. It patches the
+    // new rows' ids and nothing else, because which absence the server
+    // picked is not knowable from here.
+    //
+    // So the estimate sat at $0 until a full reload, and the card went
+    // on saying nobody had filled the slot. Reported 2026-09-23:
+    // 「請假完馬上報名別人臨打，預估帳務要重整頁面才發現」.
+    //
+    // Re-read only when there is an unfilled absence to settle — the
+    // ordinary signup, on a game nobody is away from, keeps the fast
+    // path it was written for. Deliberately not "always re-read": that
+    // would undo the whole point of the guess and put a round trip back
+    // on every signup.
+    //
+    // Deciding it here rather than reproducing the FIFO pairing locally
+    // is the same rule as renderRefundEstimate: the server owns that
+    // decision, and a second implementation of it is how two screens
+    // start disagreeing about money.
+    const signedGame = currentSeason && currentSeason.games.find((g) => g.id === gameId);
+    const mayHaveSettledAnAbsence =
+      !!signedGame && (signedGame.absences || []).some((a) => !a.filled_by);
+    if (!result || !guessHeld || mayHaveSettledAnAbsence) refreshSeasonQuietly();
     else refreshMyGuestsQuietly();
   });
 

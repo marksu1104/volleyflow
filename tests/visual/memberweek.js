@@ -16,6 +16,9 @@ const API = "http://localhost:8000";
 const ORGANIZER = "周恆";
 const MEMBER = "週測甲";
 const SUB = "週測代打";
+// A plain 臨打 — signed up through the sheet, nobody's arranged
+// substitute. The FIFO match is what makes their fee refund the absence.
+const GUEST = "週測臨打";
 
 const asOrganizer = {
   Authorization: `Bearer dev:${encodeURIComponent(ORGANIZER)}`,
@@ -282,6 +285,58 @@ function inDays(days) {
         ? []
         : [`沒有人遞補，預估應該是 $0，畫面寫的是「${ledger.estimate.replace(/\s+/g, " ")}」`]),
       ...errors,
+    ]);
+
+    // 報名臨打之後，預估退費要立刻變 — 不必重整。
+    //
+    // Reported 2026-09-23: 「請假完馬上報名別人臨打，預估帳務要重整頁面
+    // 才發現」. The signup path draws its guess and, when the server
+    // agrees, only writes the new rows' real ids back — it never touches
+    // filled_by on the absence that signup just covered, because the
+    // frontend cannot know which absence the server's FIFO picked. So
+    // currentSeason keeps filled_by: null and the estimate stays at $0
+    // until a full reload.
+    //
+    // Placed last on purpose. Done mid-walk it would leave an extra
+    // drop-in on the game, and the later 指定代打 would take the FIFO
+    // pairing away from it (an arranged substitute wins), changing the
+    // premise of every assertion after it.
+    //
+    // Driven from the screen, not the API: posting a drop-in directly
+    // never runs the optimistic path, so it cannot see this bug at all.
+    await page.click("#ledger-backdrop .gsheet-close");
+    await page.waitForSelector("#ledger-backdrop", { state: "hidden", timeout: 10000 });
+    await page.click('#hero-wrap button[onclick^="recordAbsence"]');
+    await page.waitForTimeout(1800);
+
+    // By onclick, not by .hact: on leave the card carries three of them
+    // — 指定代打, 取消請假 and this one — so .hact would open the
+    // substitute picker instead, and the wait below would blame the
+    // signup sheet for never appearing. Same convention the rest of this
+    // file already uses for recordAbsence and cancelDropIn.
+    await page.click('#hero-wrap button[onclick^="openSignup"]');
+    await page.waitForSelector("#signup-backdrop:not([hidden])", { timeout: 10000 });
+    await page.click("#su-add");
+    await page.waitForSelector("[data-person-picker]:not([hidden])", { timeout: 10000 });
+    await page.fill("[data-person-name-input]", GUEST);
+    await page.selectOption("[data-person-gender-input]", "male");
+    await page.click("[data-person-confirm]");
+    await page.waitForSelector("[data-person-picker]", { state: "hidden", timeout: 10000 });
+    await page.click("#su-go");
+    await page.waitForTimeout(2500);
+
+    // No reload between the signup and this read — that is the point.
+    await page.waitForSelector("#balance-chip:not([hidden])", { timeout: 20000 });
+    await page.click("#balance-chip");
+    await page.waitForSelector("#ledger-backdrop:not([hidden])", { timeout: 15000 });
+    await page.waitForTimeout(1200);
+    const afterSignup = await page.evaluate(
+      () => (document.getElementById("lg-estimate") || {}).innerText || ""
+    );
+    report("報名臨打之後，預估退費不必重整就會變", [
+      ...(afterSignup.includes(`$${share}`)
+        ? []
+        : [`有人補上了，預估應該是 $${share}，畫面寫的是「${afterSignup.replace(/\s+/g, " ")}」`]),
     ]);
   } finally {
     await browser.close();
