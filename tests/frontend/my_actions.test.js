@@ -207,7 +207,7 @@ test("every control in the row is the same kind of button", () => {
 test("taking leave puts naming a substitute right there, not two taps away", () => {
   // 代打 and 報名 are different acts — a substitute takes *your* slot,
   // a signup queues for whatever slot is free — and burying 指定代打
-  // inside 看名單 made it look as though it had been removed, leaving
+  // inside 名單 made it look as though it had been removed, leaving
   // 報名 as the only visible way to get someone into your place.
   const { season, game } = fixture({
     game: { absences: [{ id: 77, player_name: "周安", covered_by: null }] },

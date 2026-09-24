@@ -22,7 +22,7 @@ const GAME = {
   absences: [
     { id: 100, player_name: "成員2", covered_by: "Momo" },
     // The other branch of the absent row's controls: nobody covering, so
-    // it draws 找代打 + 銷假 rather than 改代打 + 取消, and the note is
+    // it draws 代打 + 銷假 rather than 代打 + 取消, and the note is
     // 缺額 rather than somebody's name. A second row here also gives
     // 每一列都一樣高 something to compare *within* this tab, which one
     // row alone never could.
@@ -50,6 +50,21 @@ check("每一列都一樣高", (m) => {
 
 check("名單列的文字沒有被裁掉", (m) =>
   m.clipped.length ? `被容器切掉: ${m.clipped.join("、")}` : null);
+
+check("「誰報名的」標籤沒有被別條規則蓋掉", (m) => {
+  // Guard first: a fixture with no such tag would make every assertion
+  // below vacuously true, which is the failure mode that cost the most
+  // time on 2026-09-23 — a probe that measured nothing read exactly like
+  // a probe that found nothing wrong.
+  if (!m.byTags.length) return "fixture 裡沒有「誰報名的」標籤，這條檢查量不到東西";
+  const loud = m.byTags.filter(
+    (t) => t.bg !== "rgba(0, 0, 0, 0)" && t.bg !== "transparent"
+  );
+  return loud.length
+    ? `標籤還留著藥丸底色（${loud.map((t) => `${t.tab} ${t.bg}`).join("、")}），` +
+        `左右內距卻是 ${loud[0].padLeft}，字會貼著邊`
+    : null;
+});
 
 check("每一個分頁都有畫出東西", (m) => {
   const empty = m.tabs.filter((t) => t.height < 20).map((t) => t.key);
@@ -214,6 +229,7 @@ check(`按鈕文字在最窄手機上留有餘裕（文字寬 ÷ 可用寬 < ${F
     // proves every tab renders at all.
     const rows = [];
     const clipped = [];
+    const byTags = [];
     const tabs = [];
     for (const key of ["attending", "absent", "queued"]) {
       showGameDetailTab(out, key);
@@ -229,6 +245,19 @@ check(`按鈕文字在最窄手機上留有餘裕（文字寬 ÷ 可用寬 < ${F
         // was rendering as half a glyph wedged against 移除. The inline
         // .att-note reports clientWidth 0, so measure the box that does
         // the clipping rather than the note itself.
+        // The 「X 報名」 tag is meant to be quiet: no pill, no side
+        // padding, faint text. `.att-row.dropin .att-note` is (0,3,0) and
+        // beat the unqualified `.att-note.by` (0,2,0), so on a 臨打 row it
+        // kept the green pill background while still taking the zero side
+        // padding — the text sat flush against the pill and was reported
+        // as 「文字超框」 (2026-09-24, from a screenshot). Nothing else here
+        // could see it: the text never overflows its box, so the clipping
+        // check above stays green. Losing only *some* declarations is what
+        // makes a cascade bug look like a sizing bug.
+        for (const n of r.querySelectorAll(".att-note.by")) {
+          const cs = getComputedStyle(n);
+          byTags.push({ tab: key, bg: cs.backgroundColor, padLeft: cs.paddingLeft });
+        }
         for (const e of r.querySelectorAll("*")) {
           // .att-who is the one thing allowed to be shortened — a long
           // name ellipsises on purpose, so the reader can see it was
@@ -298,6 +327,7 @@ check(`按鈕文字在最窄手機上留有餘裕（文字寬 ÷ 可用寬 < ${F
       picker,
       rows,
       clipped,
+      byTags,
       tabs,
       tabTargets: [...document.querySelectorAll(".gd-tab")].map((t) =>
         round(t.getBoundingClientRect().height)

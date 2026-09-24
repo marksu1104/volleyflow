@@ -152,7 +152,7 @@ function buildTodos(season, requests, balances, lineReachable) {
       label: `${describeDate(game.date).label} 只有 ${playing} 人`,
       sub: `低於門檻 ${season.minimum_roster} 人`,
       gameId: game.id,
-      action: "看名單",
+      action: "名單",
     });
   }
   const unpaid = season.members.filter((m) => owing.has(m.id)).length;
@@ -1569,12 +1569,17 @@ function renderGameDetail(container, season, game, options) {
     const offerCancel =
       !!absence.covered_by && !game.locked && !!onCancelSubstitute && allowed && covering;
 
-    // Two and three characters, like every other mini-action in the app
+    // Nouns, two characters, like every other mini-action in the app
     // (儲存, 刪除, 編輯, 退款, 明細, 復原, 請假, 移除, 遞補, 固定, 臨打).
-    // These three were the only four-character ones anywhere, and two of
-    // them sit side by side on this row: at 390px that pushed the note
-    // past the end of .att-name, which clips rather than wraps, so
-    // 「Momo 代打」 came out as half a glyph. Measured 2026-09-23.
+    // These were the only four-character ones anywhere, and two of them
+    // sit side by side on this row: at 390px that pushed the note past
+    // the end of .att-name, which clips rather than wraps, so 「Momo 代打」
+    // came out as half a glyph. Measured 2026-09-23.
+    //
+    // 代打 covers both arranging one and changing one — it is the same
+    // panel either way, and 找/改 as a prefix read as instructions rather
+    // than as a label (2026-09-24: 「好像不夠正式中性」). Dropping the verb
+    // also shrinks the button, which was the other thing reported.
     //
     // 取消 is unambiguous despite reading like a bare verb: it is offered
     // only when somebody *is* covering, and 銷假 only when nobody is —
@@ -1582,9 +1587,7 @@ function renderGameDetail(container, season, game, options) {
     // carries both.
     const controls =
       (offerAssign
-        ? `<button type="button" class="mini-action" data-toggle-sub="${absence.id}">${
-            absence.covered_by ? "改代打" : "找代打"
-          }</button>`
+        ? `<button type="button" class="mini-action" data-toggle-sub="${absence.id}">代打</button>`
         : "") +
       (offerCancel
         ? `<button type="button" class="mini-action danger" data-cancel-sub="${covering.id}">取消</button>`

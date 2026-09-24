@@ -978,7 +978,7 @@
     // date now means "show me that game" — the card above the calendar
     // switches to it and its buttons come with it, so taking leave or
     // signing up for any date is two taps and no modal. The full
-    // 18-name roster is behind 看名單, which is the rarer thing to want.
+    // 18-name roster is behind 名單, which is the rarer thing to want.
     renderHero(currentSeason);
     renderCalendar();
     // Say that something changed. Two dates with the same headcount
@@ -1014,7 +1014,7 @@
       statusHtml: mine.status,
       actionsHtml: mine.actions,
       moreHtml: `<button type="button" class="hero-more" onclick="openGameSheet()">
-          <span>看名單（${expectedAttendance(season, game)} 人）</span><span class="chev">›</span>
+          <span>名單（${expectedAttendance(season, game)} 人）</span><span class="chev">›</span>
         </button>`,
     });
     wrap.dataset.heroGameId = game.id;
@@ -1286,7 +1286,7 @@
       }
       // Naming who covers for you is the thing you most want right
       // after taking leave, and it used to live two taps deep inside
-      // 看名單 — so it read as having been removed. It is also a
+      // 名單 — so it read as having been removed. It is also a
       // different act from signing someone up: a 代打 takes *your*
       // slot, a 報名 queues for whatever slot is free.
       return {

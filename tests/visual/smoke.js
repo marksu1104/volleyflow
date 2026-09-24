@@ -126,7 +126,7 @@ async function pressEach(page, path, { only, dialogs }) {
     // Without it, a press that redraws the page shifts the indices, the
     // same control comes round again at a later one, and opening a sheet
     // that is already open is correctly nothing — which read as a dead
-    // 看名單 button and cost an investigation to prove otherwise.
+    // 名單 button and cost an investigation to prove otherwise.
     //
     // Before the button is measured, not after: a control inside a sheet
     // this just shut has no height, so it is skipped as unreachable

@@ -649,7 +649,17 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 /* Who brought a guest. Quieter than the 臨打/代打 label beside it on
    purpose: that one says what this person is to the game, this one only
    says who to ask about them, and it must not compete. */
-.att-note.by { background: none; padding: 2px 0; color: var(--ink-faint); font-weight: 400; }
+/* Qualified deliberately. `.att-row.dropin .att-note` above is (0,3,0)
+   and beat a plain `.att-note.by` (0,2,0), so on a 臨打 row this tag kept
+   the green pill's background while still taking this rule's zero side
+   padding — the text sat flush against the pill's edge and read as
+   overflowing it. Reported 2026-09-24 with a screenshot. Losing only
+   *some* declarations is what made it look like a sizing bug rather
+   than a cascade one. */
+.att-row .att-note.by,
+.att-row.dropin .att-note.by {
+  background: none; padding: 2px 0; color: var(--ink-faint); font-weight: 400;
+}
 .att-note.gap { background: var(--bad-soft); color: var(--bad); }
 
 .gender-tag { font-size: .68rem; margin-left: 4px; opacity: .8; }
@@ -1118,7 +1128,7 @@ textarea {
    date and nothing else — floating them underneath made them read as
    page-level buttons that happened to be nearby, and gave three
    controls three different widths and weights. One row, equal weight,
-   equal width; 看名單 is navigation rather than an action, so it sits
+   equal width; 名單 is navigation rather than an action, so it sits
    apart, quiet, with a chevron. */
 .hero-actions {
   display: flex; gap: 8px; margin-top: 13px; padding-top: 13px;
