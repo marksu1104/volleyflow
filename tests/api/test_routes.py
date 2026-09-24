@@ -372,6 +372,10 @@ def test_get_season_reflects_absences_signups_and_waitlist(
             "player_id": bob_signup.json()["player_id"],
             "player_name": "Bob",
             "gender": None,
+            # The roster names whoever signed a guest up, since
+            # 2026-09-23. Null when they signed themselves up, which is
+            # most rows; here the organizer did it, so it is their name.
+            "brought_by_name": "Test Organizer",
             # He is a 臨打, not anybody's 代打 — see the absence above.
             "covering": None,
             # The organizer signed him up in this test.

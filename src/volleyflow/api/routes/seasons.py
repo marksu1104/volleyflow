@@ -11,7 +11,7 @@ from fastapi import (
 )
 from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from volleyflow.api.conversion import (
     season_from_rows,
@@ -720,13 +720,22 @@ def get_season(
     ):
         absences_by_game[absence.game_id].append((absence.id, player.name))
 
-    # (drop_in_id, player_id, name, gender, covers_absence_id, brought_by)
+    # (drop_in_id, player_id, name, gender, covers_absence_id, brought_by,
+    #  bringer_name)
     drop_ins_by_game: dict[
-        int, list[tuple[int, int, str, Gender | None, int | None, int | None]]
+        int,
+        list[tuple[int, int, str, Gender | None, int | None, int | None, str | None]],
     ] = defaultdict(list)
-    for drop_in, player in (
-        db.query(DropInRow, PlayerRow)
+    # outerjoin, not join. brought_by_player_id is null for everybody who
+    # signed themselves up — the ordinary case — so an inner join here
+    # would drop those rows and the roster would lose most of its
+    # drop-ins. money._who_brought uses a plain join correctly, because
+    # it only ever builds a map of the ones who *were* brought.
+    Bringer = aliased(PlayerRow)
+    for drop_in, player, bringer_name in (
+        db.query(DropInRow, PlayerRow, Bringer.name)
         .join(PlayerRow, DropInRow.player_id == PlayerRow.id)
+        .outerjoin(Bringer, Bringer.id == DropInRow.brought_by_player_id)
         .filter(DropInRow.game_id.in_(game_ids), DropInRow.cancelled_at.is_(None))
         .order_by(DropInRow.signed_up_at)
         .all()
@@ -739,6 +748,7 @@ def get_season(
                 _gender(player.gender),
                 drop_in.covers_absence_id,
                 drop_in.brought_by_player_id,
+                bringer_name,
             )
         )
 
@@ -791,9 +801,15 @@ def get_season(
         arranged_by_drop_in: dict[int, str] = {}
         claimed_absence_ids: set[int] = set()
         for entry in drop_ins:
-            drop_in_id, _player_id, name, _drop_in_gender, covers_absence_id, _by = (
-                entry
-            )
+            (
+                drop_in_id,
+                _player_id,
+                name,
+                _drop_in_gender,
+                covers_absence_id,
+                _by,
+                _bringer,
+            ) = entry
             if covers_absence_id in absence_name_by_id:
                 absence_name = absence_name_by_id[covers_absence_id]
                 arranged_for_absence[absence_name] = name
@@ -805,7 +821,15 @@ def get_season(
         ]
         fifo_drop_ins = [
             name
-            for _drop_in_id, _player_id, name, _gender, covers, _by in drop_ins
+            for (
+                _drop_in_id,
+                _player_id,
+                name,
+                _gender,
+                covers,
+                _by,
+                _bringer,
+            ) in drop_ins
             if covers is None
         ]
         # Who is standing in the slot — which is also what decides the
@@ -858,6 +882,7 @@ def get_season(
                             player_id == current_player.id
                             or brought_by == current_player.id
                         ),
+                        brought_by_name=bringer_name,
                     )
                     for (
                         drop_in_id,
@@ -866,6 +891,7 @@ def get_season(
                         gender,
                         _covers,
                         brought_by,
+                        bringer_name,
                     ) in drop_ins
                 ],
                 waitlist_entries=waitlist_by_game[game.id],

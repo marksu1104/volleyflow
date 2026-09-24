@@ -338,6 +338,74 @@ function inDays(days) {
         ? []
         : [`有人補上了，預估應該是 $${share}，畫面寫的是「${afterSignup.replace(/\s+/g, " ")}」`]),
     ]);
+
+    // 幫別人報的臨打，名單上要看得出是誰報的。
+    //
+    // Reported 2026-09-23: 「有些幫忙報名的臨打我覺得要註記一下是誰報名
+    // 的」. GUEST was signed up by MEMBER through the sheet above, so the
+    // row must name MEMBER — brought_by_player_id is set only when it
+    // wasn't the person themselves, which is why 「有些」 is right: a
+    // signup you made for yourself carries no such note.
+    //
+    // The note replaces 臨打 rather than joining it: three tags on one
+    // row clipped a long guest name on 2026-09-23, and nobody signs up
+    // a member, so the bringer's name already says "drop-in". 代打 is
+    // still kept apart — rosterRow shows 代 X in preference, because a
+    // stranger who signed themselves up must never read as somebody's
+    // arranged substitute.
+    await page.click("#ledger-backdrop .gsheet-close");
+    await page.waitForSelector("#ledger-backdrop", { state: "hidden", timeout: 10000 });
+    await page.click("#hero-wrap .hero-more");
+    await page.waitForSelector("#game-sheet-backdrop:not([hidden])", { timeout: 10000 });
+    await page.click('#game-sheet-backdrop button[data-gd-tab="attending"]');
+    await page.waitForSelector('#game-sheet-backdrop [data-gd-panel="attending"]:not([hidden])', {
+      timeout: 10000,
+    });
+    // The drawn row *and* the object it was drawn from. A red here is
+    // either "the server never sent brought_by_name" or "it arrived and
+    // the row ignored it", and those have different fixes; on
+    // 2026-09-23 it cost two rounds of guessing to tell them apart,
+    // because the signup path draws a frontend-built object rather than
+    // the server's row.
+    const guestRow = await page.evaluate((guest) => {
+      const rows = [...document.querySelectorAll('[data-gd-panel="attending"] .att-row')];
+      const row = rows.find((r) => r.innerText.includes(guest));
+      const season = typeof currentSeason !== "undefined" ? currentSeason : null;
+      let held = null;
+      for (const g of (season || {}).games || []) {
+        const d = (g.confirmed_drop_ins || []).find((x) => x.player_name === guest);
+        if (d) held = d;
+      }
+      return {
+        text: row ? row.innerText.replace(/\s+/g, " ").trim() : "",
+        held: held ? JSON.stringify(held) : "（currentSeason 裡沒有這個人）",
+      };
+    }, GUEST);
+    // The third source, and the only authoritative one. shared.js caches
+    // every GET in localStorage under vf_cache: and draws the cached copy
+    // before the network answers (getJsonSWR), so currentSeason can be a
+    // stale copy rather than what the API just said. Asking the API
+    // directly is what separates the three explanations — the server
+    // never sent the field, the server sent it and the cache overruled
+    // it, or both were right and the row ignored it — which cost several
+    // rounds of guessing on 2026-09-23 when only the first two sources
+    // were on show.
+    const fresh = await get(`/seasons/${season.id}`);
+    let served = "（伺服器的名單裡沒有這個人）";
+    for (const g of fresh.games || []) {
+      const d = (g.confirmed_drop_ins || []).find((x) => x.player_name === GUEST);
+      if (d) served = JSON.stringify(d);
+    }
+    report("幫別人報的臨打，名單上說得出是誰報的", [
+      ...(guestRow.text ? [] : [`名單上找不到 ${GUEST}`]),
+      ...(guestRow.text.includes(MEMBER)
+        ? []
+        : [
+            `應該註明是 ${MEMBER} 報的，那一列寫的是「${guestRow.text}」`,
+            `前端手上的那筆：${guestRow.held}`,
+            `伺服器現在的那一筆：${served}`,
+          ]),
+    ]);
   } finally {
     await browser.close();
     await fetch(`${API}/clubs/${club.id}`, { method: "DELETE", headers: asOrganizer });

@@ -1544,6 +1544,13 @@
               player_name: p.player_name,
               gender: p.gender || null,
               covering: null,
+              // Guessed by the same rule the server applies: null when
+              // you signed yourself up, your own name otherwise. The
+              // roster's 「X 報名」 note was missing until a full reload
+              // without this — the row drawn here is a frontend-built
+              // object, and the reconcile below writes back only the
+              // real ids, never this field.
+              brought_by_name: p.player_name === playerName() ? null : playerName(),
               signed_up_by_me: true,
             });
             confirmedNames.push(p.player_name);

@@ -186,12 +186,18 @@ def list_club_balances(
 def _who_brought(db: Session, club_id: int) -> dict[int, str]:
     """Guest player id -> the name(s) of whoever signed them up.
 
-    Only ever shown on the money screen. A guest's fee is charged to
-    their own ledger, but they have no account and pay nothing — the
-    member who brought them hands over the cash — so "who do I collect
-    this from" is otherwise unanswerable, and on a night when three
-    members each bring somebody it is guesswork. Deliberately absent
-    from the roster, where it would be noise.
+    A guest's fee is charged to their own ledger, but they have no
+    account and pay nothing — the member who brought them hands over
+    the cash — so "who do I collect this from" is otherwise
+    unanswerable, and on a night when three members each bring
+    somebody it is guesswork.
+
+    Not the only place it appears any more: the roster carries it too
+    as of 2026-09-23, at the organizer's request, served there by
+    seasons.py as DropInDetailOut.brought_by_name. This paragraph used
+    to end "deliberately absent from the roster, where it would be
+    noise" — that decision is reversed, so don't delete either copy as
+    a duplicate of the other.
     """
     Bringer = aliased(PlayerRow)
     rows = (

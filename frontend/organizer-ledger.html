@@ -464,11 +464,14 @@
       actionHtml = '<div class="m-done">✓ 已結清</div>';
     }
 
-    // The one place this is ever shown. A guest's fee sits on their own
-    // ledger, but they have no account and pay nothing — the member who
-    // brought them hands over the cash — so without this the row says
-    // "小明 應收 $235" with no way to know who to ask. Kept off the
-    // roster, where it would be noise rather than an answer.
+    // A guest's fee sits on their own ledger, but they have no account
+    // and pay nothing — the member who brought them hands over the cash
+    // — so without this the row says "小明 應收 $235" with no way to
+    // know who to ask. Not the only place it appears any more: the
+    // roster carries it too as of 2026-09-23, at the organizer's
+    // request. This used to read "kept off the roster, where it would
+    // be noise rather than an answer" — that decision is reversed, so
+    // don't delete either copy as a duplicate of the other.
     const brought = balanceOf(playerId).brought_by;
     const broughtTag = brought
       ? `<span class="m-brought">${escapeHtml(brought)} 報名</span>`

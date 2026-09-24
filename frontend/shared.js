@@ -1528,9 +1528,25 @@ function renderGameDetail(container, season, game, options) {
         change && change.tab === "attending" && change.names.has(d.player_name)
           ? change.phase
           : false,
+      // Who brought them rides *after* the 代打/臨打 label, never instead
+      // of it: they answer different questions, and collapsing them is
+      // the mistake the comment above records. Null whenever somebody
+      // signed themselves up, which is why most rows carry nothing here.
+      // One note, never two. 代 X wins because it is a billing
+      // relationship, and it already implies a drop-in. Otherwise the
+      // bringer's name *replaces* 臨打 rather than joining it: nobody
+      // signs up a member, so "周恆 報名" already says this is a
+      // drop-in, and the third tag is what broke the row. Measured
+      // 2026-09-23 at 390px with a long guest name — the note rendered
+      // as half a glyph wedged against 移除, clipped rather than
+      // wrapped, so neither 每一列都一樣高 nor 沒有元素超出畫面 saw it.
+      // A drop-in who was both arranged and brought by somebody else
+      // shows only 代 X here; the money screen still names the bringer.
       note: d.covering
         ? `<span class="att-note sub">代 ${escapeHtml(d.covering)}</span>`
-        : '<span class="att-note">臨打</span>',
+        : d.brought_by_name
+          ? `<span class="att-note by">${escapeHtml(d.brought_by_name)} 報名</span>`
+          : '<span class="att-note">臨打</span>',
       // Only offered for signups this caller is entitled to undo — their
       // own, or a guest they brought — unless this is the organizer's
       // screen, which manages everybody's. `canRemoveDropIn` is how the
@@ -1553,17 +1569,28 @@ function renderGameDetail(container, season, game, options) {
     const offerCancel =
       !!absence.covered_by && !game.locked && !!onCancelSubstitute && allowed && covering;
 
+    // Two and three characters, like every other mini-action in the app
+    // (儲存, 刪除, 編輯, 退款, 明細, 復原, 請假, 移除, 遞補, 固定, 臨打).
+    // These three were the only four-character ones anywhere, and two of
+    // them sit side by side on this row: at 390px that pushed the note
+    // past the end of .att-name, which clips rather than wraps, so
+    // 「Momo 代打」 came out as half a glyph. Measured 2026-09-23.
+    //
+    // 取消 is unambiguous despite reading like a bare verb: it is offered
+    // only when somebody *is* covering, and 銷假 only when nobody is —
+    // the two conditions below are mutually exclusive, so a row never
+    // carries both.
     const controls =
       (offerAssign
         ? `<button type="button" class="mini-action" data-toggle-sub="${absence.id}">${
-            absence.covered_by ? "編輯代打" : "指定代打"
+            absence.covered_by ? "改代打" : "找代打"
           }</button>`
         : "") +
       (offerCancel
-        ? `<button type="button" class="mini-action danger" data-cancel-sub="${covering.id}">取消代打</button>`
+        ? `<button type="button" class="mini-action danger" data-cancel-sub="${covering.id}">取消</button>`
         : "") +
       (opts.onCancelAbsence && !absence.covered_by
-        ? `<button type="button" class="mini-action" data-undo-absence="${absence.id}">取消請假</button>`
+        ? `<button type="button" class="mini-action" data-undo-absence="${absence.id}">銷假</button>`
         : "");
 
     absentRows.push(

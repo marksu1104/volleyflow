@@ -646,6 +646,10 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 }
 .att-row.dropin .att-note { background: var(--surface); color: var(--good); }
 .att-note.sub { background: var(--accent-soft); color: var(--accent); }
+/* Who brought a guest. Quieter than the 臨打/代打 label beside it on
+   purpose: that one says what this person is to the game, this one only
+   says who to ask about them, and it must not compete. */
+.att-note.by { background: none; padding: 2px 0; color: var(--ink-faint); font-weight: 400; }
 .att-note.gap { background: var(--bad-soft); color: var(--bad); }
 
 .gender-tag { font-size: .68rem; margin-left: 4px; opacity: .8; }

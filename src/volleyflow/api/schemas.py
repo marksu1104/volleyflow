@@ -570,6 +570,18 @@ class DropInDetailOut(BaseModel):
     themselves, or a guest they brought. What the screen uses to decide
     whether to offer them a cancel button; the server checks the same
     thing again before allowing it."""
+    brought_by_name: str | None = None
+    """Who signed this person up, when it wasn't themselves — null for
+    somebody who signed up on their own account.
+
+    The money screen has shown this since it was built (see
+    money._who_brought), on the reasoning that it answers "who do I
+    collect this from" and belongs nowhere else. The roster was
+    deliberately left without it as noise. Reversed 2026-09-23 at the
+    organizer's request: on a night with several guests, "who is this
+    person and why are they here" is a question the roster gets asked
+    too, and the name answers it in the place people are already
+    looking."""
 
 
 class GameDetailOut(BaseModel):

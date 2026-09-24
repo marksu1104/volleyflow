@@ -19,10 +19,23 @@ const SEASON = {
 const GAME = {
   id: 10, date: "2026-10-06", status: "scheduled", locked: false,
   air_conditioned: true, share: "235",
-  absences: [{ id: 100, player_name: "成員2", covered_by: "Momo" }],
+  absences: [
+    { id: 100, player_name: "成員2", covered_by: "Momo" },
+    // The other branch of the absent row's controls: nobody covering, so
+    // it draws 找代打 + 銷假 rather than 改代打 + 取消, and the note is
+    // 缺額 rather than somebody's name. A second row here also gives
+    // 每一列都一樣高 something to compare *within* this tab, which one
+    // row alone never could.
+    { id: 101, player_name: "成員3", covered_by: null },
+  ],
   confirmed_drop_ins: [
     { id: 200, player_id: 90, player_name: "Momo", gender: "male", covering: "成員2", linked: false },
-    { id: 201, player_id: 91, player_name: "WenChiao +1 女", gender: "female", covering: null, linked: false },
+    // The longest name on the sheet, carrying both notes at once — 臨打
+    // plus who brought them. That pairing is the row most likely to grow
+    // taller than its neighbours, and without brought_by_name in this
+    // fixture the second note never renders and 每一列都一樣高 measures
+    // nothing.
+    { id: 201, player_id: 91, player_name: "WenChiao +1 女", gender: "female", covering: null, linked: false, brought_by_name: "周恆" },
   ],
   waitlist_entries: [{ id: 300, player_name: "測試", gender: "male" }],
 };
@@ -34,6 +47,9 @@ check("每一列都一樣高", (m) => {
   const heights = new Set(m.rows.map((r) => r.h));
   return heights.size === 1 ? null : `列高不一致: ${[...heights].join(", ")}`;
 });
+
+check("名單列的文字沒有被裁掉", (m) =>
+  m.clipped.length ? `被容器切掉: ${m.clipped.join("、")}` : null);
 
 check("每一個分頁都有畫出東西", (m) => {
   const empty = m.tabs.filter((t) => t.height < 20).map((t) => t.key);
@@ -197,6 +213,7 @@ check(`按鈕文字在最窄手機上留有餘裕（文字寬 ÷ 可用寬 < ${F
     // in turn and measured while it is actually visible, which also
     // proves every tab renders at all.
     const rows = [];
+    const clipped = [];
     const tabs = [];
     for (const key of ["attending", "absent", "queued"]) {
       showGameDetailTab(out, key);
@@ -204,6 +221,29 @@ check(`按鈕文字在最窄手機上留有餘裕（文字寬 ÷ 可用寬 < ${F
       tabs.push({ key, visible: !panel.hidden, height: round(panel.getBoundingClientRect().height) });
       for (const r of panel.querySelectorAll(".att-row")) {
         rows.push({ tab: key, cls: r.className, h: round(r.getBoundingClientRect().height) });
+        // Text cut off *inside* a row. Neither 每一列都一樣高 nor
+        // 沒有元素超出畫面 can see this: a flex child shrinks to fit, so
+        // the row keeps its height and nothing passes the screen edge —
+        // the characters are simply clipped. Found 2026-09-23 by eye on
+        // a screenshot, with both of those checks green, while 周恆 報名
+        // was rendering as half a glyph wedged against 移除. The inline
+        // .att-note reports clientWidth 0, so measure the box that does
+        // the clipping rather than the note itself.
+        for (const e of r.querySelectorAll("*")) {
+          // .att-who is the one thing allowed to be shortened — a long
+          // name ellipsises on purpose, so the reader can see it was
+          // cut. Everything else cut here is cut mid-glyph with nothing
+          // to say so, which is the bug. Deliberately not exempting
+          // "anything with text-overflow: ellipsis": adding that
+          // property to a box would then silence this check rather than
+          // make the content fit.
+          if (e.classList.contains("att-who")) continue;
+          if (e.clientWidth > 0 && e.scrollWidth > e.clientWidth + 1) {
+            clipped.push(
+              `${key} ${e.className || e.tagName} 少了 ${Math.round(e.scrollWidth - e.clientWidth)}px`
+            );
+          }
+        }
       }
     }
     // The substitute picker, opened. It is hidden by default, so
@@ -257,6 +297,7 @@ check(`按鈕文字在最窄手機上留有餘裕（文字寬 ÷ 可用寬 < ${F
       busy,
       picker,
       rows,
+      clipped,
       tabs,
       tabTargets: [...document.querySelectorAll(".gd-tab")].map((t) =>
         round(t.getBoundingClientRect().height)
