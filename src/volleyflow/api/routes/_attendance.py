@@ -641,7 +641,9 @@ def _promote_from_waitlist(db: Session, game_id: int) -> int | None:
     return _promote_entry(db, entry).player_id
 
 
-def _offer_freed_slots_to_the_queue(db: Session, season: SeasonRow) -> list[int]:
+def _offer_freed_slots_to_the_queue(
+    db: Session, season: SeasonRow
+) -> list[tuple[int, int]]:
     """Taking somebody off the roster frees their place at every game they
     were expected at, so the queue is offered those places — earliest
     queued first, one person per place, exactly as an absence does.
@@ -665,7 +667,11 @@ def _offer_freed_slots_to_the_queue(db: Session, season: SeasonRow) -> list[int]
     last month's game would put them on a roster they never stood on and
     charge them for the night.
     """
-    promoted: list[int] = []
+    # (game_id, player_id), not just the player: one removal can free a
+    # place at several games at once, and whoever is promoted has to be
+    # told *which night* is theirs — see
+    # reminders.notify_promoted_from_waitlist.
+    promoted: list[tuple[int, int]] = []
     today = _today_in_taiwan()
     # Locked, in date order, exactly as _get_game_or_404 locks the one
     # game every other path through here holds. This is the only caller
@@ -697,7 +703,7 @@ def _offer_freed_slots_to_the_queue(db: Session, season: SeasonRow) -> list[int]
             if player_id is None:
                 break
             db.flush()
-            promoted.append(player_id)
+            promoted.append((game.id, player_id))
     return promoted
 
 

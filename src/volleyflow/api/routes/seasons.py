@@ -80,6 +80,10 @@ from volleyflow.db.models import (
     WaitlistEntryRow,
 )
 from volleyflow.ledger import EntryType
+from volleyflow.notify.reminders import (
+    notify_promoted_from_waitlist,
+    notify_season_settled,
+)
 from volleyflow.pricing import share_per_game
 from volleyflow.settlement import (
     season_shares,
@@ -594,9 +598,16 @@ def remove_member(
     # that never opened. Before the fee sync, for the same reason the
     # restore is: the promoted drop-ins' charges belong in the ledger the
     # sync then reads.
-    _offer_freed_slots_to_the_queue(db, season)
+    promoted = _offer_freed_slots_to_the_queue(db, season)
     _sync_member_season_fee_ledger(db, season, player_id, is_member=False)
     db.commit()
+
+    # After the commit, never before — see the note in
+    # attendance.record_absence. Taking one person off the roster frees a
+    # place at every game they were expected at, so this single action
+    # can promote several people into several different nights, and each
+    # of them is told which night is theirs.
+    notify_promoted_from_waitlist(db, promoted)
 
 
 @router.get("/seasons/{season_id}/join-pool", response_model=list[ClubMemberOut])
@@ -990,6 +1001,12 @@ def settle_season(
 
     season_row.settled_at = now
     db.commit()
+
+    # After the commit, never before. This is the one message that states
+    # an amount, so a rolled-back transaction would put a figure in front
+    # of every member that the books never recorded — and a LINE push
+    # cannot be taken back.
+    notify_season_settled(db, season_row, settlements)
 
     return SeasonSettleOut(
         season_id=season_id,

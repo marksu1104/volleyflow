@@ -5,6 +5,7 @@ notified — never the waitlist."
 """
 
 import logging
+from collections import defaultdict
 from datetime import date, timedelta
 
 from sqlalchemy import func
@@ -23,6 +24,7 @@ from volleyflow.db.models import (
 )
 from volleyflow.notify.line_client import push_to_user
 from volleyflow.schedule import GameStatus
+from volleyflow.settlement import MemberSettlement
 
 logger = logging.getLogger("volleyflow.reminders")
 
@@ -187,6 +189,134 @@ def send_join_request_digests(session: Session) -> int:
                     "Couldn't tell an organizer of club %s who is waiting", club_id
                 )
     return len(waiting)
+
+
+def _line_ids_for(session: Session, player_ids: list[int]) -> dict[int, str]:
+    """Player id -> LINE id, for whoever has one.
+
+    A missing id is the ordinary case, not a failure: a guest the
+    organizer typed in by hand has no LINE account at all, and neither
+    does somebody's +1. They simply can't be told.
+    """
+    if not player_ids:
+        return {}
+    rows = (
+        session.query(PlayerRow.id, PlayerRow.line_user_id)
+        .filter(PlayerRow.id.in_(player_ids), PlayerRow.line_user_id.is_not(None))
+        .all()
+    )
+    return {row[0]: row[1] for row in rows}
+
+
+def _club_name(session: Session, club_id: int) -> str:
+    club = session.get(ClubRow, club_id)
+    return club.name if club is not None else ""
+
+
+def notify_promoted_from_waitlist(
+    session: Session, promoted: list[tuple[int, int]]
+) -> int:
+    """Tell whoever the queue just put on court. Returns how many were told.
+
+    The one notification that changes what somebody does. Everything else
+    here reports something the reader could have looked up; this one
+    reaches a person who queued, went away, and has no reason to check
+    again — while the slot is already counted as theirs and the roster
+    says they are playing. Not telling them is how a game ends up a
+    player short with nobody at fault.
+
+    Takes `(game_id, player_id)` pairs rather than one game and a list of
+    people. Removing somebody from a season's roster frees their place at
+    *every* game they were expected at, so a single action can promote
+    several people into several different nights, and each of them has to
+    be told which night is theirs.
+
+    **Call this after the commit, never before.** The promotion is one
+    write in a transaction that can still roll back; a push sent from
+    inside it would tell somebody they are playing in a game they were
+    never actually promoted to, and LINE has no way to take it back.
+
+    One try per person: LINE refuses a push to anybody who hasn't added
+    the Official Account, and letting that error escape would stop
+    everyone after them in the list — the failure send_game_reminder was
+    fixed for on 2026-09-15.
+    """
+    if not promoted:
+        return 0
+
+    by_game: dict[int, list[int]] = defaultdict(list)
+    for game_id, player_id in promoted:
+        by_game[game_id].append(player_id)
+    reachable = _line_ids_for(session, [player_id for _, player_id in promoted])
+
+    told = 0
+    for game_id, player_ids in by_game.items():
+        game = session.get(GameRow, game_id)
+        if game is None:
+            continue
+        season = session.get(SeasonRow, game.season_id)
+        if season is None:
+            continue
+        # The club's name leads, for the same reason the short-roster
+        # alert carries it: one person can play in more than one club and
+        # a date alone doesn't say which.
+        text = (
+            f"{_club_name(session, season.club_id)} {game.date} 這一場有名額，"
+            f"你已從候補遞補上場。\n{APP_URL}"
+        )
+        for player_id in player_ids:
+            line_user_id = reachable.get(player_id)
+            if line_user_id is None:
+                continue
+            try:
+                push_to_user(line_user_id, text)
+                told += 1
+            except Exception:
+                logger.exception(
+                    "Couldn't tell player %s they were promoted into game %s",
+                    player_id,
+                    game_id,
+                )
+    return told
+
+
+def notify_season_settled(
+    session: Session, season: SeasonRow, settlements: list[MemberSettlement]
+) -> int:
+    """Tell each member what the season came to. Returns how many were told.
+
+    Once per season, so the cost against the free tier is one push per
+    member per season rather than per game — which is why this one was
+    worth turning on and the pre-game reminder wasn't.
+
+    The amount is stated rather than left to be looked up: "已結算" on its
+    own sends every member into the app to find one number, and the
+    number is the only reason the message exists.
+    """
+    name = _club_name(session, season.club_id)
+    reachable = _line_ids_for(session, [ms.player.id for ms in settlements])
+
+    told = 0
+    for member in settlements:
+        line_user_id = reachable.get(member.player.id)
+        if line_user_id is None:
+            continue
+        # net is refund - season_fee, positive when the club owes them.
+        # Stated as 退費 only when there is one; a member who used every
+        # night they paid for gets a plain notice rather than "$0 退費",
+        # which reads like something went wrong.
+        if member.refund > 0:
+            body = f"本季已結算，你有 ${member.refund} 退費。"
+        else:
+            body = "本季已結算，你沒有可退的費用。"
+        try:
+            push_to_user(line_user_id, f"{name} {body}\n{APP_URL}")
+            told += 1
+        except Exception:
+            logger.exception(
+                "Couldn't tell player %s the season was settled", member.player.id
+            )
+    return told
 
 
 if __name__ == "__main__":

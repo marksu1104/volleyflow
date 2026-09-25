@@ -31,21 +31,20 @@ from volleyflow.db.models import (
     SeasonRow,
 )
 from volleyflow.notify import reminders
+from volleyflow.players import Player
+from volleyflow.settlement import MemberSettlement
 
 SentMessages = list[tuple[str, str]]
 
 
-@pytest.fixture(autouse=True)
-def sent_messages(monkeypatch: pytest.MonkeyPatch) -> SentMessages:
-    """Autouse, so no test in this file can reach the real LINE API even
-    by forgetting to ask for the fixture."""
-    sent: SentMessages = []
-
-    def fake_push_to_user(user_id: str, text: str) -> None:
-        sent.append((user_id, text))
-
-    monkeypatch.setattr(reminders, "push_to_user", fake_push_to_user)
-    return sent
+# The sent_messages fixture moved to tests/conftest.py on 2026-09-25, so
+# it covers the whole suite rather than this file alone. It had to: the
+# API routes send pushes of their own now (a waitlist promotion, a
+# settled season), and those tests were reaching the real line_client,
+# raising KeyError on the missing token inside the notifier's own
+# try/except, and passing anyway. Two autouse fixtures patching the same
+# attribute would also have made which one wins depend on ordering, and
+# the losing one's list is silently never written to.
 
 
 def _season(
@@ -374,6 +373,14 @@ def test_nobody_waiting_to_join_sends_nothing(
     assert sent_messages == []
 
 
+def _settlement(player: PlayerRow, refund: str) -> MemberSettlement:
+    return MemberSettlement(
+        player=Player(id=player.id, name=player.name),
+        season_fee=Decimal("500"),
+        refund=Decimal(refund),
+    )
+
+
 def test_every_message_carries_a_way_back_into_the_app(
     db_session: Session, sent_messages: SentMessages
 ) -> None:
@@ -381,8 +388,11 @@ def test_every_message_carries_a_way_back_into_the_app(
     it sends the reader off to find the app themselves — and the join
     digest was worse, naming a screen it gave no way to reach.
 
-    Both push paths in one test on purpose: a third message type added
-    later without the link fails here rather than shipping quietly.
+    All four push paths in one test on purpose: a fifth message type
+    added later without the link fails here rather than shipping quietly.
+    Two of them were added on 2026-09-25 and this assertion had to grow
+    with them — the promise in this docstring is only worth anything if
+    somebody keeps it.
 
     The literal address, not `reminders.APP_URL`, which would only
     compare the constant to itself. This pins the real LIFF app, so
@@ -391,10 +401,150 @@ def test_every_message_carries_a_way_back_into_the_app(
     season = _season(db_session, minimum_roster=5, club_name="晴光館")
     game = _short_game(db_session, season)
     _waiting_to_join(db_session, season, "新人一")
+    queued = PlayerRow(name="候補的人", line_user_id="Uqueued")
+    member = PlayerRow(name="季末的人", line_user_id="Usettled")
+    db_session.add_all([queued, member])
+    db_session.flush()
 
     reminders.send_game_reminder(db_session, game)
     reminders.send_join_request_digests(db_session)
+    reminders.notify_promoted_from_waitlist(db_session, [(game.id, queued.id)])
+    reminders.notify_season_settled(db_session, season, [_settlement(member, "100")])
 
-    assert len(sent_messages) == 2, "a short game and a waiting joiner"
+    assert len(sent_messages) == 4, "短名單、待核准、候補遞補、季末結算"
     for _user_id, text in sent_messages:
         assert "https://liff.line.me/2011156233-6CouG6VI" in text
+
+
+def test_a_promoted_player_is_told_which_night_is_theirs(
+    db_session: Session, sent_messages: SentMessages
+) -> None:
+    """The date is the point. Somebody can be queued for several games at
+    once, and "你遞補上了" without saying which night is a message they
+    have to open the app to understand — which is what the notification
+    exists to save them.
+    """
+    season = _season(db_session, club_name="晴光館")
+    game = _short_game(db_session, season)
+    queued = PlayerRow(name="候補的人", line_user_id="Uqueued")
+    db_session.add(queued)
+    db_session.flush()
+
+    told = reminders.notify_promoted_from_waitlist(db_session, [(game.id, queued.id)])
+
+    assert told == 1
+    user_id, text = sent_messages[0]
+    assert user_id == "Uqueued"
+    assert "晴光館" in text
+    assert "2026-08-25" in text
+
+
+def test_a_promoted_guest_without_line_is_skipped_rather_than_crashing(
+    db_session: Session, sent_messages: SentMessages
+) -> None:
+    # The ordinary case, not an edge one: a guest somebody typed in by
+    # hand has no LINE account at all, and most drop-ins are exactly that.
+    season = _season(db_session)
+    game = _short_game(db_session, season)
+    guest = PlayerRow(name="朋友的朋友")
+    db_session.add(guest)
+    db_session.flush()
+
+    told = reminders.notify_promoted_from_waitlist(db_session, [(game.id, guest.id)])
+
+    assert told == 0
+    assert sent_messages == []
+
+
+def test_one_removal_can_promote_people_into_different_nights(
+    db_session: Session, sent_messages: SentMessages
+) -> None:
+    """Why this takes (game_id, player_id) pairs rather than a game and a
+    list of people: taking one person off the roster frees their place at
+    every game they were expected at, so a single action promotes several
+    people into several different nights. Each has to hear their own date.
+    """
+    season = _season(db_session, club_name="晴光館")
+    tuesday = GameRow(season_id=season.id, date=date(2026, 8, 25))
+    friday = GameRow(season_id=season.id, date=date(2026, 8, 28))
+    first = PlayerRow(name="週二的人", line_user_id="Utuesday")
+    second = PlayerRow(name="週五的人", line_user_id="Ufriday")
+    db_session.add_all([tuesday, friday, first, second])
+    db_session.flush()
+
+    told = reminders.notify_promoted_from_waitlist(
+        db_session, [(tuesday.id, first.id), (friday.id, second.id)]
+    )
+
+    assert told == 2
+    by_user = dict(sent_messages)
+    assert "2026-08-25" in by_user["Utuesday"]
+    assert "2026-08-28" in by_user["Ufriday"]
+
+
+def test_one_unreachable_promoted_player_does_not_stop_the_others(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Same failure send_game_reminder was fixed for on 2026-09-15: LINE
+    # raises for anybody who hasn't added the Official Account, and one
+    # of them must not swallow everyone after them in the list.
+    delivered: list[str] = []
+
+    def push(user_id: str, text: str) -> None:
+        if user_id == "Unot-a-friend":
+            raise RuntimeError("400 from LINE: not a friend")
+        delivered.append(user_id)
+
+    monkeypatch.setattr(reminders, "push_to_user", push)
+    season = _season(db_session)
+    game = _short_game(db_session, season)
+    blocked = PlayerRow(name="封鎖的人", line_user_id="Unot-a-friend")
+    fine = PlayerRow(name="正常的人", line_user_id="Ufine")
+    db_session.add_all([blocked, fine])
+    db_session.flush()
+
+    told = reminders.notify_promoted_from_waitlist(
+        db_session, [(game.id, blocked.id), (game.id, fine.id)]
+    )
+
+    assert told == 1
+    assert delivered == ["Ufine"]
+
+
+def test_settling_tells_each_member_what_they_are_owed(
+    db_session: Session, sent_messages: SentMessages
+) -> None:
+    """The amount is the only reason this message exists. "已結算" alone
+    sends every member into the app to find one number.
+    """
+    season = _season(db_session, club_name="晴光館")
+    member = PlayerRow(name="有退費的", line_user_id="Urefund")
+    db_session.add(member)
+    db_session.flush()
+
+    told = reminders.notify_season_settled(
+        db_session, season, [_settlement(member, "235")]
+    )
+
+    assert told == 1
+    user_id, text = sent_messages[0]
+    assert user_id == "Urefund"
+    assert "晴光館" in text
+    assert "$235" in text
+
+
+def test_a_member_with_nothing_owed_is_not_told_about_zero(
+    db_session: Session, sent_messages: SentMessages
+) -> None:
+    # "$0 退費" reads like something went wrong. Somebody who played every
+    # night they paid for gets a plain notice instead.
+    season = _season(db_session)
+    member = PlayerRow(name="沒退費的", line_user_id="Unothing")
+    db_session.add(member)
+    db_session.flush()
+
+    reminders.notify_season_settled(db_session, season, [_settlement(member, "0")])
+
+    _user_id, text = sent_messages[0]
+    assert "$0" not in text
+    assert "沒有可退的費用" in text

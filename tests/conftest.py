@@ -15,6 +15,36 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from volleyflow.db.models import Base
+from volleyflow.notify import reminders
+
+SentMessages = list[tuple[str, str]]
+
+
+@pytest.fixture(autouse=True)
+def sent_messages(monkeypatch: pytest.MonkeyPatch) -> SentMessages:
+    """Every LINE push a test triggers, captured rather than sent.
+
+    Autouse across the whole suite, not just tests/notify, because the
+    API routes push on their own now: promoting somebody off the waitlist
+    tells them, and settling a season tells every member. Without a patch
+    that reaches those tests, each one called line_client, asked for
+    LINE_CHANNEL_ACCESS_TOKEN, and raised KeyError *inside the notifier's
+    own `except Exception`* — so the suite stayed green while the push
+    never happened at all. Found 2026-09-25, when 534 tests passed
+    without once running the code they were meant to cover.
+
+    Patched on `reminders`, where the name is bound. `from ... import
+    push_to_user` copies the reference, so patching line_client itself
+    would leave that copy untouched — the same trap tests/api/conftest.py
+    records for verify_id_token.
+    """
+    sent: SentMessages = []
+
+    def fake_push_to_user(user_id: str, text: str) -> None:
+        sent.append((user_id, text))
+
+    monkeypatch.setattr(reminders, "push_to_user", fake_push_to_user)
+    return sent
 
 
 @pytest.fixture

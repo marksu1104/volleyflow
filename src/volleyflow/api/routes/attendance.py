@@ -64,6 +64,7 @@ from volleyflow.db.models import (
     SeasonRow,
     WaitlistEntryRow,
 )
+from volleyflow.notify.reminders import notify_promoted_from_waitlist
 
 router = APIRouter()
 
@@ -105,6 +106,14 @@ def record_absence(
 
     db.commit()
     db.refresh(absence)
+
+    # After the commit, never before. A LINE push cannot be taken back,
+    # and until this line the promotion is a write that could still roll
+    # back — telling somebody they are playing in a game they were never
+    # promoted to is worse than not telling them at all. See
+    # reminders.notify_promoted_from_waitlist.
+    if promoted is not None:
+        notify_promoted_from_waitlist(db, [(game.id, promoted)])
 
     return AbsenceOut(
         id=absence.id,
@@ -625,6 +634,11 @@ def promote_from_waitlist(
     db.commit()
     db.refresh(drop_in)
 
+    # The organizer promoting somebody by hand, rather than the queue
+    # doing it on its own — the person still has no idea, so they are
+    # told the same way. After the commit; see record_absence.
+    notify_promoted_from_waitlist(db, [(game.id, drop_in.player_id)])
+
     return WaitlistPromoteOut(
         player_id=drop_in.player_id,
         game_id=game.id,
@@ -679,6 +693,10 @@ def cancel_drop_in(
 
     db.commit()
     db.refresh(drop_in)
+
+    # After the commit — see the note in record_absence.
+    if promoted is not None:
+        notify_promoted_from_waitlist(db, [(drop_in.game_id, promoted)])
 
     return DropInCancelOut(
         id=drop_in.id,
