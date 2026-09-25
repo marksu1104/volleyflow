@@ -2518,6 +2518,15 @@ const _API_ERROR_PATTERNS = [
   [/^Past this season's change deadline for this game$/, () => "已經過了這一場的更動期限"],
 
   // Capacity and the roster.
+  //
+  // ⚠️ Nothing in the API raises the message below any more: `seasons.py`
+  // now says "No room for another member on {date}, and there is no
+  // drop-in to move back to the waitlist." (the pattern after this one).
+  // Kept rather than deleted because `games.py:255` and two other sites
+  // re-raise a ValueError's own text through `str(exc)`, and a wording
+  // that isn't in the source today can still arrive from one of those.
+  // If you are confident it can't, delete it — but check those three
+  // first. Noted 2026-09-25.
   [
     /^No room for another member: (.+) already \d+ on court\. Mark somebody absent or cancel a drop-in on those games first\.$/,
     (m) => `無法加入固定名單：${m[1]}已經額滿。請先將一位固定成員設為請假，或移除該場臨打`,
@@ -2533,6 +2542,10 @@ const _API_ERROR_PATTERNS = [
   [
     /^Can't lower capacity to (\d+) — (\d+) people are already on the roster or on a game's court$/,
     (m) => `人數上限不能調到 ${m[1]} 人——目前已經有 ${m[2]} 人在名單或場上了`,
+  ],
+  [
+    /^This season already has (\d+) fixed members for (\d+) slots/,
+    (m) => `本季已經有 ${m[1]} 位固定成員，上限 ${m[2]} 位。請先調高人數上限，或把一位移出名單`,
   ],
   [
     /^This game is full \((\d+)\) and everyone in it was personally arranged/,
@@ -2557,7 +2570,14 @@ const _API_ERROR_PATTERNS = [
     /^Season is already settled — venue cost can't change now$/,
     () => "這一季已經結算，場地費不能再改了",
   ],
-  [/^Season i?s? already settled$/, () => "這一季已經結算了"],
+  // Both spellings. seasons.py says "Season is already settled" in most
+  // places and "Season already settled" in one (seasons.py:974). The
+  // previous pattern tried to cover both with `i?s?` — but with both
+  // optionals dropped that asks for *two* spaces, so it matched neither
+  // wording of that route and the English reached the screen. Found
+  // 2026-09-25 by running every HTTPException in the API through this
+  // table, which is not something reading it could have caught.
+  [/^Season (is )?already settled$/, () => "這一季已經結算了"],
   [/^Season is not settled$/, () => "這一季還沒結算，沒有東西可以復原"],
   [/^This settlement has already been undone$/, () => "這次結算已經復原過了"],
   [
@@ -2585,6 +2605,16 @@ const _API_ERROR_PATTERNS = [
 
   // Everything else that's actually reachable from ordinary use.
   [/^Name can't be empty$/, () => "名字不能空白"],
+  [/^Game is already cancelled$/, () => "這一場已經取消了"],
+  // The developer-only screens. An ordinary member never reaches these,
+  // but an untranslated string is an untranslated string — and leaving
+  // them out means the audit can never reach zero, which is how a
+  // catalogue stops being maintained.
+  [
+    /^(The developer overview|Reading reports) isn't configured on this server$/,
+    () => "這個功能在伺服器上尚未設定",
+  ],
+  [/^Only the developer can read (this|reports)$/, () => "只有開發者可以看這一頁"],
   [/^Problem reporting isn't configured yet$/, () => "回報功能尚未設定"],
   [/^Nothing to report$/, () => "沒有內容可以回報"],
   [
