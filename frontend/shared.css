@@ -194,6 +194,17 @@ button:disabled { opacity: .6; cursor: default; }
 .btn-row { display: flex; gap: 8px; }
 .btn-row .btn { margin-top: 0; }
 
+/* A text field with its own action beside it — 開新一季 的「不在球隊裡的
+   人」. The class sat on the markup with no rule anywhere to match it, so
+   the field and its button stacked and the button kept the browser's
+   default grey (reported 2026-09-28 with a screenshot). .btn is
+   width:100% with a top margin, which is right for a page-wide action
+   and wrong inside a row — hence the same two overrides .btn-row needs
+   above. */
+.add-member-row { display: flex; gap: 8px; align-items: center; }
+.add-member-row .control { flex: 1; min-width: 0; }
+.add-member-row .btn { width: auto; margin-top: 0; flex: none; }
+
 /* 待辦: one line above the game card. A row of coloured chips read as a
    wall of warnings and needed a scrollbar; colour now lives in the dot. */
 .todo-line {

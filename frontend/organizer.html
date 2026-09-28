@@ -753,6 +753,12 @@
             gender: gender || null,
             covering: null,
             linked: false,
+            // Same rule the server applies (attendance.py): null when you
+            // signed yourself up, your own name otherwise. Without it the
+            // roster tag was missing until a full reload — member.html got
+            // this on 2026-09-23 and this copy was left behind, which is
+            // what 「正式網站沒看到幫別人報名的標籤」 was on 2026-09-28.
+            brought_by_name: name === myName ? null : myName,
           });
         } else {
           game.waitlist_entries.push({
