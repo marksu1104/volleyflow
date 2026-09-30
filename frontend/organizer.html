@@ -344,7 +344,12 @@
     const parts = [
       `${season.games.length} 場`,
       `${season.members.length} 人`,
-      `每人每場 $${season.share_per_game}`,
+      // share_per_game is the figure for a game with the AC off; a cooled
+      // night costs ac_surcharge/capacity more. Unqualified it reads as
+      // the price of every game. Seasons that don't price air
+      // conditioning keep the plain number — the qualifier would only be
+      // something to puzzle over there.
+      `每人每場 $${season.share_per_game}${Number(season.ac_surcharge) > 0 ? "（未含冷氣）" : ""}`,
       season.game_start_time && season.game_end_time
         ? `${escapeHtml(season.game_start_time.slice(0, 5))}–${escapeHtml(season.game_end_time.slice(0, 5))}`
         : null,
@@ -406,7 +411,7 @@
     const each = acExtraEach(season, game);
     return `
       <div class="ac-switch">
-        <span class="lbl">冷氣</span>
+        <span class="lbl">本場冷氣</span>
         <span class="ac-seg">
           <button type="button" aria-pressed="${on}"
             onclick="toggleAirConditioning(${game.id}, true)">開</button>
@@ -420,9 +425,15 @@
   async function toggleAirConditioning(gameId, on) {
     if (on === currentSeason.games.find((g) => g.id === gameId).air_conditioned) return;
     const each = acExtraEach(currentSeason, currentSeason.games.find((g) => g.id === gameId));
+    // Both figures, because they answer different questions: the club's
+    // bill moves by the whole surcharge, each member's share by their
+    // slice of it. Correcting a date the season was set up with is a
+    // different act that must *not* move the total — that lives in
+    // 設定頁 · 冷氣場次.
+    const surcharge = Number(currentSeason.ac_surcharge) || 0;
     const wording = on
-      ? `要把這場改成「有開冷氣」嗎？每位成員這一場會多 $${each}。`
-      : `要把這場改成「沒開冷氣」嗎？每位成員這一場會退 $${each}。`;
+      ? `確定將本場改為開冷氣？\n場地費總額將增加 $${surcharge}，每位成員本場增加 $${each}。`
+      : `確定將本場改為未開冷氣？\n場地費總額將減少 $${surcharge}，每位成員本場減少 $${each}。`;
     if (!confirm(wording)) return;
     try {
       await postJson(API_BASE, `/games/${gameId}/air-conditioning`, { air_conditioned: on }, "PUT");

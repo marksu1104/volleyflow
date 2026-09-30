@@ -991,6 +991,13 @@ a.btn { display: block; text-decoration: none; text-align: center; }
 .chip.add { background: none; border: 1px dashed var(--rule-strong); color: var(--ink-soft); cursor: pointer; padding: 5px 10px; }
 .chip .chip-ac { opacity: 1; font-size: .7rem; padding: 3px 8px; border: 1px solid var(--rule-strong); border-radius: 999px; color: var(--ink-faint); }
 .chip .chip-ac.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+/* The same badge quoted inside a sentence, so the hint can name the
+   control it is talking about rather than describing it in words. */
+.hint .chip-ac {
+  display: inline-block; font-size: .7rem; line-height: 1.4; padding: 1px 8px;
+  border: 1px solid var(--rule-strong); border-radius: 999px; color: var(--ink-faint); vertical-align: 1px;
+}
+.hint .chip-ac.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
 
 /* a tap-to-toggle checkbox row, for picking this season's members */
 .box {
