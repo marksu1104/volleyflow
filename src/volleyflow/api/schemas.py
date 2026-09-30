@@ -193,6 +193,19 @@ class AirConditioningUpdate(BaseModel):
     air_conditioned: bool
 
 
+class AirConditionedDatesUpdate(BaseModel):
+    dates: list[date] = Field(default_factory=list)
+    """Which of this season's games are down as needing the air
+    conditioning. The whole set is replaced, so a date left out is turned
+    off.
+
+    This corrects what was *forecast* when the season was set up, and so
+    deliberately leaves `total_venue_cost` alone: the club's bill has not
+    changed, only which nights the air-conditioning part of it belongs
+    to. routes.set_game_air_conditioning is the other case — the AC
+    really did run, or really didn't, and the bill moves with it."""
+
+
 class GameOut(BaseModel):
     id: int
     date: date

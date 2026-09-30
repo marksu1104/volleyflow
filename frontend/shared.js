@@ -2590,6 +2590,10 @@ const _API_ERROR_PATTERNS = [
   [/^No club with id \d+$/, () => "找不到這個球隊"],
   [/^No season with id \d+$/, () => "找不到這一季"],
   [/^No game with id \d+$/, () => "找不到這一場"],
+  [
+    /^No game on (\d{4}-\d{2}-\d{2}) in this season$/,
+    (m) => `這一季沒有 ${m[1]} 這一場`,
+  ],
   [/^No absence with id \d+$/, () => "找不到這筆請假"],
   [/^No drop-in with id \d+/, () => "找不到這筆報名"],
   [/^No waitlist entry with id \d+$/, () => "找不到這筆候補"],

@@ -150,6 +150,14 @@ h2 { font-size: .9rem; margin: 28px 0 10px; color: var(--ink-soft); font-weight:
    it; the dense roster row directly above 新增訪客 just made it obvious
    there first. Sections that deliberately want no gap set it inline. */
 .wrap > .section-label:first-child { margin-top: 0; }
+/* A count riding along on a section's label — how many of the thing the
+   section is about. Set apart from the label rather than shouting with
+   it: the label is uppercase and bold, and a number inherits neither
+   well. */
+.section-label .section-note {
+  float: right; font-weight: 400; letter-spacing: 0;
+  text-transform: none; color: var(--ink-faint); font-family: var(--font-num);
+}
 /* A section-label that also opens and closes what's under it — the
    roster page's "其他成員", collapsed by default because 本季固定成員
    is what the organizer actually came here to read, and a long tail of

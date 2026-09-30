@@ -48,6 +48,7 @@ from volleyflow.api.routes._people import (
 )
 from volleyflow.api.schemas import (
     AbsenceDetailOut,
+    AirConditionedDatesUpdate,
     ClubMemberOut,
     DisplacedDropInOut,
     DropInDetailOut,
@@ -338,6 +339,56 @@ def update_season(
     db.commit()
     db.refresh(season)
     return _season_out(db, season)
+
+
+@router.put("/seasons/{season_id}/air-conditioned-dates", status_code=204)
+def set_air_conditioned_dates(
+    season_id: int,
+    payload: AirConditionedDatesUpdate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> None:
+    """Correct which nights this season is down as needing the AC.
+
+    The forecast made when the season was booked is easy to get wrong,
+    and until now there was no way to fix it: the only control was
+    games.set_game_air_conditioning, which treats a change as the AC
+    having actually run on the night and moves `total_venue_cost` by
+    `ac_surcharge` accordingly. Using that to correct a mistyped forecast
+    silently inflated or shrank the club's bill, one game at a time.
+
+    So this one leaves the total alone. What it does change is how that
+    total is *divided*: the AC portion comes out of the total before the
+    even split (see pricing.shares_by_game), so moving it to different
+    nights re-prices every game. A member's whole-season fee stays within
+    a few dollars of where it was — not exactly equal, because each
+    game's share is rounded up on its own and the rounding lands
+    differently — and _sync_season_fee_ledger writes that difference as
+    an adjustment, exactly as editing the venue cost does.
+
+    Refused once the season is settled, for the same reason every other
+    money-moving edit is: the books are closed.
+    """
+    season = db.get(SeasonRow, season_id)
+    if season is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    _require_organizer(db, season.club_id, current_player)
+    if season.settled_at is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is already settled")
+
+    cooled = set(payload.dates)
+    games = db.query(GameRow).filter(GameRow.season_id == season_id).all()
+    unknown = cooled - {game.date for game in games}
+    if unknown:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"No game on {min(unknown)} in this season",
+        )
+    for game in games:
+        game.air_conditioned = game.date in cooled
+    db.flush()
+    _sync_season_fee_ledger(db, season)
+    db.commit()
 
 
 @router.post("/seasons/{season_id}/members", response_model=SeasonMemberAddOut)

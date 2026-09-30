@@ -123,6 +123,9 @@ const KNOWN_MESSAGES = [
   "This settlement has already been undone",
   "Waiting for the organizer to approve you",
   "阿凱 is no longer in this club",
+  // Added 2026-09-30 with 冷氣場次: a date that names no game in this
+  // season, which is how a typo in the correction comes back.
+  "No game on 2026-12-25 in this season",
 ];
 
 // isChinese alone was never enough, and this test spent weeks proving it:

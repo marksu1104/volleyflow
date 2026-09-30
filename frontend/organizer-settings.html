@@ -247,6 +247,17 @@
     <button type="button" class="fold" id="past-games-toggle" hidden></button>
     <div id="past-games" hidden></div>
 
+    <!-- Only shown when the season prices air conditioning at all. This
+         corrects the forecast made at setup; the per-game switch on the
+         management page records what actually happened and moves the
+         venue cost with it. -->
+    <div id="ac-block" hidden>
+      <div class="section-label">冷氣場次<span id="ac-count" class="section-note"></span></div>
+      <p class="hint">修正開季時的預定，場地費總額不變。</p>
+      <div id="ac-dates" class="chips"></div>
+      <button type="button" class="btn btn-quiet" id="ac-save" onclick="saveAcDates(this)">儲存冷氣場次</button>
+    </div>
+
     <div class="section-label">本季設定 · 金額</div>
 
     <div class="field">
@@ -1067,6 +1078,7 @@
           currentSeason = season;
           fillForm(season);
           renderGames(season);
+          renderAcDates(season);
           document.getElementById("page-state").innerHTML = "";
           document.getElementById("settings-form").hidden = creatingNextSeason;
         },
@@ -1105,6 +1117,76 @@
     if (status === "cancelled_unrefunded") return "已取消・場地費照算";
     if (status === "cancelled_refunded") return "已取消・場地費不算";
     return "";
+  }
+
+  /* 冷氣場次 — correcting the forecast made when the season was set up.
+   *
+   * Deliberately not the same act as the per-game switch on the
+   * management page: that one records that the air conditioning really
+   * ran (or didn't) and moves `total_venue_cost` with it, because the
+   * venue really charges for it. This one only says which nights the
+   * air-conditioning part of an unchanged bill belongs to, so the total
+   * stays put and every game is simply re-priced around it. Using the
+   * per-game switch to fix a mistyped forecast inflated the bill one
+   * game at a time, which is why this exists.
+   */
+  let acDates = new Set();
+  // The season this block is currently showing. Kept here rather than
+  // read from currentSeason so the three functions below depend only on
+  // what renderAcDates was handed — they are the same object in the
+  // page, and this way they can be exercised without one.
+  let acSeason = null;
+
+  function renderAcDates(season) {
+    acSeason = season;
+    const block = document.getElementById("ac-block");
+    // Nothing to place when the venue doesn't charge for the AC at all.
+    block.hidden = !(Number(season.ac_surcharge) > 0);
+    if (block.hidden) return;
+    acDates = new Set(
+      season.games.filter((g) => g.air_conditioned).map((g) => g.date)
+    );
+    drawAcDates(season);
+  }
+
+  function drawAcDates(season) {
+    const settled = season.settled_at !== null;
+    document.getElementById("ac-dates").innerHTML = season.games
+      .map((g) => {
+        const on = acDates.has(g.date);
+        return `<span class="chip">${describeDate(g.date).label}<button type="button" class="chip-ac${
+          on ? " on" : ""
+        }" aria-pressed="${on}"${settled ? " disabled" : ""} onclick="toggleSeasonAcDate('${
+          g.date
+        }')">冷氣</button></span>`;
+      })
+      .join("");
+    document.getElementById("ac-count").textContent = `${acDates.size} 場`;
+    document.getElementById("ac-save").disabled = settled;
+  }
+
+  function toggleSeasonAcDate(iso) {
+    // Local until 儲存: a half-finished correction must not re-price the
+    // season one tap at a time.
+    if (acDates.has(iso)) acDates.delete(iso);
+    else acDates.add(iso);
+    drawAcDates(acSeason);
+  }
+
+  async function saveAcDates() {
+    try {
+      await postJson(
+        API_BASE,
+        `/seasons/${acSeason.id}/air-conditioned-dates`,
+        { dates: [...acDates] },
+        "PUT"
+      );
+      toast("冷氣場次已更新", "good");
+      // Re-read: every game's share moved, and the season fee with it.
+      await loadSettings(acSeason.id);
+    } catch (e) {
+      toast("更新失敗：" + translateApiError(e.message));
+    }
   }
 
   function renderGames(season) {
