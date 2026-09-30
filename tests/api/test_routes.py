@@ -2365,16 +2365,25 @@ def test_an_organizer_can_set_gender_for_someone_with_no_line_account(
     assert response.json()["gender"] == "female"
 
 
-def test_an_organizer_cannot_set_gender_for_someone_with_a_line_account(
+def test_an_organizer_may_set_gender_for_a_member_with_a_line_account(
     client: TestClient,
 ) -> None:
+    """Reversed on 2026-09-30, at the organizer's request. This used to be
+    refused on the reasoning that anyone who can open the app owns their
+    own profile — but the roster's male/female split is what a night gets
+    planned around, and a member who never filled theirs in left it wrong
+    with no way for the organizer to put it right.
+
+    Renaming did *not* come with it; the test below still refuses that.
+    """
     club = create_club(client)
     carol = identify(client, "Carol")
     join_club(client, club["id"], auth_headers(carol["token"]))
 
     response = client.put(f"/players/{carol['id']}/gender", json={"gender": "female"})
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.json()["gender"] == "female"
 
 
 def test_a_stranger_cannot_set_gender_for_an_accountless_player(

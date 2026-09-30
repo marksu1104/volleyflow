@@ -199,16 +199,16 @@ def _require_club_access(db: Session, club_id: int, current_player: PlayerRow) -
         )
 
 
-def _may_edit_accountless_player(
+def _organizes_a_club_of(
     db: Session, current_player: PlayerRow, target: PlayerRow
 ) -> bool:
-    """Whether `current_player` organizes a club that `target` belongs to,
-    and `target` has no LINE identity to speak for themselves with. The
-    narrow case where acting on someone else's profile is legitimate:
-    they only exist because an organizer typed their name in.
+    """Whether `current_player` organizes any club `target` belongs to.
+
+    Split out of _may_edit_accountless_player on 2026-09-30: the gender
+    field opened up to organizers for everyone in their club, while
+    renaming stayed narrow. Both used to call the same helper, so
+    loosening one would have loosened the other by accident.
     """
-    if target.line_user_id is not None:
-        return False
     shared = (
         db.query(ClubMemberRow)
         .join(
@@ -226,6 +226,19 @@ def _may_edit_accountless_player(
         if mine is not None and mine.role == "organizer":
             return True
     return False
+
+
+def _may_edit_accountless_player(
+    db: Session, current_player: PlayerRow, target: PlayerRow
+) -> bool:
+    """Whether `current_player` organizes a club that `target` belongs to,
+    and `target` has no LINE identity to speak for themselves with. The
+    narrow case where acting on someone else's profile is legitimate:
+    they only exist because an organizer typed their name in.
+    """
+    if target.line_user_id is not None:
+        return False
+    return _organizes_a_club_of(db, current_player, target)
 
 
 def _require_organizer(db: Session, club_id: int, current_player: PlayerRow) -> None:

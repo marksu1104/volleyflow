@@ -14,6 +14,7 @@ from volleyflow.api.routes._people import (
     _gender,
     _get_player_or_404,
     _may_edit_accountless_player,
+    _organizes_a_club_of,
     _unique_display_name,
     get_current_player,
     is_developer,
@@ -140,15 +141,20 @@ def set_player_gender(
     """Self-reported by the player — never billing-relevant, only shown
     on the roster so a game's expected male/female split is visible.
 
-    Yours to set, with one exception: a player the organizer typed in by
-    hand has no LINE account, so they cannot open the app and set it
-    themselves, and their half of the roster's male/female count would
-    be stuck at unknown forever. An organizer of a club they belong to
-    may fill it in for them. Once that person claims a LINE identity,
-    it's theirs alone again.
+    Yours to set, and an organizer may set it for anyone in their club.
+
+    It used to be restricted to players with no LINE account, on the
+    reasoning that anyone who can open the app should own their own
+    profile. In practice the roster's male/female split is what the
+    organizer plans a night around, and a member who never filled theirs
+    in left it wrong with no way for the organizer to correct it. Opened
+    up on 2026-09-30 at the organizer's request. Renaming is deliberately
+    *not* included: a name is how a person is addressed, and the two
+    stopped sharing a permission helper so that loosening this one could
+    not loosen that one by accident.
     """
     player = _get_player_or_404(db, player_id)
-    if current_player.id != player_id and not _may_edit_accountless_player(
+    if current_player.id != player_id and not _organizes_a_club_of(
         db, current_player, player
     ):
         raise HTTPException(
