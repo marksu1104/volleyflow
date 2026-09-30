@@ -660,6 +660,24 @@ class SeasonDetailOut(BaseModel):
     games: list[GameDetailOut]
 
 
+class CashAtSettlement(BaseModel):
+    player_id: int
+    amount: Decimal
+    """Signed the way the ledger signs a payment: positive when the
+    player hands money over, negative when the organizer hands it back."""
+
+
+class SeasonSettleRequest(BaseModel):
+    cash: list[CashAtSettlement] = Field(default_factory=list)
+    """Whose balance is being squared in cash as part of this settlement.
+
+    Anyone left out simply keeps their balance, and a balance is already
+    club-wide rather than per-season — so "leave it for next season" is
+    the absence of an entry, not an entry of its own. That is why this
+    list is normally short: it holds only the people actually handing
+    money over or taking it back on the day."""
+
+
 class SeasonSettleOut(BaseModel):
     season_id: int
     settled_at: datetime

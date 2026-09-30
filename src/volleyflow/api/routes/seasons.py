@@ -64,6 +64,7 @@ from volleyflow.api.schemas import (
     SeasonMemberAddOut,
     SeasonOut,
     SeasonSettleOut,
+    SeasonSettleRequest,
     SeasonSummaryOut,
     SeasonUnsettleOut,
     SeasonUpdate,
@@ -1021,6 +1022,7 @@ def view_settlement(
 @router.post("/seasons/{season_id}/settle", response_model=SeasonSettleOut)
 def settle_season(
     season_id: int,
+    payload: SeasonSettleRequest | None = None,
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> SeasonSettleOut:
@@ -1029,11 +1031,31 @@ def settle_season(
     when each member joined the roster (see _sync_season_fee_ledger) —
     so this is purely the refund half of the billing rules' settlement.
     A season can't be settled twice.
+
+    `payload.cash` records the money that actually changed hands while
+    the organizer was settling up, in the same pass. It used to be a
+    separate errand: settle, then go down the list tapping 退款 or 已收
+    one person at a time. Anyone left out of the list keeps their
+    balance, which is what carries into the next season — 「保留至下一季」
+    is the absence of a payment, not a payment of its own, so there is
+    nothing to write for it.
     """
     season_row, settlements = _gather_member_settlements(db, season_id)
     _require_organizer(db, season_row.club_id, current_player)
     if season_row.settled_at is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season already settled")
+
+    cash = payload.cash if payload is not None else []
+    members = {ms.player.id for ms in settlements}
+    for entry in cash:
+        # A club-mate who isn't in this season has no balance this
+        # settlement can square, and a stranger has no business in it at
+        # all. Refusing beats quietly writing money against the wrong id.
+        if entry.player_id not in members:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Player {entry.player_id} is not a member of this season",
+            )
 
     now = _now()
     for ms in settlements:
@@ -1049,6 +1071,24 @@ def settle_season(
                     note=f"Season {season_id} absence refund",
                 )
             )
+
+    # After the refunds, never before: what somebody hands over on the
+    # day is settled against a balance that already includes what this
+    # settlement just credited them.
+    for entry in cash:
+        if entry.amount == 0:
+            continue
+        db.add(
+            LedgerEntryRow(
+                player_id=entry.player_id,
+                club_id=season_row.club_id,
+                entry_type=EntryType.PAYMENT,
+                amount=entry.amount,
+                recorded_at=now,
+                season_id=season_id,
+                note=f"Season {season_id} settlement",
+            )
+        )
 
     season_row.settled_at = now
     db.commit()

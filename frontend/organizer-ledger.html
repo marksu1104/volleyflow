@@ -82,8 +82,12 @@
 
   <div id="tab-closing" class="tab" hidden>
     <div id="closing-before">
-      <p class="hint">結算會計算每個人這一季的請假退費，寫進帳本，並鎖住這一季的名單與場地費。結算後不能重複結算。</p>
-      <div class="section-label">本季退費</div>
+      <p class="hint">結算後本季名單與場地費將鎖定，不可重複結算。未選擇收付款者，餘額保留至下一季。</p>
+      <div class="balance" style="margin-bottom:14px">
+        <span class="balance-label">現金結餘</span>
+        <span id="closing-cash" class="balance-value even">—</span>
+      </div>
+      <div class="section-label">本季結算</div>
       <div id="closing-preview" class="money"></div>
       <button type="button" class="btn btn-primary" id="settle-btn" onclick="settleSeason()">結算此季</button>
     </div>
@@ -759,22 +763,7 @@
     document.getElementById("closing-after").hidden = !settled;
 
     if (!settled) {
-      const refunded = settlementPreview.members.filter((m) => Number(m.refund) > 0);
-      document.getElementById("closing-preview").innerHTML = refunded.length
-        ? refunded
-            .map(
-              (m) => `
-                <div class="m-row">
-                  <div class="m-top">
-                    <span class="avatar sm">${escapeHtml((m.player_name || "?").slice(0, 1))}</span>
-                    <span class="m-name">${escapeHtml(m.player_name)}</span>
-                    <span class="m-net owed">退費 $${m.refund}</span>
-                  </div>
-                </div>
-              `
-            )
-            .join("")
-        : '<div class="empty">這一季沒有需要退費的請假</div>';
+      renderClosingChoices(season, settlementPreview);
       return;
     }
 
@@ -791,6 +780,101 @@
         moneyRowHtml(m.id, m.name, m.gender, splitLedger(balanceOf(m.id), "club"), null, null)
       )
       .join("");
+  }
+
+  /* Settling in one pass.
+   *
+   * The list used to show only the people owed a refund, read-only, and
+   * squaring up was a second errand afterwards: settle, then walk the
+   * member list tapping 退款 or 已收 one at a time. Now every member
+   * whose balance isn't zero gets a choice here, and 結算此季 writes the
+   * refunds and the cash together.
+   *
+   * 保留至下一季 is the default and writes nothing: a balance is already
+   * club-wide, so leaving it alone *is* carrying it forward. That is why
+   * only the people actually handing money over end up in the request.
+   */
+  const closingCash = new Map();
+  // What the block is currently showing. Held here rather than read from
+  // currentSeason/settlementPreview so the functions below depend only
+  // on what they were handed — they are the same objects in the page.
+  let closingSeason = null;
+  let closingPreview = null;
+
+  /** What this member's balance is, from the club's point of view:
+   * positive means the club owes them. Club-wide rather than
+   * season-scoped, for the reason given in renderClosingTab below. */
+  function closingDue(playerId) {
+    return Number(splitLedger(balanceOf(playerId), "club").due);
+  }
+
+  function renderClosingChoices(season, preview) {
+    closingSeason = season || closingSeason;
+    closingPreview = preview || closingPreview;
+    season = closingSeason;
+    // The settlement hasn't been written yet, so a member's balance
+    // doesn't include the refund it is about to credit them. Add it in,
+    // or someone owed exactly their refund reads as 已結清 and the
+    // organizer is never offered the payout.
+    const refundOf = new Map(
+      closingPreview.members.map((m) => [m.player_id, Number(m.refund)])
+    );
+    const rows = season.members
+      .map((m) => ({
+        id: m.id,
+        name: m.name,
+        gender: m.gender,
+        due: closingDue(m.id) + (refundOf.get(m.id) || 0),
+      }))
+      .filter((m) => m.due !== 0);
+
+    document.getElementById("closing-preview").innerHTML = rows.length
+      ? rows.map(closingRowHtml).join("")
+      : '<div class="empty">每個人都已結清，直接結算即可</div>';
+    renderClosingCash(rows);
+  }
+
+  function closingRowHtml(m) {
+    const owed = m.due > 0;
+    const picked = closingCash.has(m.id) ? "cash" : "keep";
+    const amount = Math.abs(m.due);
+    return `
+      <div class="m-row">
+        <div class="m-top">
+          <span class="avatar sm">${escapeHtml((m.name || "?").slice(0, 1))}</span>
+          <span class="m-name">${escapeHtml(m.name)}${genderTag(m.gender)}</span>
+          <span class="m-net ${owed ? "owed" : "owe"}">${owed ? "應退" : "應收"} $${amount}</span>
+        </div>
+        <div class="m-act">
+          <button type="button" class="${picked === "keep" ? "paid" : "later"}"
+            onclick="pickClosing(${m.id}, 'keep')">保留至下一季</button>
+          <button type="button" class="${picked === "cash" ? "paid" : "later"}"
+            onclick="pickClosing(${m.id}, 'cash')">${owed ? "退款" : "已收"}</button>
+        </div>
+      </div>`;
+  }
+
+  /** Cash in less cash out, so the organizer can count what should be in
+   * their hand when the evening is over. */
+  function renderClosingCash(rows) {
+    let total = 0;
+    let moves = 0;
+    for (const m of rows) {
+      if (!closingCash.has(m.id)) continue;
+      total -= m.due;
+      moves += 1;
+    }
+    const el = document.getElementById("closing-cash");
+    el.textContent = moves === 0 ? "—" : (total > 0 ? "+" : total < 0 ? "−" : "") + "$" + Math.abs(total);
+    el.className = "balance-value" + (moves === 0 ? " even" : total > 0 ? " owed" : " owe");
+  }
+
+  function pickClosing(playerId, how) {
+    // The amount is read at settle time, not here: a preview refresh
+    // between the tap and 結算此季 would otherwise write a stale figure.
+    if (how === "cash") closingCash.set(playerId, true);
+    else closingCash.delete(playerId);
+    renderClosingChoices();
   }
 
   /** Undo a settlement.
@@ -828,10 +912,23 @@
   async function settleSeason() {
     if (!confirm("確定要結算這一季嗎？結算後會鎖住名單與場地費，且無法重複結算。")) return;
     const btn = document.getElementById("settle-btn");
+    // Read now, from the same figures on screen: the refund each member
+    // is about to be credited, plus whatever they already owed or were
+    // owed. Anyone not in closingCash simply isn't sent.
+    const refundOf = new Map(
+      closingPreview.members.map((m) => [m.player_id, Number(m.refund)])
+    );
+    const cash = [...closingCash.keys()]
+      .map((id) => ({
+        player_id: id,
+        amount: String(-(closingDue(id) + (refundOf.get(id) || 0))),
+      }))
+      .filter((entry) => entry.amount !== "0");
     try {
       await whileBusy(btn, async () => {
-        await postJson(API_BASE, `/seasons/${currentSeason.id}/settle`, {});
+        await postJson(API_BASE, `/seasons/${currentSeason.id}/settle`, { cash });
       });
+      closingCash.clear();
       loadLedger(currentSeason.id);
     } catch (e) {
       toast("結算失敗：" + e.message);

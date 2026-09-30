@@ -2498,6 +2498,7 @@ const _API_ERROR_PATTERNS = [
   // Membership and permissions.
   [/^Already a member of this (club|season)$/, () => "已經是這裡的成員了"],
   [/^Not a member of this (club|season)$/, () => "不是這裡的成員"],
+  [/^Player \d+ is not a member of this season$/, () => "這個人不是本季的成員"],
   [/^Player is not a member of this club$/, () => "這個人不是球隊成員"],
   [/^Player is not a fixed member of this game's season$/, () => "這個人不是本季的固定成員"],
   [/^You are not a member of this club$/, () => "你不是這個球隊的成員"],

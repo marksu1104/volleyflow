@@ -126,6 +126,9 @@ const KNOWN_MESSAGES = [
   // Added 2026-09-30 with 冷氣場次: a date that names no game in this
   // season, which is how a typo in the correction comes back.
   "No game on 2026-12-25 in this season",
+  // Added 2026-09-30 with settling in one pass: cash aimed at somebody
+  // who isn't in the season it is settling.
+  "Player 42 is not a member of this season",
 ];
 
 // isChinese alone was never enough, and this test spent weeks proving it:
