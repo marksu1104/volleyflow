@@ -328,6 +328,42 @@ function renderGameHero(season, game, opts) {
 
 /** "2026年7月" / "2026年7~9月" / "2025年12月~2026年2月" — a season's
  * game-date span read as a season, not an ISO date range. */
+/** The season a page should open on: the one being played now.
+ *
+ * "Now" first — today inside the season's own dates. Failing that the
+ * next one due to start, so a club between seasons looks forward rather
+ * than back. Failing that the most recently finished, which is where the
+ * money still is when a season has ended but isn't settled.
+ *
+ * Seasons arrive newest-created first, and that used to be the default.
+ * It meant booking next season in advance moved every page onto a season
+ * with no games played yet — reported 2026-09-29.
+ */
+function defaultSeasonId(seasons) {
+  const today = new Date();
+  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+  const current = seasons.filter(
+    (s) => s.first_game_date <= iso && iso <= s.last_game_date
+  );
+  // More than one only when seasons overlap, which the app allows: the
+  // one ending soonest is the one being finished off.
+  if (current.length) {
+    return current.reduce((a, b) => (a.last_game_date <= b.last_game_date ? a : b)).id;
+  }
+
+  const upcoming = seasons.filter((s) => s.first_game_date > iso);
+  if (upcoming.length) {
+    return upcoming.reduce((a, b) => (a.first_game_date <= b.first_game_date ? a : b)).id;
+  }
+
+  const past = seasons.filter((s) => s.last_game_date < iso);
+  if (past.length) {
+    return past.reduce((a, b) => (a.last_game_date >= b.last_game_date ? a : b)).id;
+  }
+  return seasons[0].id;
+}
+
 function formatSeasonLabel(season) {
   const first = new Date(season.first_game_date + "T00:00:00");
   const last = new Date(season.last_game_date + "T00:00:00");
@@ -565,16 +601,32 @@ async function initClubAndSeasonPickers(
       })
       .join("");
 
-    const remembered = rememberedId(seasonStorageKey);
+    // Which season to open on, when nothing was picked in this tab yet.
+    //
+    // The list arrives newest-created first, so the old rule — "whatever
+    // is first" — meant that booking next season early moved every
+    // page's default onto a season nobody is playing yet. What an
+    // organizer wants is the one being played now.
+    //
+    // Only sessionStorage remembers a choice (see pickSeasonId): opening
+    // the app tomorrow lands on the current season again, while moving
+    // between pages inside one visit keeps the season being worked on —
+    // without that, opening a past season's ledger and tapping through
+    // to 明細 would snap back to the current one and make an old season
+    // impossible to work with at all.
+    const remembered = sessionStorage.getItem(seasonStorageKey);
     if (remembered && seasons.some((s) => String(s.id) === remembered)) {
       seasonEl.value = remembered;
+    } else {
+      seasonEl.value = String(defaultSeasonId(seasons));
     }
 
     // Assignment rather than addEventListener: loadSeasons runs again on
     // every club change, and addEventListener would stack one more
     // handler each time.
     seasonEl.onchange = () => {
-      rememberId(seasonStorageKey, seasonEl.value);
+      // sessionStorage only — a choice lasts this visit, not forever.
+      sessionStorage.setItem(seasonStorageKey, seasonEl.value);
       onSeasonChange(seasonEl.value);
       flashSeasonContent();
     };
