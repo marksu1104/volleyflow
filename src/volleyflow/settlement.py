@@ -47,6 +47,13 @@ class MemberSettlement:
     player: Player
     season_fee: Decimal
     refund: Decimal
+    refunded_absences: int = 0
+    """How many of their absences were covered, and so refunded.
+
+    Carried alongside the money because it cannot be worked back out of
+    it: games don't all cost the same once air conditioning is priced,
+    so `refund` divided by any one share is not a count of nights. The
+    settlement notice says "請假 2 場" and needs the real number."""
 
     @property
     def net(self) -> Decimal:
@@ -91,17 +98,19 @@ def settle_member(
     # cheap half.
     fee = sum((shares[g.id] for g in billable), Decimal("0"))
 
-    refund = sum(
-        (
-            shares[game.id]
-            for game in billable
-            for absence in covered_absences(game, absences, drop_ins)
-            if absence.player == player
-        ),
-        Decimal("0"),
-    )
+    refunded = [
+        shares[game.id]
+        for game in billable
+        for absence in covered_absences(game, absences, drop_ins)
+        if absence.player == player
+    ]
 
-    return MemberSettlement(player=player, season_fee=fee, refund=refund)
+    return MemberSettlement(
+        player=player,
+        season_fee=fee,
+        refund=sum(refunded, Decimal("0")),
+        refunded_absences=len(refunded),
+    )
 
 
 def settle_drop_in(drop_in: DropIn, season: Season) -> Decimal:

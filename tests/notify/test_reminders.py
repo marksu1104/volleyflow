@@ -26,10 +26,12 @@ from volleyflow.db.models import (
     ClubRow,
     DropInRow,
     GameRow,
+    LedgerEntryRow,
     PlayerRow,
     SeasonMemberRow,
     SeasonRow,
 )
+from volleyflow.ledger import EntryType
 from volleyflow.notify import reminders
 from volleyflow.players import Player
 from volleyflow.settlement import MemberSettlement
@@ -373,12 +375,29 @@ def test_nobody_waiting_to_join_sends_nothing(
     assert sent_messages == []
 
 
-def _settlement(player: PlayerRow, refund: str) -> MemberSettlement:
+def _settlement(player: PlayerRow, refund: str, absences: int = 0) -> MemberSettlement:
     return MemberSettlement(
         player=Player(id=player.id, name=player.name),
         season_fee=Decimal("500"),
         refund=Decimal(refund),
+        refunded_absences=absences,
     )
+
+
+def _charge(db_session: Session, season: SeasonRow, player: PlayerRow, amount: str):
+    """A ledger entry, so the notice has a balance to report. Signed from
+    the player's side: negative means they owe the club."""
+    db_session.add(
+        LedgerEntryRow(
+            player_id=player.id,
+            club_id=season.club_id,
+            entry_type=EntryType.SEASON_FEE_CHARGED,
+            amount=Decimal(amount),
+            recorded_at=datetime.now(),
+            season_id=season.id,
+        )
+    )
+    db_session.flush()
 
 
 def test_every_message_carries_a_way_back_into_the_app(
@@ -514,30 +533,33 @@ def test_one_unreachable_promoted_player_does_not_stop_the_others(
 def test_settling_tells_each_member_what_they_are_owed(
     db_session: Session, sent_messages: SentMessages
 ) -> None:
-    """The amount is the only reason this message exists. "已結算" alone
-    sends every member into the app to find one number.
-    """
+    """Three facts, in the order the reader asks them: what the season
+    cost, what came back, and what that leaves outstanding."""
     season = _season(db_session, club_name="晴光館")
     member = PlayerRow(name="有退費的", line_user_id="Urefund")
     db_session.add(member)
     db_session.flush()
+    _charge(db_session, season, member, "-500")
 
     told = reminders.notify_season_settled(
-        db_session, season, [_settlement(member, "235")]
+        db_session, season, [_settlement(member, "235", absences=2)]
     )
 
     assert told == 1
     user_id, text = sent_messages[0]
     assert user_id == "Urefund"
     assert "晴光館" in text
-    assert "$235" in text
+    assert "季費 $500" in text
+    assert "請假 2 場退費 $235" in text
+    # Club-wide, so a balance left over from an earlier season shows too.
+    assert "目前應繳 $500" in text
 
 
 def test_a_member_with_nothing_owed_is_not_told_about_zero(
     db_session: Session, sent_messages: SentMessages
 ) -> None:
-    # "$0 退費" reads like something went wrong. Somebody who played every
-    # night they paid for gets a plain notice instead.
+    # "請假 0 場退費 $0" reads like something went wrong. Somebody who
+    # played every night they paid for is simply not told about refunds.
     season = _season(db_session)
     member = PlayerRow(name="沒退費的", line_user_id="Unothing")
     db_session.add(member)
@@ -546,5 +568,21 @@ def test_a_member_with_nothing_owed_is_not_told_about_zero(
     reminders.notify_season_settled(db_session, season, [_settlement(member, "0")])
 
     _user_id, text = sent_messages[0]
-    assert "$0" not in text
-    assert "沒有可退的費用" in text
+    assert "退費" not in text
+    assert "目前已結清" in text, "a settled-up member is told so, not left to infer it"
+
+
+def test_the_notice_says_when_the_club_owes_the_member(
+    db_session: Session, sent_messages: SentMessages
+) -> None:
+    season = _season(db_session)
+    member = PlayerRow(name="多付的", line_user_id="Uowed")
+    db_session.add(member)
+    db_session.flush()
+    # Paid more than they were charged — the club owes the difference.
+    _charge(db_session, season, member, "150")
+
+    reminders.notify_season_settled(db_session, season, [_settlement(member, "0")])
+
+    _user_id, text = sent_messages[0]
+    assert "目前應退 $150" in text

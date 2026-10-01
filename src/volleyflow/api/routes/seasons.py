@@ -58,6 +58,7 @@ from volleyflow.api.schemas import (
     Gender,
     MemberAdd,
     MemberOut,
+    NoticeSentOut,
     PaidOutMemberOut,
     SeasonCreate,
     SeasonDetailOut,
@@ -1093,17 +1094,44 @@ def settle_season(
     season_row.settled_at = now
     db.commit()
 
-    # After the commit, never before. This is the one message that states
-    # an amount, so a rolled-back transaction would put a figure in front
-    # of every member that the books never recorded — and a LINE push
-    # cannot be taken back.
-    notify_season_settled(db, season_row, settlements)
+    # Deliberately silent. Settling used to push a message to every
+    # member on the spot, which put a figure in front of them before the
+    # organizer had checked it and gave no way to send it again to
+    # anyone who missed it. Telling people is its own act now — see
+    # send_settlement_notice below.
 
     return SeasonSettleOut(
         season_id=season_id,
         settled_at=now,
         members=[_member_settlement_out(ms) for ms in settlements],
     )
+
+
+@router.post("/seasons/{season_id}/settlement-notice", response_model=NoticeSentOut)
+def send_settlement_notice(
+    season_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> NoticeSentOut:
+    """Tell every member what the season came to — when the organizer
+    says so, not the moment it is settled.
+
+    Settling used to push this automatically, which was wrong twice
+    over: a figure reached every member before the organizer had looked
+    at it, and anyone who had not added the Official Account simply
+    never heard, with no way to try again. Separating the two makes
+    telling people a thing you do, and a thing you can repeat.
+
+    Repeatable on purpose. LINE refuses a push to anybody who hasn't
+    added the Official Account as a friend, so the usual reason to send
+    it twice is that somebody added it in between.
+    """
+    season_row, settlements = _gather_member_settlements(db, season_id)
+    _require_organizer(db, season_row.club_id, current_player)
+    if season_row.settled_at is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is not settled")
+
+    return NoticeSentOut(sent=notify_season_settled(db, season_row, settlements))
 
 
 @router.post("/seasons/{season_id}/unsettle", response_model=SeasonUnsettleOut)

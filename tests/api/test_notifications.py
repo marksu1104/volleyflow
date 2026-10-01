@@ -20,6 +20,7 @@ line_user_id, which is why the assertions below compare against tokens.
 """
 
 from datetime import date, timedelta
+from typing import Any
 
 from fastapi.testclient import TestClient
 
@@ -186,22 +187,80 @@ def test_taking_somebody_off_the_roster_tells_whoever_the_queue_promoted(
     assert second in dates[1]
 
 
-def test_settling_a_season_tells_each_member_it_can_reach(
-    client: TestClient, sent_messages: SentMessages
-) -> None:
+def _settled_season(client: TestClient) -> dict[str, Any]:
     # The organizer is a season member here on purpose: create_club gave
-    # them a LINE identity, and "Bob" — typed in by the organizer — has
-    # none, so the organizer is the only member a push can reach. Bob
-    # being silently skipped is the correct behaviour, not a gap.
+    # them a LINE identity, and "Bob" — typed in by hand — has none, so
+    # the organizer is the only member a push can reach. Bob being
+    # silently skipped is the correct behaviour, not a gap.
     season = start_season(
         client,
         member_names=["Test Organizer", "Bob"],
         capacity=2,
         game_dates=["2026-08-18"],
     )
+    assert client.post(f"/seasons/{season['id']}/settle", json={}).status_code == 200
+    return season
 
-    response = client.post(f"/seasons/{season['id']}/settle", json={})
 
-    assert response.status_code == 200
+def test_settling_a_season_says_nothing_by_itself(
+    client: TestClient, sent_messages: SentMessages
+) -> None:
+    """Settling used to push to every member on the spot. That put a
+    figure in front of them before the organizer had checked it, and
+    gave no way to send it again to anyone who missed it — so telling
+    people is now its own act."""
+    _settled_season(client)
+
+    assert sent_messages == []
+
+
+def test_the_organizer_sends_the_notice_when_they_choose_to(
+    client: TestClient, sent_messages: SentMessages
+) -> None:
+    season = _settled_season(client)
+
+    response = client.post(f"/seasons/{season['id']}/settlement-notice")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["sent"] == 1, "Bob has no LINE account to reach"
     assert [user_id for user_id, _ in sent_messages] == [season["organizer_token"]]
     assert "已結算" in sent_messages[0][1]
+
+
+def test_the_notice_can_be_sent_again(
+    client: TestClient, sent_messages: SentMessages
+) -> None:
+    # The usual reason: somebody added the Official Account after the
+    # first attempt, and LINE had refused them.
+    season = _settled_season(client)
+
+    client.post(f"/seasons/{season['id']}/settlement-notice")
+    client.post(f"/seasons/{season['id']}/settlement-notice")
+
+    assert len(sent_messages) == 2
+
+
+def test_an_unsettled_season_has_no_notice_to_send(client: TestClient) -> None:
+    season = start_season(
+        client, member_names=["Test Organizer"], capacity=2, game_dates=["2026-08-18"]
+    )
+
+    response = client.post(f"/seasons/{season['id']}/settlement-notice")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Season is not settled"
+
+
+def test_only_the_organizer_may_send_the_notice(
+    client: TestClient, sent_messages: SentMessages
+) -> None:
+    season = _settled_season(client)
+    outsider = identify(client, "Outsider")
+
+    response = client.post(
+        f"/seasons/{season['id']}/settlement-notice",
+        headers=auth_headers(outsider["token"]),
+    )
+
+    assert response.status_code == 403
+    assert sent_messages == []

@@ -7,6 +7,7 @@ notified — never the waitlist."
 import logging
 from collections import defaultdict
 from datetime import date, timedelta
+from decimal import Decimal
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -18,6 +19,7 @@ from volleyflow.db.models import (
     ClubRow,
     DropInRow,
     GameRow,
+    LedgerEntryRow,
     PlayerRow,
     SeasonMemberRow,
     SeasonRow,
@@ -46,6 +48,8 @@ logger = logging.getLogger("volleyflow.reminders")
 # Adding it costs nothing: it rides inside a message already being sent,
 # and the free tier counts messages, not characters.
 APP_URL = "https://liff.line.me/2011156233-6CouG6VI"
+
+ZERO = Decimal("0")
 
 
 def _expected_roster(session: Session, game: GameRow, season: SeasonRow) -> list[str]:
@@ -294,29 +298,73 @@ def notify_season_settled(
     number is the only reason the message exists.
     """
     name = _club_name(session, season.club_id)
-    reachable = _line_ids_for(session, [ms.player.id for ms in settlements])
+    player_ids = [ms.player.id for ms in settlements]
+    reachable = _line_ids_for(session, player_ids)
+    balances = _club_balances(session, season.club_id, player_ids)
 
     told = 0
     for member in settlements:
         line_user_id = reachable.get(member.player.id)
         if line_user_id is None:
             continue
-        # net is refund - season_fee, positive when the club owes them.
-        # Stated as 退費 only when there is one; a member who used every
-        # night they paid for gets a plain notice rather than "$0 退費",
-        # which reads like something went wrong.
-        if member.refund > 0:
-            body = f"本季已結算，你有 ${member.refund} 退費。"
-        else:
-            body = "本季已結算，你沒有可退的費用。"
+        text = _settlement_text(name, member, balances.get(member.player.id, ZERO))
         try:
-            push_to_user(line_user_id, f"{name} {body}\n{APP_URL}")
+            push_to_user(line_user_id, text)
             told += 1
         except Exception:
             logger.exception(
                 "Couldn't tell player %s the season was settled", member.player.id
             )
     return told
+
+
+def _club_balances(
+    session: Session, club_id: int, player_ids: list[int]
+) -> dict[int, Decimal]:
+    """Each player's standing in this club, across every season.
+
+    Club-wide on purpose: what a member wants from this message is what
+    they still owe *now*, and an amount left over from an earlier season
+    is part of that. Telling them only this season's figure would name a
+    number they can't reconcile with the app.
+    """
+    if not player_ids:
+        return {}
+    rows = (
+        session.query(LedgerEntryRow.player_id, func.sum(LedgerEntryRow.amount))
+        .filter(
+            LedgerEntryRow.club_id == club_id,
+            LedgerEntryRow.player_id.in_(player_ids),
+        )
+        .group_by(LedgerEntryRow.player_id)
+        .all()
+    )
+    return {row[0]: Decimal(row[1] or 0) for row in rows}
+
+
+def _settlement_text(club: str, member: MemberSettlement, balance: Decimal) -> str:
+    """What one member is told when a season is settled.
+
+    Three facts in a fixed order — what the season cost, what came back,
+    and what that leaves — because the question behind the message is
+    always "so do I owe anything". The per-night detail stays in the app:
+    LINE allows a long message, but nobody reads one, and a member with
+    eight absences would get a wall of dates to find one number in.
+    """
+    lines = [f"{club} 本季已結算。", f"季費 ${member.season_fee}"]
+    if member.refunded_absences:
+        lines.append(f"請假 {member.refunded_absences} 場退費 ${member.refund}")
+
+    # Positive: the club owes them. Negative: they owe the club. Zero is
+    # worth saying plainly — a member who has settled up wants to be told
+    # so, not left to infer it from silence.
+    if balance < 0:
+        lines.append(f"目前應繳 ${-balance}")
+    elif balance > 0:
+        lines.append(f"目前應退 ${balance}")
+    else:
+        lines.append("目前已結清")
+    return "\n".join(lines) + f"\n{APP_URL}"
 
 
 if __name__ == "__main__":

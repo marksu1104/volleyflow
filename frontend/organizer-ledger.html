@@ -100,9 +100,12 @@
       <div id="closing-list" class="money"></div>
       <p id="closing-all-clear" class="empty" hidden>所有成員均已結清</p>
 
+      <button type="button" class="btn btn-primary" id="notice-btn" onclick="sendSettlementNotice(this)" style="margin-top:16px">發送結算通知</button>
+      <p class="hint">成員會收到季費、請假退費與目前應繳金額。可重複發送。</p>
+
       <div class="btn-row" style="margin-top:16px">
         <button type="button" class="btn btn-quiet" id="unsettle-btn" onclick="unsettleSeason()">復原結算</button>
-        <a class="btn btn-primary" href="organizer-settings.html">開新一季</a>
+        <a class="btn btn-quiet" href="organizer-settings.html">開新一季</a>
       </div>
       <p class="hint">
         按錯了可以復原：每一筆退費會用一筆相反的紀錄沖銷掉，原本那筆會留著，帳本仍然說得出發生過什麼。
@@ -875,6 +878,27 @@
     if (how === "cash") closingCash.set(playerId, true);
     else closingCash.delete(playerId);
     renderClosingChoices();
+  }
+
+  /** Tell every member what the season came to.
+   *
+   * Its own button rather than part of 結算此季: settling used to push
+   * the message automatically, which named a figure before the organizer
+   * had checked it and left no way to reach anyone who missed it. The
+   * count comes back because it is routinely lower than the roster —
+   * LINE refuses a push to anybody who hasn't added the Official
+   * Account, and saying "已通知 8 位" is honest where silence implies
+   * everyone heard.
+   */
+  async function sendSettlementNotice(btn) {
+    try {
+      const result = await whileBusy(btn, async () =>
+        postJson(API_BASE, `/seasons/${currentSeason.id}/settlement-notice`, {})
+      );
+      toast(`已通知 ${result.sent} 位成員`, "good");
+    } catch (e) {
+      toast("發送失敗：" + translateApiError(e.message));
+    }
   }
 
   /** Undo a settlement.

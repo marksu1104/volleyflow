@@ -678,6 +678,14 @@ class SeasonSettleRequest(BaseModel):
     money over or taking it back on the day."""
 
 
+class NoticeSentOut(BaseModel):
+    sent: int
+    """How many members were actually messaged. Lower than the roster
+    whenever somebody has no LINE account, or has one but never added
+    the Official Account — LINE refuses those, and the screen says so
+    rather than implying everyone heard."""
+
+
 class SeasonSettleOut(BaseModel):
     season_id: int
     settled_at: datetime
