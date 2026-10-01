@@ -546,6 +546,9 @@ class DropInSummary(BaseModel):
     gender: Gender | None = None
     signed_up_by_me: bool = False
     """Themselves, or a guest they queued — whether they may take it back."""
+    brought_by_name: str | None = None
+    """Who queued this person, when it wasn't themselves — the same tag
+    the confirmed drop-ins carry (DropInDetailOut.brought_by_name)."""
 
 
 class AbsenceDetailOut(BaseModel):

@@ -1560,6 +1560,7 @@
               id: -1,
               player_name: p.player_name,
               gender: p.gender || null,
+              brought_by_name: p.player_name === playerName() ? null : playerName(),
               signed_up_by_me: true,
             });
             queuedNames.push(p.player_name);

@@ -817,9 +817,11 @@ def get_season(
         )
 
     waitlist_by_game: dict[int, list[DropInSummary]] = defaultdict(list)
-    for entry, player in (
-        db.query(WaitlistEntryRow, PlayerRow)
+    # outerjoin for the same reason as the drop-ins above.
+    for entry, player, queuer_name in (
+        db.query(WaitlistEntryRow, PlayerRow, Bringer.name)
         .join(PlayerRow, WaitlistEntryRow.player_id == PlayerRow.id)
+        .outerjoin(Bringer, Bringer.id == WaitlistEntryRow.brought_by_player_id)
         .filter(WaitlistEntryRow.game_id.in_(game_ids))
         .order_by(WaitlistEntryRow.queued_at)
         .all()
@@ -833,6 +835,7 @@ def get_season(
                     entry.player_id == current_player.id
                     or entry.brought_by_player_id == current_player.id
                 ),
+                brought_by_name=queuer_name,
             )
         )
 

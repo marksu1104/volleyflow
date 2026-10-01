@@ -749,7 +749,9 @@
   }
 
   function genderButtons(m) {
-    if (m.linked || !canEditRoster()) return "";
+    // Linked members too: people skip the gender question on first
+    // sign-in, and the court split needs it either way.
+    if (!canEditRoster()) return "";
     return `
       <span class="mini-gender">
         <button type="button" class="${m.gender === "male" ? "on" : ""}" onclick="setGender(${m.id}, 'male')">男</button>

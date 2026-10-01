@@ -1722,7 +1722,11 @@ function renderGameDetail(container, season, game, options) {
           change && change.tab === "queued" && change.names.has(w.player_name)
             ? change.phase
             : false,
-        note: '<span class="att-note">候補</span>',
+        // The bringer replaces 候補 the same way it replaces 臨打 above:
+        // the tab already says these people are queued.
+        note: w.brought_by_name
+          ? `<span class="att-note by">${escapeHtml(w.brought_by_name)} 報名</span>`
+          : '<span class="att-note">候補</span>',
         // 遞補 first: the organizer opens this sheet to put somebody on
         // the court far more often than to strike them off, and the
         // queue's own order is exactly what they are overriding — the

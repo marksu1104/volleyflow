@@ -777,6 +777,7 @@
             player_id: -1,
             player_name: name,
             gender: gender || null,
+            brought_by_name: name === myName ? null : myName,
             signed_up_by_me: true,
           });
         }

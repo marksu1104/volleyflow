@@ -116,6 +116,18 @@ test("the waitlist keeps its order and marks the viewer", () => {
   assert.match(el.innerHTML, /（你）/);
 });
 
+test("a queued guest names who signed them up; a self-signup stays 候補", () => {
+  const { season, game } = fixture();
+  game.waitlist_entries = [
+    { id: 300, player_name: "芷若", gender: "female", brought_by_name: "周安" },
+    { id: 301, player_name: "宋青", gender: "male", brought_by_name: null },
+  ];
+  const el = makeElement();
+  renderGameDetail(el, season, game, {});
+  assert.match(el.innerHTML, /芷若[\s\S]*?att-note by">周安 報名</);
+  assert.match(el.innerHTML, /宋青[\s\S]*?att-note">候補</);
+});
+
 test("editing controls appear only for a caller that can edit", () => {
   const readOnly = render();
   assert.doesNotMatch(readOnly, /data-mark-absent/);

@@ -389,6 +389,7 @@ def test_get_season_reflects_absences_signups_and_waitlist(
             "gender": None,
             # Queued by the organizer, who may take her back out.
             "signed_up_by_me": True,
+            "brought_by_name": "Test Organizer",
         }
     ]
 

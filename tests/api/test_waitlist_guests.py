@@ -74,6 +74,26 @@ def test_only_the_one_who_queued_a_guest_is_told_they_can_remove_them(
     assert queue_seen_by(other) == [False]
 
 
+def test_the_queue_names_who_brought_a_guest_and_nobody_for_yourself(
+    client: TestClient,
+) -> None:
+    # The confirmed drop-ins have carried this since 2026-09-23; the queue
+    # did not, so a guest the organizer queued for somebody looked
+    # exactly like a stranger who had signed up on their own.
+    club, season = _club(client, capacity=1)
+    member = _member(client, club, "會員乙")
+    game_id = season["games"][0]["id"]
+    _bring(client, game_id, member)
+    client.post(
+        "/drop-ins", json={"player_name": "會員乙", "game_id": game_id}, headers=member
+    )
+
+    game = client.get(f"/seasons/{season['id']}", headers=member).json()["games"][0]
+
+    queue = {w["player_name"]: w["brought_by_name"] for w in game["waitlist_entries"]}
+    assert queue == {"朋友丙": "會員乙", "會員乙": None}
+
+
 def test_a_guest_promoted_from_the_queue_is_still_theirs_to_cancel(
     client: TestClient,
 ) -> None:
