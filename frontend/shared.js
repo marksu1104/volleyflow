@@ -110,15 +110,16 @@ function gameLocation(season, game) {
  * A pure function of what the page already has, so the rule is testable
  * without a browser — see tests/frontend/todos.test.js. */
 function buildTodos(season, requests, balances, lineReachable) {
-  // This season's money only. `balance` is club-wide and spans every
-  // season the player has ever been in, so counting from it put people
-  // on the 待辦 list over a fee belonging to some other season —
-  // including one booked for *later*, since a season's fees are charged
-  // when it is created. Callers fetch /balances?season_id=…, so
-  // season_total is the figure for the season on screen. Same rule as
-  // the 帳務 page's splitLedger.
+  // Up to the season on screen. `balance` is club-wide and includes
+  // seasons booked for *later* (their fees are charged when they are
+  // created), which put people on the 待辦 list over money not yet due.
+  // Callers fetch /balances?season_id=…, whose through_season is this
+  // season plus whatever earlier ones left. Same rule as the 帳務 page's
+  // splitLedger; season_total is the fallback for an older cached answer.
   const owing = new Set(
-    balances.filter((b) => Number(b.season_total) < 0).map((b) => b.player_id)
+    balances
+      .filter((b) => Number(b.through_season ?? b.season_total) < 0)
+      .map((b) => b.player_id)
   );
   const upcoming = season.games.filter(
     (g) => g.status === "scheduled" && !describeDate(g.date).isPast
@@ -671,6 +672,21 @@ async function initClubAndSeasonPickers(
  * about which games this person played. Callers that have a season
  * should pass it.
  */
+/** A member's ledger up to `season`: everything except seasons that
+ * start after it. Their fees are charged the moment they are booked, so
+ * with next season already set up the whole ledger read as owing it
+ * now. `season_starts` comes with the ledger, so switching season needs
+ * no second request. Without a season, or for a season the ledger knows
+ * nothing about, nothing counts as later. */
+function ledgerUpTo(ledger, season) {
+  const starts = ledger.season_starts || {};
+  const own = season ? starts[season.id] || (season.games[0] && season.games[0].date) : null;
+  const later = (e) =>
+    !!own && e.season_id != null && starts[e.season_id] != null && starts[e.season_id] > own;
+  const laterTotal = ledger.entries.filter(later).reduce((t, e) => t + Number(e.amount), 0);
+  return { later, total: Number(ledger.balance) - laterTotal };
+}
+
 function summaryRows(ledger, season, name) {
   const here = (e) => !!season && e.season_id === season.id;
   const sum = (pred) =>
@@ -703,15 +719,16 @@ function summaryRows(ledger, season, name) {
       sum((e) => here(e) && e.entry_type === "drop_in_fee_charged"));
     add("已收付款", null, sum((e) => here(e) && e.entry_type === "payment"));
   }
-  // Everything outside the season on screen. Not "上季": a season's fees
-  // are charged the moment it is created, so a club with the next season
-  // already booked has money here belonging to a season still to come.
-  // Same correction as the 帳務 page's splitLedger.
-  add("其他季別", null, sum((e) => !here(e)));
+  // What earlier seasons left. A season starting later is left out
+  // altogether rather than shown here — see ledgerUpTo. With no season
+  // on screen there is no "earlier", only other seasons.
+  const upTo = ledgerUpTo(ledger, season);
+  const earlier = sum((e) => !here(e) && !upTo.later(e));
+  add(!season ? "其他季別" : earlier > 0 ? "上季餘額" : "上季未繳", null, earlier);
 
   // The lines and the headline must never disagree: an entry type this
   // screen doesn't know about still has to appear somewhere.
-  const rest = Number(ledger.balance) - accounted;
+  const rest = upTo.total - accounted;
   if (Math.abs(rest) >= 1) add("其他", null, rest);
 
   return rows.length ? rows : [{ label: "尚無任何費用", detail: null, amount: 0 }];

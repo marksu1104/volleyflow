@@ -1690,7 +1690,8 @@
       chip.hidden = true;
       return;
     }
-    const n = Number(myLedger.balance);
+    // Up to the season on screen — never a season booked for later.
+    const n = ledgerUpTo(myLedger, currentSeason).total;
     chip.innerHTML = `
       <span class="bc-label">我的帳務</span>
       <span class="bc-value">${
@@ -1728,7 +1729,8 @@
       return;
     }
 
-    const n = Number(myLedger.balance);
+    // Up to the season on screen — never a season booked for later.
+    const n = ledgerUpTo(myLedger, currentSeason).total;
     total.className = "lg-total " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
     total.innerHTML =
       `<span>${n === 0 ? "目前已結清" : n > 0 ? "應退給你" : "你應繳"}</span>` +

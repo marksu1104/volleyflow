@@ -6,13 +6,14 @@ rules — those call down into this.
 """
 
 from collections import defaultdict
+from datetime import date
 from decimal import Decimal
 
 from fastapi import (
     HTTPException,
     status,
 )
-from sqlalchemy import func
+from sqlalchemy import ColumnElement, func, true
 from sqlalchemy.orm import Session
 
 from volleyflow.api.conversion import (
@@ -44,6 +45,45 @@ from volleyflow.settlement import (
     season_shares,
     settle_member,
 )
+
+
+def _seasons_up_to(db: Session, season_row: SeasonRow) -> list[int]:
+    """This club's seasons that start no later than `season_row` — the
+    ones whose money is due by the time it is.
+
+    Every money figure for a season is "up to" that season, never the
+    whole club ledger. A member's fee is charged the moment they join a
+    season, so a club that books January in October already has
+    January's fee on everybody's ledger. Summing the whole ledger put
+    that fee into October's settlement as money owed, and offered to
+    collect it under October's name. Seasons are ordered by their first
+    game; one with no games yet has charged nobody, so it only ever
+    counts for itself.
+    """
+    starts: dict[int, date] = {
+        season_id: start
+        for season_id, start in db.query(GameRow.season_id, func.min(GameRow.date))
+        .join(SeasonRow, SeasonRow.id == GameRow.season_id)
+        .filter(SeasonRow.club_id == season_row.club_id)
+        .group_by(GameRow.season_id)
+        .all()
+    }
+    own = starts.get(season_row.id)
+    earlier = [
+        season_id
+        for season_id, start in starts.items()
+        if own is not None and start <= own
+    ]
+    return sorted(set(earlier) | {season_row.id})
+
+
+def _counts_up_to(season_ids: list[int] | None) -> ColumnElement[bool]:
+    """The ledger rows a season's figure includes: its own and earlier
+    seasons', plus any entry tied to no season at all — that is money
+    already moved, never a fee still to come. None: every row."""
+    if season_ids is None:
+        return true()
+    return LedgerEntryRow.season_id.in_(season_ids) | LedgerEntryRow.season_id.is_(None)
 
 
 def _drop_in_share(db: Session, season_row: SeasonRow, game_id: int) -> Decimal:

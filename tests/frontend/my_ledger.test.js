@@ -13,8 +13,12 @@ const { summaryRows } = page;
 
 /** summaryRows takes everything as arguments on purpose, so these cases
  * can be stated without a page around them. */
-function rowsFor({ entries, balance, games = [], name = "周安" }) {
-  return summaryRows({ balance: String(balance), entries }, { id: 1, games }, name);
+function rowsFor({ entries, balance, games = [], name = "周安", starts = {} }) {
+  return summaryRows(
+    { balance: String(balance), entries, season_starts: starts },
+    { id: 1, games },
+    name
+  );
 }
 
 const game = (over) => ({
@@ -90,31 +94,46 @@ test("money from another season is its own line, not mixed in", () => {
     ],
   });
 
-  assert.equal(rows.find((r) => r.label === "其他季別").amount, 705);
+  assert.equal(rows.find((r) => r.label === "上季餘額").amount, 705);
   assert.equal(rows.find((r) => r.label === "本季季費").amount, -3055);
 });
 
-test("the other season's line does not claim to be the previous one", () => {
-  // Reported 2026-09-17 on the organizer's 帳務 page and fixed here too:
-  // a season booked for January has its fees charged as soon as it is
-  // created, so the money sitting outside the season on screen is just
-  // as likely to belong to a season that hasn't started.
-  const rows = rowsFor({
-    balance: -5055,
-    games: [game({})],
+test("a season booked for later is left out, not called 上季", () => {
+  // Reported 2026-09-17 and again in 2026-10: a season booked for
+  // January has its fees charged as soon as it is created. It used to
+  // be shown as 其他季別 and counted in the headline, so a member read
+  // as owing January's fee in October.
+  const page = load("member.html");
+  const season = { id: 1, games: [game({})] };
+  const ledger = {
+    balance: "-5055",
+    season_starts: { 1: "2026-10-06", 42: "2027-01-05" },
     entries: [
       { entry_type: "season_fee_charged", amount: "-3055", season_id: 1 },
       { entry_type: "season_fee_charged", amount: "-2000", season_id: 42 },
     ],
+  };
+
+  const rows = page.summaryRows(ledger, season, "周安");
+
+  assert.equal(page.ledgerUpTo(ledger, season).total, -3055, "the headline");
+  assert.equal(rows.reduce((t, r) => t + r.amount, 0), -3055, "the lines agree with it");
+  assert.equal(rows.filter((r) => /上季|其他/.test(r.label)).length, 0);
+});
+
+test("what an earlier season still owes is carried in as 上季未繳", () => {
+  const rows = rowsFor({
+    balance: -3520,
+    games: [game({})],
+    starts: { 1: "2026-10-06", 7: "2026-07-07" },
+    entries: [
+      { entry_type: "season_fee_charged", amount: "-3055", season_id: 1 },
+      { entry_type: "season_fee_charged", amount: "-3055", season_id: 7 },
+      { entry_type: "payment", amount: "2590", season_id: 7 },
+    ],
   });
 
-  const other = rows.find((r) => r.label === "其他季別");
-  assert.equal(other.amount, -2000);
-  assert.equal(
-    rows.filter((r) => /上季|上一季/.test(r.label)).length,
-    0,
-    "it may well be a future season"
-  );
+  assert.equal(rows.find((r) => r.label === "上季未繳").amount, -465);
 });
 
 test("the lines always add up to the balance", () => {

@@ -1,5 +1,7 @@
 """Payments in, refunds out, and what each person's books say."""
 
+from datetime import date
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -15,6 +17,7 @@ from volleyflow.api.conversion import (
     player_from_row,
 )
 from volleyflow.api.dependencies import get_db
+from volleyflow.api.routes._money import _counts_up_to, _seasons_up_to
 from volleyflow.api.routes._people import (
     _get_club_or_404,
     _get_player_or_404,
@@ -150,11 +153,13 @@ def list_club_balances(
     _require_organizer(db, club_id, current_player)
 
     in_season = LedgerEntryRow.season_id == season_id
+    up_to = _counts_up_to(_season_ids_up_to(db, club_id, season_id))
     rows = (
         db.query(
             LedgerEntryRow.player_id,
             func.sum(LedgerEntryRow.amount),
             func.sum(case((in_season, LedgerEntryRow.amount), else_=0)),
+            func.sum(case((up_to, LedgerEntryRow.amount), else_=0)),
             func.sum(
                 case(
                     (
@@ -177,10 +182,24 @@ def list_club_balances(
             balance=balance_total,
             season_total=season_total,
             season_fee_charged=season_fee,
+            through_season=through,
             brought_by=brought_by.get(player_id),
         )
-        for player_id, balance_total, season_total, season_fee in rows
+        for player_id, balance_total, season_total, through, season_fee in rows
     ]
+
+
+def _season_ids_up_to(
+    db: Session, club_id: int, season_id: int | None
+) -> list[int] | None:
+    """`_seasons_up_to` for a season named in a query string, or None —
+    meaning every season — when none was named or it isn't this club's."""
+    if season_id is None:
+        return None
+    season = db.get(SeasonRow, season_id)
+    if season is None or season.club_id != club_id:
+        return None
+    return _seasons_up_to(db, season)
 
 
 def _who_brought(db: Session, club_id: int) -> dict[int, str]:
@@ -252,11 +271,20 @@ def get_player_ledger(
         .all()
     )
     entries = [ledger_entry_from_row(row, player) for row in entry_rows]
+    season_ids = {row.season_id for row in entry_rows if row.season_id is not None}
+    season_starts: dict[int, date] = {
+        season_id: start
+        for season_id, start in db.query(GameRow.season_id, func.min(GameRow.date))
+        .filter(GameRow.season_id.in_(season_ids))
+        .group_by(GameRow.season_id)
+        .all()
+    }
 
     return PlayerLedgerOut(
         player_id=player.id,
         player_name=player.name,
         balance=balance(entries),
+        season_starts=season_starts,
         entries=[
             LedgerEntryOut(
                 id=row.id,

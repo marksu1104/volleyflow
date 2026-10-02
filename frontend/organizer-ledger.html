@@ -399,38 +399,41 @@
         player_id: playerId,
         balance: "0",
         season_total: "0",
+        through_season: "0",
         season_fee_charged: "0",
         brought_by: null,
       }
     );
   }
 
-  /** This season's own entries vs. everything else on the player's club
-   * ledger, and which of the two the row is actually about.
+  /** Which part of a player's club ledger a row is about.
    *
-   * `scope` exists because of a real bug. A club's books span seasons,
-   * so `balance` includes seasons that are not the one on screen — and
-   * once a second season exists, the other one is not necessarily a
-   * *past* one. A season booked for January has its fees charged the
-   * moment it is created (CLAUDE.md 2.4: the fee lands on the ledger up
-   * front, not at season end), so the October page was stating
-   * January's unpaid fee in its 應收, offering to collect it on a button
-   * that tags the payment to October, and calling it 上季餘額 when it
-   * was next season's.
+   * A club's books span seasons, and a season's fees are charged the
+   * moment it is created (CLAUDE.md 2.4), so the ledger can hold a
+   * season that hasn't started yet. Summing all of it put a January
+   * season's fee into October's 應收 — on 季費 in 2026-09, and on
+   * 季末結算 until 2026-10, where 已收 would have booked January's money
+   * as October's.
    *
-   * "season" — 季費 and 當天臨打, which collect this season's money and
-   * nothing else. "club" — 季末結算, the whole reckoning, where a
-   * balance moving between seasons is the point. Either way the other
-   * pool is shown as context, never folded into the figure the
-   * organizer acts on. */
-  function splitLedger(row, scope = "club") {
+   * "through" — 季費 and 季末結算: this season and every earlier one
+   * (the server's `through_season`), so last season's kept balance is
+   * deducted or added here and a later season never is. "season" —
+   * 當天臨打, which collects this season's money and nothing else. */
+  function splitLedger(row, scope = "through") {
     const balance = Number(row.balance);
     const seasonTotal = Number(row.season_total);
+    // A cached answer from before the server sent through_season has
+    // only the whole ledger to offer.
+    const through = row.through_season == null ? balance : Number(row.through_season);
     return {
+      scope,
       seasonTotal,
+      // Earlier seasons only — what 上季餘額 / 上季未繳 refer to.
+      earlierTotal: through - seasonTotal,
+      // Every other season, earlier or later — 當天臨打's context line.
       otherTotal: balance - seasonTotal,
       balance,
-      due: scope === "season" ? seasonTotal : balance,
+      due: scope === "season" ? seasonTotal : through,
     };
   }
 
@@ -443,10 +446,19 @@
     const netText = due === 0 ? "已結清" : due > 0 ? `應退 $${due}` : `應收 $${Math.abs(due)}`;
     const breakParts = [];
     if (extraBreakLabel) breakParts.push(`<span>${extraBreakLabel} <b>$${extraBreakValue}</b></span>`);
-    // Named for what it is: every season that isn't the one on screen,
-    // which may well be one still to come. It used to say 上季.
-    if (split.otherTotal !== 0) {
-      breakParts.push(`<span>其他季別 <b>${split.otherTotal > 0 ? "+" : "−"}$${Math.abs(split.otherTotal)}</b></span>`);
+    if (split.scope === "season") {
+      // Every season that isn't the one on screen, which may well be one
+      // still to come — so not 上季.
+      if (split.otherTotal !== 0) {
+        breakParts.push(`<span>其他季別 <b>${split.otherTotal > 0 ? "+" : "−"}$${Math.abs(split.otherTotal)}</b></span>`);
+      }
+    } else if (split.earlierTotal !== 0) {
+      // Next to 本季季費 the credit is what comes off it; on its own it
+      // is just what the earlier seasons left.
+      const credit = extraBreakLabel ? "上季餘額扣除" : "上季餘額";
+      breakParts.push(
+        `<span>${split.earlierTotal > 0 ? credit : "上季未繳"} <b>$${Math.abs(split.earlierTotal)}</b></span>`
+      );
     }
 
     let actionHtml = "";
@@ -625,6 +637,7 @@
       ...row,
       balance: String(Number(row.balance) + Number(amount)),
       season_total: String(Number(row.season_total) + Number(amount)),
+      through_season: String(Number(row.through_season ?? row.balance) + Number(amount)),
     };
     // The screen now knows something the server hasn't been told yet, so
     // any balances read already in the air is out of date — same rule
@@ -677,14 +690,15 @@
     let total = 0;
     const rowsHtml = season.members
       .map((member) => {
-        // Season-scoped: this page collects this season's fee, so both
-        // the rows and the progress bar are driven by entries tagged to
-        // this season and never by another season's money. See
+        // Up to this season: last season's kept balance comes off (or
+        // goes on) here, and a season booked later never does. See
         // splitLedger.
-        const split = splitLedger(balanceOf(member.id), "season");
+        const split = splitLedger(balanceOf(member.id));
         const feeCharged = -Number(balanceOf(member.id).season_fee_charged);
         total += feeCharged;
-        const outstanding = Math.max(0, -split.seasonTotal);
+        // The bar measures this season's fee, so what is still owed
+        // counts against it only up to the fee itself.
+        const outstanding = Math.min(feeCharged, Math.max(0, -split.due));
         collected += feeCharged - outstanding;
         return moneyRowHtml(member.id, member.name, member.gender, split, "本季季費", feeCharged);
       })
@@ -698,7 +712,7 @@
     // to disagree: the bar was season-scoped and this was club-wide, so
     // the card could read "全部已收" over "3 人未收".
     const unpaidCount = season.members.filter(
-      (m) => splitLedger(balanceOf(m.id), "season").due < 0
+      (m) => splitLedger(balanceOf(m.id)).due < 0
     ).length;
     document.getElementById("fee-hint").textContent =
       unpaidCount === 0
@@ -780,7 +794,7 @@
         // Club-wide on purpose: settling a season is the whole
         // reckoning, and a balance carried in from another season is
         // exactly what has to be squared here.
-        moneyRowHtml(m.id, m.name, m.gender, splitLedger(balanceOf(m.id), "club"), null, null)
+        moneyRowHtml(m.id, m.name, m.gender, splitLedger(balanceOf(m.id)), null, null)
       )
       .join("");
   }
@@ -808,7 +822,7 @@
    * positive means the club owes them. Club-wide rather than
    * season-scoped, for the reason given in renderClosingTab below. */
   function closingDue(playerId) {
-    return Number(splitLedger(balanceOf(playerId), "club").due);
+    return Number(splitLedger(balanceOf(playerId)).due);
   }
 
   function renderClosingChoices(season, preview) {

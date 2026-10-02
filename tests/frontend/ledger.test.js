@@ -10,10 +10,13 @@ const { load } = require("./harness.js");
 
 const { splitLedger, moneyRowHtml, balanceOf } = load("organizer-ledger.html");
 
-const row = (balance, seasonTotal, fee) => ({
+// `through` is the server's through_season: this season plus earlier
+// ones. It equals the balance unless a later season is already booked.
+const row = (balance, seasonTotal, fee, through = balance) => ({
   player_id: 1,
   balance: String(balance),
   season_total: String(seasonTotal),
+  through_season: String(through),
   season_fee_charged: String(fee),
 });
 
@@ -56,61 +59,62 @@ test("owing money offers to collect it, and shows why", () => {
   );
   assert.match(html, /應收 \$2585/);
   assert.match(html, /已收/);
-  assert.match(html, /其他季別/, "the carried credit has to be visible, not just netted");
+  assert.match(html, /上季餘額扣除 <b>\$470/, "the carried credit has to be visible, not just netted");
 });
 
-test("the 季費 page states this season's fee, not another season's debt", () => {
+test("the 季費 page leaves out a season booked for later", () => {
   // Reported 2026-09-17: a club running its 10~12月 season with a 1~3月
   // season already booked saw January's unpaid fee on October's 季費
-  // page — added into 應收, and labelled 上季餘額 when it was next
-  // season's. A season's fees land on the ledger the moment it is
-  // created, so "the other season" is not necessarily a past one.
-  // Here: 3055 owed for this season, 2000 for a season not on screen.
-  const split = splitLedger(row(-5055, -3055, -3055), "season");
+  // page. A season's fees land on the ledger the moment it is created.
+  // Here: 3055 owed for this season, 2000 for a season not yet started.
+  const split = splitLedger(row(-5055, -3055, -3055, -3055));
 
-  assert.equal(split.due, -3055, "the row is about this season only");
+  assert.equal(split.due, -3055);
   const html = moneyRowHtml(1, "林書妤", "female", split, "本季季費", 3055);
   assert.match(html, /應收 \$3055/);
-  assert.doesNotMatch(html, /應收 \$5055/, "another season's debt is not collected here");
-  assert.match(html, /其他季別/, "it is still visible as context");
-  assert.doesNotMatch(html, /上季/, "the other season may well be a future one");
+  assert.doesNotMatch(html, /5055/, "a later season's fee is not collected here");
+  assert.doesNotMatch(html, /上季|其他季別/, "and is not shown as context either");
 });
 
-test("已收 collects the season's figure, not the club-wide one", () => {
+test("已收 collects what is due up to this season, never a later season's fee", () => {
   // The button records a payment tagged to the season on screen, so
-  // collecting the club-wide total would book another season's money
-  // against this one — the part of this bug that moved real money.
+  // collecting a later season's fee would book that money against this one.
   const html = moneyRowHtml(
     1,
     "林書妤",
     "female",
-    splitLedger(row(-5055, -3055, -3055), "season"),
+    splitLedger(row(-5055, -3055, -3055, -3055)),
     null,
     null
   );
 
   assert.match(html, /recordFullPayment\(this, 1, 3055\)/);
-  assert.doesNotMatch(html, /recordFullPayment\(this, 1, 5055\)/);
 });
 
-test("a season with nothing owed in it reads as settled, debt elsewhere or not", () => {
-  // What the 未收 count on the 季費 card is driven by. It used to be
-  // club-wide while the progress bar above it was already season-scoped,
-  // so one card could say 全部已收 and 3 人未收 at the same time.
+test("what last season left unpaid is collected with this season's fee", () => {
+  const split = splitLedger(row(-3520, -3055, -3055));
+
+  const html = moneyRowHtml(1, "林書妤", "female", split, "本季季費", 3055);
+
+  assert.match(html, /應收 \$3520/);
+  assert.match(html, /上季未繳 <b>\$465/);
+});
+
+test("季末結算 squares this season and earlier ones, not a season booked later", () => {
+  // Reported 2026-10-02: settling October with January booked showed
+  // everyone owing January's fee, and 已收 would have recorded it as
+  // October's money. 470 of credit from before, 2000 owed for later.
+  const split = splitLedger(row(-4585, -3055, -3055, -2585));
+
+  assert.equal(split.due, -2585);
+  assert.match(moneyRowHtml(1, "林書妤", "female", split, null, null), /應收 \$2585/);
+});
+
+test("當天臨打 still collects only this season's money", () => {
   const split = splitLedger(row(-2000, 0, -3055), "season");
 
   assert.equal(split.due, 0);
   assert.match(moneyRowHtml(1, "林書妤", "female", split, null, null), /已結清/);
-});
-
-test("季末結算 still squares the whole club balance", () => {
-  // The other half of the rule. Settling a season is the full
-  // reckoning, and a balance carried between seasons is exactly what
-  // has to be squared there — CLAUDE.md 2.4.
-  const split = splitLedger(row(-5055, -3055, -3055), "club");
-
-  assert.equal(split.due, -5055);
-  assert.match(moneyRowHtml(1, "林書妤", "female", split, null, null), /應收 \$5055/);
 });
 
 test("being owed money offers a refund but doesn't insist", () => {

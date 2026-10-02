@@ -823,6 +823,10 @@ class PlayerBalanceOut(BaseModel):
     season_fee_charged: Decimal
     """Just the season-fee entries for that season, before any payment,
     which is what "本季季費" means on screen."""
+    through_season: Decimal
+    """What is due by the season asked about: its own entries and every
+    earlier season's, never a season that starts later. What 季費 and
+    季末結算 act on. Equal to `balance` when no season is asked about."""
     brought_by: str | None = None
     """Who signed this player up, when they're a guest somebody brought.
 
@@ -838,4 +842,9 @@ class PlayerLedgerOut(BaseModel):
     player_name: str
     balance: Decimal
     """Positive: the organizer owes the player. Negative: the player owes."""
+    season_starts: dict[int, date] = {}
+    """First game date of every season these entries belong to. The member
+    screen leaves out seasons that start after the one it is showing —
+    their fees are charged when they are booked, but are not due yet —
+    and switches season without asking the server again."""
     entries: list[LedgerEntryOut]
