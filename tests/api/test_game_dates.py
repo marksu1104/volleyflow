@@ -102,10 +102,11 @@ def test_a_cancelled_game_cannot_be_moved(client: TestClient) -> None:
 
 
 def test_a_settled_season_refuses_a_move(client: TestClient) -> None:
-    season = start_season(client, game_dates=[_in(30)], member_names=["Alice"])
-    client.post(f"/seasons/{season['id']}/settle")
+    # Two weeks out: inside the three weeks a season may be settled in.
+    season = start_season(client, game_dates=[_in(14)], member_names=["Alice"])
+    assert client.post(f"/seasons/{season['id']}/settle").status_code == 200
 
-    refused = client.patch(f"/games/{season['games'][0]['id']}", json={"date": _in(31)})
+    refused = client.patch(f"/games/{season['games'][0]['id']}", json={"date": _in(15)})
 
     assert refused.status_code == 400
     assert "settled" in refused.json()["detail"]

@@ -807,7 +807,7 @@ test("a settled season's sheet can still be read", () => {
 });
 
 test("a settled season's sheet says why it is read-only", () => {
-  assert.match(renderSettled(ALL_ACTIONS), /已經結算/);
+  assert.match(renderSettled(ALL_ACTIONS), /本季已結算/);
 });
 
 test("the settled notice outranks the change-deadline one", () => {
@@ -819,12 +819,12 @@ test("the settled notice outranks the change-deadline one", () => {
   const el = makeElement();
   renderGameDetail(el, season, game, { viewerName: "周安", ...ALL_ACTIONS });
 
-  assert.match(el.innerHTML, /已經結算/);
+  assert.match(el.innerHTML, /本季已結算/);
   assert.doesNotMatch(el.innerHTML, /已過更動期限/);
 });
 
 test("an open season is untouched by any of this", () => {
   const html = render(ALL_ACTIONS);
   assert.ok(html.includes("<button"));
-  assert.doesNotMatch(html, /已經結算/);
+  assert.doesNotMatch(html, /本季已結算/);
 });

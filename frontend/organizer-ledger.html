@@ -82,23 +82,28 @@
 
   <div id="tab-closing" class="tab" hidden>
     <div id="closing-before">
-      <p class="hint">結算後本季名單與場地費將鎖定，不可重複結算。未選擇收付款者，餘額保留至下一季。</p>
-      <div class="balance" style="margin-bottom:14px">
-        <span class="balance-label">現金結餘</span>
-        <span id="closing-cash" class="balance-value even">—</span>
+      <p id="closing-blocked" class="empty" hidden></p>
+      <div id="closing-ready">
+        <p class="hint">結算後本季名單與場地費鎖定，剩下的場次不能請假或報名臨打。未選擇者，餘額保留至下一季。</p>
+        <div class="balance" style="margin-bottom:14px">
+          <span class="balance-label">現金結餘</span>
+          <span id="closing-cash" class="balance-value even">—</span>
+        </div>
+        <div class="section-label">本季結算</div>
+        <div id="closing-preview" class="money"></div>
+        <p id="closing-pending" class="hint"></p>
+        <button type="button" class="btn btn-primary" id="settle-btn" onclick="settleSeason()">結算此季</button>
       </div>
-      <div class="section-label">本季結算</div>
-      <div id="closing-preview" class="money"></div>
-      <button type="button" class="btn btn-primary" id="settle-btn" onclick="settleSeason()">結算此季</button>
     </div>
     <div id="closing-after" hidden>
       <div class="balance" style="margin-bottom: 14px">
         <span class="balance-label">已結算</span>
         <span id="closing-settled-at" class="balance-value even"></span>
       </div>
-      <div class="section-label">尚未結清的餘額</div>
+      <div class="section-label">保留至下一季</div>
       <div id="closing-list" class="money"></div>
       <p id="closing-all-clear" class="empty" hidden>所有成員均已結清</p>
+      <p id="closing-kept-hint" class="hint">保留的金額於下一季季費扣除或加收。</p>
 
       <button type="button" class="btn btn-primary" id="notice-btn" onclick="sendSettlementNotice(this)" style="margin-top:16px">發送結算通知</button>
       <p class="hint">成員會收到季費、請假退費與目前應繳金額。可重複發送。</p>
@@ -107,10 +112,7 @@
         <button type="button" class="btn btn-quiet" id="unsettle-btn" onclick="unsettleSeason()">復原結算</button>
         <a class="btn btn-quiet" href="organizer-settings.html">開新一季</a>
       </div>
-      <p class="hint">
-        按錯了可以復原：每一筆退費會用一筆相反的紀錄沖銷掉，原本那筆會留著，帳本仍然說得出發生過什麼。
-        已經用現金退出去的錢不會自動收回，復原後會告訴你是誰。
-      </p>
+      <p class="hint">復原後，退費紀錄以沖銷方式保留。已退現金不會自動收回。</p>
     </div>
   </div>
 </div>
@@ -780,22 +782,25 @@
     document.getElementById("closing-after").hidden = !settled;
 
     if (!settled) {
-      renderClosingChoices(season, settlementPreview);
+      // Not offered before it can be done: the server refuses the same
+      // cases (_why_not_settleable), and a button that only explains its
+      // refusal after being pressed is the worse screen.
+      const blocked = settleBlocker(season, todayString());
+      document.getElementById("closing-blocked").hidden = !blocked;
+      document.getElementById("closing-blocked").textContent = blocked || "";
+      document.getElementById("closing-ready").hidden = !!blocked;
+      if (!blocked) renderClosingChoices(season, settlementPreview);
       return;
     }
 
     document.getElementById("closing-settled-at").textContent = season.settled_at.slice(0, 16).replace("T", " ");
-    const unsettled = season.members.filter(
-      (m) => Number(balanceOf(m.id).balance) !== 0
-    );
-    document.getElementById("closing-all-clear").hidden = unsettled.length > 0;
-    document.getElementById("closing-list").innerHTML = unsettled
-      .map((m) =>
-        // Club-wide on purpose: settling a season is the whole
-        // reckoning, and a balance carried in from another season is
-        // exactly what has to be squared here.
-        moneyRowHtml(m.id, m.name, m.gender, splitLedger(balanceOf(m.id)), null, null)
-      )
+    // Up to this season, like everything on this tab: a season booked
+    // for later is not something this one kept back.
+    const kept = season.members.filter((m) => splitLedger(balanceOf(m.id)).due !== 0);
+    document.getElementById("closing-all-clear").hidden = kept.length > 0;
+    document.getElementById("closing-kept-hint").hidden = kept.length === 0;
+    document.getElementById("closing-list").innerHTML = kept
+      .map((m) => moneyRowHtml(m.id, m.name, m.gender, splitLedger(balanceOf(m.id)), null, null))
       .join("");
   }
 
@@ -818,9 +823,45 @@
   let closingSeason = null;
   let closingPreview = null;
 
+  /** When a season may be settled — the same rule the server enforces
+   * in _why_not_settleable, stated here so the tab can say why instead
+   * of offering a button that will be refused. From three weeks before
+   * the last game, and only once no game still to come has an absence
+   * nobody is filling. `today` is "YYYY-MM-DD", passed in for tests. */
+  function settleBlocker(season, today) {
+    const games = [...season.games].sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (!games.length) return null;
+    const opens = shiftDate(games[games.length - 1].date, -21);
+    if (today < opens) return `${monthDay(opens)} 起可結算（最後一場前 3 週）。`;
+    const open = games.find(
+      (g) => g.date >= today && g.status === "scheduled" && g.absences.some((a) => !a.filled_by)
+    );
+    return open ? `${monthDay(open.date)} 尚有缺額，補齊後可結算。` : null;
+  }
+
+  function shiftDate(iso, days) {
+    const d = new Date(iso + "T00:00:00");
+    d.setDate(d.getDate() + days);
+    return localIso(d);
+  }
+
+  function localIso(d) {
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  function todayString() {
+    return localIso(new Date());
+  }
+
+  function monthDay(iso) {
+    const [, m, d] = iso.split("-");
+    return `${Number(m)}/${Number(d)}`;
+  }
+
   /** What this member's balance is, from the club's point of view:
-   * positive means the club owes them. Club-wide rather than
-   * season-scoped, for the reason given in renderClosingTab below. */
+   * positive means the club owes them. Up to this season — see
+   * splitLedger. */
   function closingDue(playerId) {
     return Number(splitLedger(balanceOf(playerId)).due);
   }
@@ -847,7 +888,7 @@
 
     document.getElementById("closing-preview").innerHTML = rows.length
       ? rows.map(closingRowHtml).join("")
-      : '<div class="empty">每個人都已結清，直接結算即可</div>';
+      : '<div class="empty">所有成員均已結清。</div>';
     renderClosingCash(rows);
   }
 
@@ -862,17 +903,22 @@
           <span class="m-name">${escapeHtml(m.name)}${genderTag(m.gender)}</span>
           <span class="m-net ${owed ? "owed" : "owe"}">${owed ? "應退" : "應收"} $${amount}</span>
         </div>
-        <div class="m-act">
-          <button type="button" class="${picked === "keep" ? "paid" : "later"}"
+        <div class="seg-pick" role="radiogroup" aria-label="${escapeHtml(m.name)} 結算方式">
+          <button type="button" role="radio" aria-checked="${picked === "keep"}"
+            class="${picked === "keep" ? "selected" : ""}"
             onclick="pickClosing(${m.id}, 'keep')">保留至下一季</button>
-          <button type="button" class="${picked === "cash" ? "paid" : "later"}"
+          <button type="button" role="radio" aria-checked="${picked === "cash"}"
+            class="${picked === "cash" ? "selected" : ""}"
             onclick="pickClosing(${m.id}, 'cash')">${owed ? "退款" : "已收"}</button>
         </div>
       </div>`;
   }
 
   /** Cash in less cash out, so the organizer can count what should be in
-   * their hand when the evening is over. */
+   * their hand when the evening is over — and, under the list, what
+   * 結算此季 is about to write. The choices above it are a selection,
+   * not a record (styled as one: .seg-pick, never the solid 已收 that
+   * records on the spot), so the line says when they take effect. */
   function renderClosingCash(rows) {
     let total = 0;
     let moves = 0;
@@ -884,6 +930,9 @@
     const el = document.getElementById("closing-cash");
     el.textContent = moves === 0 ? "—" : (total > 0 ? "+" : total < 0 ? "−" : "") + "$" + Math.abs(total);
     el.className = "balance-value" + (moves === 0 ? " even" : total > 0 ? " owed" : " owe");
+    const pending = document.getElementById("closing-pending");
+    pending.hidden = rows.length === 0;
+    pending.textContent = `結算時記錄：現金收付 ${moves} 筆，保留 ${rows.length - moves} 筆。`;
   }
 
   function pickClosing(playerId, how) {
@@ -926,7 +975,7 @@
    * unsettle_season.
    */
   async function unsettleSeason() {
-    if (!confirm("要復原這次結算嗎？每一筆退費都會用一筆相反的紀錄沖銷掉，原本的紀錄會留著。")) return;
+    if (!confirm("確定復原結算？\n退費紀錄以沖銷方式保留。")) return;
     try {
       // postJson marks the pressed control busy and hands back a message
       // already in Chinese — see saveGameEdit on the settings page.
@@ -935,9 +984,9 @@
       loadLedger(currentSeason.id);
       if (paid.length) {
         toast(
-          `已復原。${paid
+          `已復原結算。已退現金：${paid
             .map((p) => `${p.player_name} $${p.amount}`)
-            .join("、")} 已經領過現金，這筆現在記為應收`
+            .join("、")}，已改記為應收。`
         );
       } else {
         toast("已復原結算", "good");
@@ -948,7 +997,7 @@
   }
 
   async function settleSeason() {
-    if (!confirm("確定要結算這一季嗎？結算後會鎖住名單與場地費，且無法重複結算。")) return;
+    if (!confirm("確定結算此季？\n結算後名單與場地費鎖定，剩下的場次不能請假或報名臨打。")) return;
     const btn = document.getElementById("settle-btn");
     // Read now, from the same figures on screen: the refund each member
     // is about to be credited, plus whatever they already owed or were

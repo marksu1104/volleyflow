@@ -35,6 +35,7 @@ from volleyflow.api.routes._money import (
     _member_settlement_out,
     _sync_member_season_fee_ledger,
     _sync_season_fee_ledger,
+    _why_not_settleable,
 )
 from volleyflow.api.routes._people import (
     _gender,
@@ -1064,6 +1065,9 @@ def settle_season(
     _require_organizer(db, season_row.club_id, current_player)
     if season_row.settled_at is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season already settled")
+    not_yet = _why_not_settleable(db, season_id, _today_in_taiwan())
+    if not_yet is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, not_yet)
 
     cash = payload.cash if payload is not None else []
     members = {ms.player.id for ms in settlements}

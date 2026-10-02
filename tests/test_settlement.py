@@ -4,7 +4,7 @@ from decimal import Decimal
 from volleyflow.attendance import Absence, DropIn
 from volleyflow.players import Player
 from volleyflow.schedule import Game, GameStatus, Season
-from volleyflow.settlement import settle_drop_in, settle_member
+from volleyflow.settlement import open_slots, settle_drop_in, settle_member
 
 ALICE = Player(id=1, name="Alice")
 BOB = Player(id=2, name="Bob")
@@ -328,3 +328,21 @@ def test_turning_the_air_conditioning_off_lowers_only_that_game():
 
     assert settle_member(ALICE, before, [], []).season_fee == Decimal("2000")
     assert settle_member(ALICE, after, [], []).season_fee == Decimal("1800")
+
+
+def test_open_slots_counts_absences_nobody_is_filling():
+    absences = [
+        Absence(ALICE, GAME1, recorded_at=datetime(2026, 8, 1)),
+        Absence(BOB, GAME1, recorded_at=datetime(2026, 8, 2)),
+    ]
+    drop_ins = [DropIn(CAROL, GAME1, signed_up_at=datetime(2026, 8, 3))]
+
+    assert open_slots(GAME1, absences, drop_ins) == 1
+
+
+def test_open_slots_is_zero_once_every_absence_is_filled():
+    absences = [Absence(ALICE, GAME1, recorded_at=datetime(2026, 8, 1))]
+    drop_ins = [DropIn(CAROL, GAME1, signed_up_at=datetime(2026, 8, 3))]
+
+    assert open_slots(GAME1, absences, drop_ins) == 0
+    assert open_slots(GAME2, absences, drop_ins) == 0, "another game's absence"

@@ -1804,7 +1804,7 @@ function renderGameDetail(container, season, game, options) {
     })}
     ${
       closed
-        ? '<div class="gdetail-locked">這一季已經結算，名單與帳務都已鎖定</div>'
+        ? '<div class="gdetail-locked">本季已結算，名單已確定</div>'
         : game.locked
           ? '<div class="gdetail-locked">已過更動期限，這一場無法再變更</div>'
           : ""
@@ -2659,6 +2659,8 @@ const _API_ERROR_PATTERNS = [
     () => "有一季已經結算，帳本不能刪除",
   ],
   [/^This season has payments recorded/, () => "此季已有收款紀錄，無法刪除"],
+  [/^Season can be settled from \d{4}-(\d{2})-(\d{2})$/, (m) => `${Number(m[1])}/${Number(m[2])} 起可結算`],
+  [/^Game on \d{4}-(\d{2})-(\d{2}) has an open slot$/, (m) => `${Number(m[1])}/${Number(m[2])} 尚有缺額，補齊後可結算`],
   [/^That would make the season's venue cost negative/, () => "這樣會讓場地費變成負的"],
 
   // Not found.

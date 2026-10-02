@@ -810,6 +810,10 @@ textarea.control { resize: vertical; min-height: 90px; }
   color: var(--ink-soft); font-size: .82rem; font-weight: 600; cursor: pointer;
 }
 .seg-pick button.selected { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+/* Inside a money row: a choice made now and written later (季末結算),
+   kept visibly apart from .m-act's solid buttons, which record on tap. */
+.m-row .seg-pick { margin-top: 9px; }
+.m-row .seg-pick button { padding: 7px; font-size: .78rem; }
 
 /* club rows — the switcher sheet and the profile page's club list share this */
 .club-row {

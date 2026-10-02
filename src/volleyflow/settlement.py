@@ -42,6 +42,16 @@ def covered_absences(
     return list(substituted & set(game_absences)) + fifo_absences[: len(fifo_drop_ins)]
 
 
+def open_slots(
+    game: Game, absences: Sequence[Absence], drop_ins: Sequence[DropIn]
+) -> int:
+    """How many absences at this game nobody is filling — the 缺額 the
+    roster shows. Every covered absence has somebody on court in its
+    place; the rest left a slot empty."""
+    active = [a for a in absences if a.game == game and a.is_active]
+    return len(active) - len(covered_absences(game, absences, drop_ins))
+
+
 @dataclass(frozen=True)
 class MemberSettlement:
     player: Player

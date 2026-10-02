@@ -18,7 +18,9 @@ def _season_with_a_refund(client: TestClient) -> tuple[dict[str, Any], int]:
     the only way an absence is refunded at all."""
     season = start_season(
         client,
-        game_dates=["2031-05-06", "2031-05-13"],
+        # Already played: a season is settled near or after its end, and
+        # one months away could not be settled at all.
+        game_dates=["2026-05-06", "2026-05-13"],
         member_names=["Alice", "Bob"],
         capacity=2,
     )

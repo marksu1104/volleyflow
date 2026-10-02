@@ -6,8 +6,9 @@ rules — those call down into this.
 """
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
+from typing import NamedTuple
 
 from fastapi import (
     HTTPException,
@@ -29,6 +30,7 @@ from volleyflow.api.routes._people import (
 from volleyflow.api.schemas import (
     MemberSettlementOut,
 )
+from volleyflow.attendance import Absence, DropIn
 from volleyflow.db.models import (
     AbsenceRow,
     DropInRow,
@@ -39,9 +41,11 @@ from volleyflow.db.models import (
     SeasonRow,
 )
 from volleyflow.ledger import EntryType
-from volleyflow.schedule import GameStatus
+from volleyflow.players import Player
+from volleyflow.schedule import Game, GameStatus, Season
 from volleyflow.settlement import (
     MemberSettlement,
+    open_slots,
     season_shares,
     settle_member,
 )
@@ -155,13 +159,19 @@ def _record_drop_in_charge(
     )
 
 
-def _gather_member_settlements(
-    db: Session, season_id: int
-) -> tuple[SeasonRow, list[MemberSettlement]]:
-    """Everything needed to report or record a season's settlement,
-    shared by the read-only settlement view and the settle-for-real
-    endpoint below so they can never disagree with each other.
-    """
+class _SeasonFacts(NamedTuple):
+    """One season read out of the database as billing objects."""
+
+    row: SeasonRow
+    season: Season
+    member_rows: list[PlayerRow]
+    players_by_id: dict[int, Player]
+    games_by_id: dict[int, Game]
+    absences: list[Absence]
+    drop_ins: list[DropIn]
+
+
+def _load_season_facts(db: Session, season_id: int) -> _SeasonFacts:
     season_row = db.get(SeasonRow, season_id)
     if season_row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
@@ -194,17 +204,67 @@ def _gather_member_settlements(
         row.id: absence_from_row(row, players_by_id, games_by_id)
         for row in absence_rows
     }
-    absences = list(absences_by_id.values())
     drop_ins = [
         drop_in_from_row(d, players_by_id, games_by_id, absences_by_id)
         for d in drop_in_rows
     ]
+    return _SeasonFacts(
+        season_row,
+        season,
+        member_rows,
+        players_by_id,
+        games_by_id,
+        list(absences_by_id.values()),
+        drop_ins,
+    )
 
+
+def _gather_member_settlements(
+    db: Session, season_id: int
+) -> tuple[SeasonRow, list[MemberSettlement]]:
+    """Everything needed to report or record a season's settlement,
+    shared by the read-only settlement view and the settle-for-real
+    endpoint below so they can never disagree with each other.
+    """
+    facts = _load_season_facts(db, season_id)
     settlements = [
-        settle_member(players_by_id[m.id], season, absences, drop_ins)
-        for m in member_rows
+        settle_member(
+            facts.players_by_id[m.id], facts.season, facts.absences, facts.drop_ins
+        )
+        for m in facts.member_rows
     ]
-    return season_row, settlements
+    return facts.row, settlements
+
+
+SETTLE_WINDOW = timedelta(weeks=3)
+"""How long before the last game a season may be settled. Fixed rather
+than a club setting, at the organizer's choice (2026-10-02): the roster
+is usually certain well before the final night, and a setting nobody
+changes is one more thing on the settings page to read past."""
+
+
+def _why_not_settleable(db: Session, season_id: int, today: date) -> str | None:
+    """Why this season cannot be settled yet, or None if it can.
+
+    Settling locks attendance, so the games still to come must already
+    be decided: settling is open from three weeks before the last game,
+    and only once none of the remaining games has an absence nobody is
+    filling. A slot still open could yet be filled — and that would
+    change who gets refunded, after the refunds were written.
+    """
+    facts = _load_season_facts(db, season_id)
+    games = sorted(facts.games_by_id.values(), key=lambda g: g.date)
+    if not games:
+        return None
+    opens = games[-1].date - SETTLE_WINDOW
+    if today < opens:
+        return f"Season can be settled from {opens.isoformat()}"
+    for game in games:
+        if game.date < today or game.status != GameStatus.SCHEDULED:
+            continue
+        if open_slots(game, facts.absences, facts.drop_ins) > 0:
+            return f"Game on {game.date.isoformat()} has an open slot"
+    return None
 
 
 def _sync_season_fee_ledger(db: Session, season_row: SeasonRow) -> None:
