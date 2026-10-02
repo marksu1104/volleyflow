@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 from datetime import date
+from decimal import Decimal
 
 from fastapi import (
     APIRouter,
@@ -9,7 +10,7 @@ from fastapi import (
     HTTPException,
     status,
 )
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
@@ -31,8 +32,10 @@ from volleyflow.api.routes._attendance import (
     _within_change_deadline,
 )
 from volleyflow.api.routes._money import (
+    _fee_dues,
     _gather_member_settlements,
     _member_settlement_out,
+    _previous_season,
     _sync_member_season_fee_ledger,
     _sync_season_fee_ledger,
     _why_not_settleable,
@@ -54,12 +57,12 @@ from volleyflow.api.schemas import (
     DisplacedDropInOut,
     DropInDetailOut,
     DropInSummary,
+    FeeNoticeOut,
     GameDetailOut,
     GameOut,
     Gender,
     MemberAdd,
     MemberOut,
-    NoticeSentOut,
     PaidOutMemberOut,
     SeasonCreate,
     SeasonDetailOut,
@@ -85,8 +88,9 @@ from volleyflow.db.models import (
 )
 from volleyflow.ledger import EntryType
 from volleyflow.notify.reminders import (
+    FeeDue,
+    notify_fee_due,
     notify_promoted_from_waitlist,
-    notify_season_settled,
 )
 from volleyflow.pricing import share_per_game
 from volleyflow.settlement import (
@@ -769,6 +773,13 @@ def get_season(
         .filter(SeasonMemberRow.season_id == season_id)
         .all()
     )
+    notified_at = {
+        player_id: sent_at
+        for player_id, sent_at in db.query(
+            SeasonMemberRow.player_id, SeasonMemberRow.fee_notice_sent_at
+        ).filter(SeasonMemberRow.season_id == season_id)
+    }
+    previous = _previous_season(db, season_row)
 
     # One query per attendance kind for the whole season, not one per
     # game — looping a query per game (3 * N round trips to Neon for N
@@ -1008,6 +1019,7 @@ def get_season(
         ),
         ac_surcharge=season_row.ac_surcharge,
         settled_at=season_row.settled_at,
+        previous_season_settled=previous is None or previous.settled_at is not None,
         members=[
             MemberOut(
                 id=m.id,
@@ -1015,6 +1027,7 @@ def get_season(
                 gender=_gender(m.gender),
                 avatar_url=m.avatar_url,
                 linked=m.line_user_id is not None,
+                fee_notice_sent_at=notified_at.get(m.id),
             )
             for m in member_rows
         ],
@@ -1117,11 +1130,8 @@ def settle_season(
     season_row.settled_at = now
     db.commit()
 
-    # Deliberately silent. Settling used to push a message to every
-    # member on the spot, which put a figure in front of them before the
-    # organizer had checked it and gave no way to send it again to
-    # anyone who missed it. Telling people is its own act now — see
-    # send_settlement_notice below.
+    # Deliberately silent. What a member is owed or owes after this is
+    # told once, in the next season's 繳費通知 — see send_fee_notice.
 
     return SeasonSettleOut(
         season_id=season_id,
@@ -1130,31 +1140,83 @@ def settle_season(
     )
 
 
-@router.post("/seasons/{season_id}/settlement-notice", response_model=NoticeSentOut)
-def send_settlement_notice(
+_ZERO = Decimal(0)
+
+
+@router.post("/seasons/{season_id}/fee-notice", response_model=FeeNoticeOut)
+def send_fee_notice(
     season_id: int,
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
-) -> NoticeSentOut:
-    """Tell every member what the season came to — when the organizer
-    says so, not the moment it is settled.
+) -> FeeNoticeOut:
+    """Send this season's 繳費通知 to every member who owes and hasn't
+    had it yet.
 
-    Settling used to push this automatically, which was wrong twice
-    over: a figure reached every member before the organizer had looked
-    at it, and anyone who had not added the Official Account simply
-    never heard, with no way to try again. Separating the two makes
-    telling people a thing you do, and a thing you can repeat.
+    The one message about money. It replaced a notice sent at
+    settlement (2026-10-02): somebody keeping a refund for next season
+    was told one figure then and another when next season's fee came
+    due, and the organizer had two sends to remember. Last season's kept
+    balance is folded in here instead — so this waits until that season
+    is settled, and is not offered for a season already over.
 
-    Repeatable on purpose. LINE refuses a push to anybody who hasn't
-    added the Official Account as a friend, so the usual reason to send
-    it twice is that somebody added it in between.
+    A LINE message cannot be taken back, so each member gets this at
+    most once a season. The season row is locked and every recipient is
+    marked *before* anything is sent: a second tap, or the same tap
+    arriving twice, waits on the lock and then finds nobody left to
+    send to. Anyone LINE refuses is unmarked afterwards, so they can be
+    reached later without anybody else hearing twice.
     """
-    season_row, settlements = _gather_member_settlements(db, season_id)
+    season_row = (
+        db.query(SeasonRow).filter(SeasonRow.id == season_id).with_for_update().first()
+    )
+    if season_row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
     _require_organizer(db, season_row.club_id, current_player)
-    if season_row.settled_at is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is not settled")
 
-    return NoticeSentOut(sent=notify_season_settled(db, season_row, settlements))
+    last_game = (
+        db.query(func.max(GameRow.date)).filter(GameRow.season_id == season_id).scalar()
+    )
+    if last_game is None or last_game < _today_in_taiwan():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season has ended")
+    previous = _previous_season(db, season_row)
+    if previous is not None and previous.settled_at is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "The previous season is not settled"
+        )
+
+    pending = (
+        db.query(SeasonMemberRow)
+        .join(PlayerRow, PlayerRow.id == SeasonMemberRow.player_id)
+        .filter(
+            SeasonMemberRow.season_id == season_id,
+            SeasonMemberRow.fee_notice_sent_at.is_(None),
+            PlayerRow.line_user_id.is_not(None),
+        )
+        .all()
+    )
+    amounts = _fee_dues(db, season_row, [m.player_id for m in pending])
+    dues = [
+        FeeDue(player_id=m.player_id, fee=-fee, earlier=earlier, due=-through)
+        for m in pending
+        for fee, earlier, through in [amounts.get(m.player_id, (_ZERO, _ZERO, _ZERO))]
+        if through < 0
+    ]
+    owing = {d.player_id for d in dues}
+    now = _now()
+    for member in pending:
+        if member.player_id in owing:
+            member.fee_notice_sent_at = now
+    db.commit()
+
+    told = notify_fee_due(db, season_row, dues)
+    missed = owing - told
+    if missed:
+        for member in pending:
+            if member.player_id in missed:
+                member.fee_notice_sent_at = None
+        db.commit()
+
+    return FeeNoticeOut(sent=len(told), unreachable=len(missed))
 
 
 @router.post("/seasons/{season_id}/unsettle", response_model=SeasonUnsettleOut)

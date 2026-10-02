@@ -192,6 +192,10 @@ class SeasonMemberRow(Base):
 
     season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id"), primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), primary_key=True)
+    fee_notice_sent_at: Mapped[datetime | None] = mapped_column(default=None)
+    """When this member was sent this season's 繳費通知, or None. A LINE
+    message cannot be taken back, so each member gets it at most once a
+    season; this is what makes a second tap send nothing."""
 
 
 class GameRow(Base):

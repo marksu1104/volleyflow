@@ -190,8 +190,7 @@ def test_taking_somebody_off_the_roster_tells_whoever_the_queue_promoted(
 def _settled_season(client: TestClient) -> dict[str, Any]:
     # The organizer is a season member here on purpose: create_club gave
     # them a LINE identity, and "Bob" — typed in by hand — has none, so
-    # the organizer is the only member a push can reach. Bob being
-    # silently skipped is the correct behaviour, not a gap.
+    # the organizer is the only member a push can reach.
     season = start_season(
         client,
         member_names=["Test Organizer", "Bob"],
@@ -205,60 +204,160 @@ def _settled_season(client: TestClient) -> dict[str, Any]:
 def test_settling_a_season_says_nothing_by_itself(
     client: TestClient, sent_messages: SentMessages
 ) -> None:
-    """Settling used to push to every member on the spot. That put a
-    figure in front of them before the organizer had checked it, and
-    gave no way to send it again to anyone who missed it — so telling
-    people is now its own act."""
+    """Settling used to push to every member, and later offered a
+    settlement notice of its own. Both are gone: whatever a member keeps
+    for next season is told once, in next season's 繳費通知."""
     _settled_season(client)
 
     assert sent_messages == []
 
 
-def test_the_organizer_sends_the_notice_when_they_choose_to(
-    client: TestClient, sent_messages: SentMessages
-) -> None:
-    season = _settled_season(client)
-
-    response = client.post(f"/seasons/{season['id']}/settlement-notice")
-
-    assert response.status_code == 200, response.text
-    assert response.json()["sent"] == 1, "Bob has no LINE account to reach"
-    assert [user_id for user_id, _ in sent_messages] == [season["organizer_token"]]
-    assert "已結算" in sent_messages[0][1]
-
-
-def test_the_notice_can_be_sent_again(
-    client: TestClient, sent_messages: SentMessages
-) -> None:
-    # The usual reason: somebody added the Official Account after the
-    # first attempt, and LINE had refused them.
-    season = _settled_season(client)
-
-    client.post(f"/seasons/{season['id']}/settlement-notice")
-    client.post(f"/seasons/{season['id']}/settlement-notice")
-
-    assert len(sent_messages) == 2
-
-
-def test_an_unsettled_season_has_no_notice_to_send(client: TestClient) -> None:
-    season = start_season(
-        client, member_names=["Test Organizer"], capacity=2, game_dates=["2026-08-18"]
+def _next_season(client: TestClient, after: dict[str, Any]) -> dict[str, Any]:
+    return start_season(
+        client,
+        member_names=["Test Organizer", "Bob"],
+        capacity=2,
+        game_dates=[_in_days(30)],
+        club_id=after["club_id"],
     )
 
-    response = client.post(f"/seasons/{season['id']}/settlement-notice")
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Season is not settled"
+def _organizer_id(client: TestClient, season: dict[str, Any]) -> int:
+    members = client.get(f"/seasons/{season['id']}").json()["members"]
+    return int(next(m["id"] for m in members if m["name"] == "Test Organizer"))
 
 
-def test_only_the_organizer_may_send_the_notice(
+def _row(client: TestClient, season: dict[str, Any], player_id: int) -> dict[str, Any]:
+    rows = client.get(
+        f"/clubs/{season['club_id']}/balances", params={"season_id": season["id"]}
+    ).json()
+    row: dict[str, Any] = next(r for r in rows if r["player_id"] == player_id)
+    return row
+
+
+def test_the_fee_notice_states_the_fee_last_seasons_credit_and_what_is_due(
     client: TestClient, sent_messages: SentMessages
 ) -> None:
-    season = _settled_season(client)
+    autumn = _settled_season(client)
+    me = _organizer_id(client, autumn)
+    # Paid 100 more than autumn asked for, and kept it for next season.
+    owed = -int(_row(client, autumn, me)["through_season"])
+    client.post(
+        f"/clubs/{autumn['club_id']}/players/{me}/payments",
+        json={"amount": str(owed + 100), "season_id": autumn["id"]},
+    )
+    winter = _next_season(client, autumn)
+    fee = -int(_row(client, winter, me)["season_fee_charged"])
+
+    response = client.post(f"/seasons/{winter['id']}/fee-notice")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"sent": 1, "unreachable": 0}
+    [(user_id, text)] = sent_messages
+    assert user_id == autumn["organizer_token"]
+    assert f"季費 ${fee}" in text
+    assert "上季餘額扣除 $100" in text
+    assert f"應繳 ${fee - 100}" in text
+
+
+def test_each_member_gets_the_fee_notice_once_a_season(
+    client: TestClient, sent_messages: SentMessages
+) -> None:
+    # A LINE message cannot be taken back. The second tap finds nobody.
+    winter = _next_season(client, _settled_season(client))
+
+    client.post(f"/seasons/{winter['id']}/fee-notice")
+    again = client.post(f"/seasons/{winter['id']}/fee-notice")
+
+    assert again.json() == {"sent": 0, "unreachable": 0}
+    assert len(sent_messages) == 1
+
+
+def test_somebody_who_has_already_paid_is_not_asked_to(
+    client: TestClient, sent_messages: SentMessages
+) -> None:
+    winter = _next_season(client, _settled_season(client))
+    me = _organizer_id(client, winter)
+    due = -int(_row(client, winter, me)["through_season"])
+    client.post(
+        f"/clubs/{winter['club_id']}/players/{me}/payments",
+        json={"amount": str(due), "season_id": winter["id"]},
+    )
+
+    client.post(f"/seasons/{winter['id']}/fee-notice")
+
+    assert sent_messages == []
+
+
+def test_the_fee_notice_waits_for_the_previous_season_to_be_settled(
+    client: TestClient, sent_messages: SentMessages
+) -> None:
+    autumn = start_season(
+        client, member_names=["Test Organizer"], game_dates=["2026-08-18"]
+    )
+    winter = _next_season(client, autumn)
+
+    response = client.post(f"/seasons/{winter['id']}/fee-notice")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "The previous season is not settled"
+    assert sent_messages == []
+    detail = client.get(f"/seasons/{winter['id']}").json()
+    assert detail["previous_season_settled"] is False
+
+
+def test_a_season_already_over_has_no_fee_notice(client: TestClient) -> None:
+    season = start_season(
+        client, member_names=["Test Organizer"], game_dates=["2026-08-18"]
+    )
+
+    response = client.post(f"/seasons/{season['id']}/fee-notice")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Season has ended"
+
+
+def test_somebody_line_refused_can_be_sent_it_later(
+    client: TestClient, monkeypatch: Any, sent_messages: SentMessages
+) -> None:
+    # Not having added the Official Account is the usual reason. They are
+    # left unmarked, so the next send reaches them — and only them.
+    from volleyflow.notify import reminders
+
+    winter = _next_season(client, _settled_season(client))
+
+    def refuse(user_id: str, text: str) -> None:
+        raise RuntimeError("LINE said no")
+
+    monkeypatch.setattr(reminders, "push_to_user", refuse)
+    first = client.post(f"/seasons/{winter['id']}/fee-notice").json()
+    monkeypatch.setattr(
+        reminders, "push_to_user", lambda u, t: sent_messages.append((u, t))
+    )
+    second = client.post(f"/seasons/{winter['id']}/fee-notice").json()
+
+    assert first == {"sent": 0, "unreachable": 1}
+    assert second == {"sent": 1, "unreachable": 0}
+
+
+def test_the_season_says_who_has_been_sent_the_fee_notice(client: TestClient) -> None:
+    winter = _next_season(client, _settled_season(client))
+
+    client.post(f"/seasons/{winter['id']}/fee-notice")
+
+    members = client.get(f"/seasons/{winter['id']}").json()["members"]
+    sent = {m["name"]: m["fee_notice_sent_at"] is not None for m in members}
+    assert sent == {"Test Organizer": True, "Bob": False}
+
+
+def test_only_the_organizer_may_send_the_fee_notice(
+    client: TestClient, sent_messages: SentMessages
+) -> None:
+    winter = _next_season(client, _settled_season(client))
     outsider = identify(client, "Outsider")
 
     response = client.post(
-        f"/seasons/{season['id']}/settlement-notice",
+        f"/seasons/{winter['id']}/fee-notice",
         headers=auth_headers(outsider["token"]),
     )
 

@@ -402,6 +402,8 @@ class MemberOut(BaseModel):
     they can't record their own absence, sign themselves up, or set their
     own gender, and somebody has to do it for them. Worth showing on a
     roster rather than leaving the organizer to guess."""
+    fee_notice_sent_at: datetime | None = None
+    """When this member was sent this season's 繳費通知, if they were."""
 
 
 class DisplacedDropInOut(BaseModel):
@@ -659,6 +661,11 @@ class SeasonDetailOut(BaseModel):
     """What one game's air conditioning adds to the venue bill; 0 when
     the venue bundles it or the club doesn't use it."""
     settled_at: datetime | None
+    previous_season_settled: bool = True
+    """Whether the season before this one (by first game) is settled;
+    True when there is none. The 繳費通知 waits for it, because until
+    then last season's refunds aren't on the books and the figure it
+    would send isn't final."""
     members: list[MemberOut]
     games: list[GameDetailOut]
 
@@ -681,12 +688,13 @@ class SeasonSettleRequest(BaseModel):
     money over or taking it back on the day."""
 
 
-class NoticeSentOut(BaseModel):
+class FeeNoticeOut(BaseModel):
     sent: int
-    """How many members were actually messaged. Lower than the roster
-    whenever somebody has no LINE account, or has one but never added
-    the Official Account — LINE refuses those, and the screen says so
-    rather than implying everyone heard."""
+    """How many members the 繳費通知 reached."""
+    unreachable: int
+    """How many it was meant for but LINE refused — no LINE account, or
+    the Official Account never added. They stay un-notified, so a later
+    send reaches them and nobody else."""
 
 
 class SeasonSettleOut(BaseModel):

@@ -14,7 +14,7 @@ from fastapi import (
     HTTPException,
     status,
 )
-from sqlalchemy import ColumnElement, func, true
+from sqlalchemy import ColumnElement, case, func, true
 from sqlalchemy.orm import Session
 
 from volleyflow.api.conversion import (
@@ -79,6 +79,71 @@ def _seasons_up_to(db: Session, season_row: SeasonRow) -> list[int]:
         if own is not None and start <= own
     ]
     return sorted(set(earlier) | {season_row.id})
+
+
+def _previous_season(db: Session, season_row: SeasonRow) -> SeasonRow | None:
+    """The club's season that starts most recently before this one, by
+    first game — the one whose kept balances this season collects."""
+    own = (
+        db.query(func.min(GameRow.date))
+        .filter(GameRow.season_id == season_row.id)
+        .scalar()
+    )
+    if own is None:
+        return None
+    starts = (
+        db.query(GameRow.season_id, func.min(GameRow.date).label("start"))
+        .join(SeasonRow, SeasonRow.id == GameRow.season_id)
+        .filter(SeasonRow.club_id == season_row.club_id, SeasonRow.id != season_row.id)
+        .group_by(GameRow.season_id)
+        .subquery()
+    )
+    found = (
+        db.query(starts.c.season_id)
+        .filter(starts.c.start < own)
+        .order_by(starts.c.start.desc())
+        .first()
+    )
+    return db.get(SeasonRow, found[0]) if found is not None else None
+
+
+def _fee_dues(
+    db: Session, season_row: SeasonRow, player_ids: list[int]
+) -> dict[int, tuple[Decimal, Decimal, Decimal]]:
+    """Per player: (this season's fee, what earlier seasons left, what is
+    due up to this season) — all as positive-means-owed-to-them ledger
+    sums, the way the ledger signs everything."""
+    if not player_ids:
+        return {}
+    in_season = LedgerEntryRow.season_id == season_row.id
+    up_to = _counts_up_to(_seasons_up_to(db, season_row))
+    rows = (
+        db.query(
+            LedgerEntryRow.player_id,
+            func.sum(
+                case(
+                    (
+                        in_season
+                        & (LedgerEntryRow.entry_type == EntryType.SEASON_FEE_CHARGED),
+                        LedgerEntryRow.amount,
+                    ),
+                    else_=0,
+                )
+            ),
+            func.sum(case((in_season, LedgerEntryRow.amount), else_=0)),
+            func.sum(case((up_to, LedgerEntryRow.amount), else_=0)),
+        )
+        .filter(
+            LedgerEntryRow.club_id == season_row.club_id,
+            LedgerEntryRow.player_id.in_(player_ids),
+        )
+        .group_by(LedgerEntryRow.player_id)
+        .all()
+    )
+    return {
+        player_id: (Decimal(fee), Decimal(through) - Decimal(season), Decimal(through))
+        for player_id, fee, season, through in rows
+    }
 
 
 def _counts_up_to(season_ids: list[int] | None) -> ColumnElement[bool]:

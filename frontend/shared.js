@@ -2659,6 +2659,8 @@ const _API_ERROR_PATTERNS = [
     () => "有一季已經結算，帳本不能刪除",
   ],
   [/^This season has payments recorded/, () => "此季已有收款紀錄，無法刪除"],
+  [/^Season has ended$/, () => "此季已結束，無法發送繳費通知"],
+  [/^The previous season is not settled$/, () => "上一季結算後可發送繳費通知"],
   [/^Season can be settled from \d{4}-(\d{2})-(\d{2})$/, (m) => `${Number(m[1])}/${Number(m[2])} 起可結算`],
   [/^Game on \d{4}-(\d{2})-(\d{2}) has an open slot$/, (m) => `${Number(m[1])}/${Number(m[2])} 尚有缺額，補齊後可結算`],
   [/^That would make the season's venue cost negative/, () => "這樣會讓場地費變成負的"],

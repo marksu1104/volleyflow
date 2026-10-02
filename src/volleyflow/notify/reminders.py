@@ -6,6 +6,7 @@ notified — never the waitlist."
 
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -19,14 +20,12 @@ from volleyflow.db.models import (
     ClubRow,
     DropInRow,
     GameRow,
-    LedgerEntryRow,
     PlayerRow,
     SeasonMemberRow,
     SeasonRow,
 )
 from volleyflow.notify.line_client import push_to_user
 from volleyflow.schedule import GameStatus
-from volleyflow.settlement import MemberSettlement
 
 logger = logging.getLogger("volleyflow.reminders")
 
@@ -284,86 +283,68 @@ def notify_promoted_from_waitlist(
     return told
 
 
-def notify_season_settled(
-    session: Session, season: SeasonRow, settlements: list[MemberSettlement]
-) -> int:
-    """Tell each member what the season came to. Returns how many were told.
+@dataclass(frozen=True)
+class FeeDue:
+    """What one member is asked to pay for a season, in the three parts
+    the message states: this season's fee, what earlier seasons left
+    (positive: a credit coming off), and what that comes to."""
 
-    Once per season, so the cost against the free tier is one push per
-    member per season rather than per game — which is why this one was
-    worth turning on and the pre-game reminder wasn't.
+    player_id: int
+    fee: Decimal
+    earlier: Decimal
+    due: Decimal
 
-    The amount is stated rather than left to be looked up: "已結算" on its
-    own sends every member into the app to find one number, and the
-    number is the only reason the message exists.
+
+def notify_fee_due(session: Session, season: SeasonRow, dues: list[FeeDue]) -> set[int]:
+    """Send each member their 繳費通知. Returns who it reached.
+
+    The only message about money, and sent once a season: a kept refund
+    or an unpaid balance from last season is folded in here rather than
+    announced at settlement, so nobody is told one figure in December and
+    a different one in January. Anyone LINE refuses — no account, or the
+    Official Account never added — is left out of the result, so the
+    caller can leave them free to be sent it later.
     """
     name = _club_name(session, season.club_id)
-    player_ids = [ms.player.id for ms in settlements]
-    reachable = _line_ids_for(session, player_ids)
-    balances = _club_balances(session, season.club_id, player_ids)
+    label = _season_label(session, season.id)
+    reachable = _line_ids_for(session, [d.player_id for d in dues])
 
-    told = 0
-    for member in settlements:
-        line_user_id = reachable.get(member.player.id)
+    told: set[int] = set()
+    for due in dues:
+        line_user_id = reachable.get(due.player_id)
         if line_user_id is None:
             continue
-        text = _settlement_text(name, member, balances.get(member.player.id, ZERO))
         try:
-            push_to_user(line_user_id, text)
-            told += 1
+            push_to_user(line_user_id, _fee_notice_text(name, label, due))
+            told.add(due.player_id)
         except Exception:
-            logger.exception(
-                "Couldn't tell player %s the season was settled", member.player.id
-            )
+            logger.exception("Couldn't send player %s their fee notice", due.player_id)
     return told
 
 
-def _club_balances(
-    session: Session, club_id: int, player_ids: list[int]
-) -> dict[int, Decimal]:
-    """Each player's standing in this club, across every season.
-
-    Club-wide on purpose: what a member wants from this message is what
-    they still owe *now*, and an amount left over from an earlier season
-    is part of that. Telling them only this season's figure would name a
-    number they can't reconcile with the app.
-    """
-    if not player_ids:
-        return {}
-    rows = (
-        session.query(LedgerEntryRow.player_id, func.sum(LedgerEntryRow.amount))
-        .filter(
-            LedgerEntryRow.club_id == club_id,
-            LedgerEntryRow.player_id.in_(player_ids),
-        )
-        .group_by(LedgerEntryRow.player_id)
-        .all()
+def _season_label(session: Session, season_id: int) -> str:
+    """ "10/7–12/23": seasons have no names, and their dates are how the
+    app itself tells them apart."""
+    first, last = (
+        session.query(func.min(GameRow.date), func.max(GameRow.date))
+        .filter(GameRow.season_id == season_id)
+        .one()
     )
-    return {row[0]: Decimal(row[1] or 0) for row in rows}
+    if first is None or last is None:
+        return ""
+    return f"{first.month}/{first.day}–{last.month}/{last.day}"
 
 
-def _settlement_text(club: str, member: MemberSettlement, balance: Decimal) -> str:
-    """What one member is told when a season is settled.
-
-    Three facts in a fixed order — what the season cost, what came back,
-    and what that leaves — because the question behind the message is
-    always "so do I owe anything". The per-night detail stays in the app:
-    LINE allows a long message, but nobody reads one, and a member with
-    eight absences would get a wall of dates to find one number in.
-    """
-    lines = [f"{club} 本季已結算。", f"季費 ${member.season_fee}"]
-    if member.refunded_absences:
-        lines.append(f"請假 {member.refunded_absences} 場退費 ${member.refund}")
-
-    # Positive: the club owes them. Negative: they owe the club. Zero is
-    # worth saying plainly — a member who has settled up wants to be told
-    # so, not left to infer it from silence.
-    if balance < 0:
-        lines.append(f"目前應繳 ${-balance}")
-    elif balance > 0:
-        lines.append(f"目前應退 ${balance}")
-    else:
-        lines.append("目前已結清")
+def _fee_notice_text(club: str, label: str, due: FeeDue) -> str:
+    """Three lines a member can check against the app: the fee, what last
+    season left, and what is owed. The earlier line only when there is
+    one — "上季餘額扣除 $0" reads like something went wrong."""
+    lines = [f"{club} 季費（{label}）" if label else f"{club} 季費", f"季費 ${due.fee}"]
+    if due.earlier > 0:
+        lines.append(f"上季餘額扣除 ${due.earlier}")
+    elif due.earlier < 0:
+        lines.append(f"上季未繳 ${-due.earlier}")
+    lines.append(f"應繳 ${due.due}")
     return "\n".join(lines) + f"\n{APP_URL}"
 
 

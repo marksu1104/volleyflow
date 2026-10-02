@@ -67,6 +67,8 @@ const KNOWN_MESSAGES = [
   "A season in this club is settled — its books can't be deleted",
   "This season has payments recorded — it can't be deleted",
   "Season can be settled from 2026-12-02",
+  "Season has ended",
+  "The previous season is not settled",
   "Game on 2026-12-09 has an open slot",
   "That would make the season's venue cost negative",
   "No club with id 42",

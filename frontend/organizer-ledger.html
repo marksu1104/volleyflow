@@ -15,6 +15,14 @@
   .m-act.partial input, .m-act.partial .confirm-partial { display: block; }
   .m-act.partial .paid, .m-act.partial .later { display: none; }
   .settle-hint { font-size: .78rem; color: var(--ink-soft); margin: 10px 0 0; text-align: center; }
+  .fee-notice { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; margin-top: 10px; }
+  .fee-notice-text { font-size: .82rem; color: var(--ink-soft); line-height: 1.5; }
+  .fee-notice-text b { color: var(--ink); }
+  .fee-notice .btn { width: auto; margin-top: 0; padding: 9px 14px; white-space: nowrap; }
+  .notice-list { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; font-size: .84rem; margin-bottom: 12px; }
+  .notice-list div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 12px; border-top: 1px solid var(--rule); font-variant-numeric: tabular-nums; }
+  .notice-list div:first-child { border-top: none; }
+  .notice-bubble { background: var(--surface); border: 1px solid var(--rule); border-radius: 14px 14px 14px 4px; padding: 10px 12px; font-size: .84rem; line-height: 1.65; white-space: pre-line; }
 </style>
 </head>
 <body>
@@ -71,6 +79,10 @@
     </div>
     <div class="progress"><i id="fee-progress" style="width:0%"></i></div>
     <p id="fee-hint" class="hint"></p>
+    <div id="fee-notice" class="fee-notice" hidden>
+      <span id="fee-notice-text" class="fee-notice-text"></span>
+      <button type="button" class="btn btn-primary" id="fee-notice-btn" onclick="openFeeNotice()">繳費通知</button>
+    </div>
     <div class="section-label" id="fee-share-label"></div>
     <div id="fee-list" class="money" data-season-content></div>
   </div>
@@ -105,9 +117,6 @@
       <p id="closing-all-clear" class="empty" hidden>所有成員均已結清</p>
       <p id="closing-kept-hint" class="hint">保留的金額於下一季季費扣除或加收。</p>
 
-      <button type="button" class="btn btn-primary" id="notice-btn" onclick="sendSettlementNotice(this)" style="margin-top:16px">發送結算通知</button>
-      <p class="hint">成員會收到季費、請假退費與目前應繳金額。可重複發送。</p>
-
       <div class="btn-row" style="margin-top:16px">
         <button type="button" class="btn btn-quiet" id="unsettle-btn" onclick="unsettleSeason()">復原結算</button>
         <a class="btn btn-quiet" href="organizer-settings.html">開新一季</a>
@@ -123,6 +132,22 @@
     <h3 id="history-title">明細</h3>
     <div id="history-list"></div>
     <p class="hint">收款或退款按錯了，按「復原」會補一筆相反的紀錄；原本那筆會留著，標示已復原。</p>
+  </div>
+</div>
+
+<div id="notice-backdrop" class="gsheet-backdrop" hidden>
+  <div class="gsheet" role="dialog" aria-labelledby="notice-title">
+    <button class="gsheet-close" aria-label="關閉" onclick="closeFeeNotice()">✕</button>
+    <h3 id="notice-title">繳費通知</h3>
+    <div id="notice-list" class="notice-list"></div>
+    <div class="section-label">訊息內容（<span id="notice-sample-name"></span>）</div>
+    <div id="notice-sample" class="notice-bubble"></div>
+    <p class="hint">送出後無法收回。每位成員每季僅收到一次。</p>
+    <p id="notice-skipped" class="hint" hidden></p>
+    <div class="btn-row" style="margin-top:12px">
+      <button type="button" class="btn btn-quiet" onclick="closeFeeNotice()">取消</button>
+      <button type="button" class="btn btn-primary" id="notice-send" onclick="sendFeeNotice(this)">傳送</button>
+    </div>
   </div>
 </div>
 
@@ -725,7 +750,139 @@
     const games = seasonBillableGames(season);
     document.getElementById("fee-share-label").textContent =
       `每人 $${seasonFeeFor(season)} · ${games} 場`;
+    renderFeeNotice(feeNoticeState(season, todayString()));
   }
+
+  // --- 繳費通知 ---------------------------------------------------------
+
+  /** Who this season's 繳費通知 would go to right now, and what the card
+   * on the 季費 tab says. A pure function of the season and the
+   * balances, so tests/frontend/fee_notice.test.js can state the rules.
+   *
+   * The only money message there is (2026-10-02): last season's kept
+   * balance is folded in here rather than announced at settlement. The
+   * server enforces every rule below again in send_fee_notice — these
+   * exist so the card never offers a send that would be refused.
+   *
+   * - A season already over gets no card.
+   * - Until the previous season is settled the figure is not final, so
+   *   the button is shown but disabled, with the reason.
+   * - A message cannot be taken back: each member at most once a
+   *   season, so anyone already sent one is never a recipient again.
+   * - Nobody who owes nothing; nobody without LINE, who cannot receive
+   *   it (counted, so the organizer knows to tell them in person). */
+  function feeNoticeState(season, today) {
+    const last = season.games.reduce((max, g) => (g.date > max ? g.date : max), "");
+    if (!last || last < today) return { kind: "none" };
+    if (season.previous_season_settled === false) {
+      return { kind: "blocked", text: "上一季結算後可發送繳費通知。" };
+    }
+    const owing = season.members.filter(
+      (m) => !m.fee_notice_sent_at && splitLedger(balanceOf(m.id)).due < 0
+    );
+    const recipients = owing.filter((m) => m.linked);
+    const sent = season.members.filter((m) => m.fee_notice_sent_at);
+    const lastSent = sent.map((m) => m.fee_notice_sent_at).sort().pop();
+    if (recipients.length === 0) {
+      return sent.length
+        ? { kind: "done", text: `已通知 <b>${sent.length}</b> 人・${sentTime(lastSent)}` }
+        : { kind: "none" };
+    }
+    return {
+      kind: "ready",
+      text: `${sent.length ? `已通知 ${sent.length} 人・` : ""}未通知 <b>${recipients.length}</b> 人`,
+      recipients,
+      withoutLine: owing.length - recipients.length,
+    };
+  }
+
+  function sentTime(iso) {
+    const [day, time] = iso.split("T");
+    return `${monthDay(day)} ${time.slice(0, 5)}`;
+  }
+
+  function renderFeeNotice(state) {
+    const card = document.getElementById("fee-notice");
+    card.hidden = state.kind === "none";
+    if (card.hidden) return;
+    document.getElementById("fee-notice-text").innerHTML = state.text;
+    const btn = document.getElementById("fee-notice-btn");
+    btn.hidden = state.kind === "done";
+    btn.disabled = state.kind === "blocked";
+  }
+
+  /** The message exactly as the server words it (reminders.
+   * _fee_notice_text), less the app link, so what the organizer
+   * approves is what members read. */
+  function feeNoticeText(season, member, clubName) {
+    const row = balanceOf(member.id);
+    const split = splitLedger(row);
+    const dates = season.games.map((g) => g.date).sort();
+    const label = dates.length ? `${monthDay(dates[0])}–${monthDay(dates[dates.length - 1])}` : "";
+    const lines = [
+      label ? `${clubName} 季費（${label}）` : `${clubName} 季費`,
+      `季費 $${-Number(row.season_fee_charged)}`,
+    ];
+    if (split.earlierTotal > 0) lines.push(`上季餘額扣除 $${split.earlierTotal}`);
+    else if (split.earlierTotal < 0) lines.push(`上季未繳 $${-split.earlierTotal}`);
+    lines.push(`應繳 $${-split.due}`);
+    return lines.join("\n");
+  }
+
+  function currentClubName() {
+    const picker = document.getElementById("club-picker");
+    const option = picker && picker.selectedOptions && picker.selectedOptions[0];
+    return option ? option.textContent.trim() : "";
+  }
+
+  function openFeeNotice() {
+    const state = feeNoticeState(currentSeason, todayString());
+    if (state.kind !== "ready") return;
+    document.getElementById("notice-list").innerHTML = state.recipients
+      .map(
+        (m) =>
+          `<div><span>${escapeHtml(m.name)}</span><span>應繳 $${-splitLedger(balanceOf(m.id)).due}</span></div>`
+      )
+      .join("");
+    const first = state.recipients[0];
+    document.getElementById("notice-sample-name").textContent = first.name;
+    document.getElementById("notice-sample").textContent = feeNoticeText(
+      currentSeason,
+      first,
+      currentClubName()
+    );
+    const skipped = document.getElementById("notice-skipped");
+    skipped.hidden = state.withoutLine === 0;
+    skipped.textContent = `另有 ${state.withoutLine} 位未使用 LINE，不傳送。`;
+    document.getElementById("notice-send").textContent = `傳送給 ${state.recipients.length} 人`;
+    document.getElementById("notice-backdrop").hidden = false;
+  }
+
+  function closeFeeNotice() {
+    document.getElementById("notice-backdrop").hidden = true;
+  }
+
+  async function sendFeeNotice(btn) {
+    try {
+      const result = await whileBusy(btn, async () =>
+        postJson(API_BASE, `/seasons/${currentSeason.id}/fee-notice`, {})
+      );
+      closeFeeNotice();
+      toast(
+        result.unreachable
+          ? `已通知 ${result.sent} 位成員。${result.unreachable} 位未能送達（尚未加入官方帳號）。`
+          : `已通知 ${result.sent} 位成員。`,
+        "good"
+      );
+      loadLedger(currentSeason.id);
+    } catch (e) {
+      toast("傳送失敗：" + translateApiError(e.message));
+    }
+  }
+
+  document.getElementById("notice-backdrop").addEventListener("click", (e) => {
+    if (e.target.id === "notice-backdrop") closeFeeNotice();
+  });
 
   function seasonBillableGames(season) {
     return season.games.filter((g) => g.status !== "cancelled_refunded").length;
@@ -941,27 +1098,6 @@
     if (how === "cash") closingCash.set(playerId, true);
     else closingCash.delete(playerId);
     renderClosingChoices();
-  }
-
-  /** Tell every member what the season came to.
-   *
-   * Its own button rather than part of 結算此季: settling used to push
-   * the message automatically, which named a figure before the organizer
-   * had checked it and left no way to reach anyone who missed it. The
-   * count comes back because it is routinely lower than the roster —
-   * LINE refuses a push to anybody who hasn't added the Official
-   * Account, and saying "已通知 8 位" is honest where silence implies
-   * everyone heard.
-   */
-  async function sendSettlementNotice(btn) {
-    try {
-      const result = await whileBusy(btn, async () =>
-        postJson(API_BASE, `/seasons/${currentSeason.id}/settlement-notice`, {})
-      );
-      toast(`已通知 ${result.sent} 位成員`, "good");
-    } catch (e) {
-      toast("發送失敗：" + translateApiError(e.message));
-    }
   }
 
   /** Undo a settlement.

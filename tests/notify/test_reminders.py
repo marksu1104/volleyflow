@@ -33,8 +33,6 @@ from volleyflow.db.models import (
 )
 from volleyflow.ledger import EntryType
 from volleyflow.notify import reminders
-from volleyflow.players import Player
-from volleyflow.settlement import MemberSettlement
 
 SentMessages = list[tuple[str, str]]
 
@@ -375,15 +373,6 @@ def test_nobody_waiting_to_join_sends_nothing(
     assert sent_messages == []
 
 
-def _settlement(player: PlayerRow, refund: str, absences: int = 0) -> MemberSettlement:
-    return MemberSettlement(
-        player=Player(id=player.id, name=player.name),
-        season_fee=Decimal("500"),
-        refund=Decimal(refund),
-        refunded_absences=absences,
-    )
-
-
 def _charge(db_session: Session, season: SeasonRow, player: PlayerRow, amount: str):
     """A ledger entry, so the notice has a balance to report. Signed from
     the player's side: negative means they owe the club."""
@@ -428,9 +417,13 @@ def test_every_message_carries_a_way_back_into_the_app(
     reminders.send_game_reminder(db_session, game)
     reminders.send_join_request_digests(db_session)
     reminders.notify_promoted_from_waitlist(db_session, [(game.id, queued.id)])
-    reminders.notify_season_settled(db_session, season, [_settlement(member, "100")])
+    reminders.notify_fee_due(
+        db_session,
+        season,
+        [reminders.FeeDue(member.id, Decimal(500), Decimal(0), Decimal(500))],
+    )
 
-    assert len(sent_messages) == 4, "短名單、待核准、候補遞補、季末結算"
+    assert len(sent_messages) == 4, "短名單、待核准、候補遞補、繳費通知"
     for _user_id, text in sent_messages:
         assert "https://liff.line.me/2011156233-6CouG6VI" in text
 
@@ -530,59 +523,34 @@ def test_one_unreachable_promoted_player_does_not_stop_the_others(
     assert delivered == ["Ufine"]
 
 
-def test_settling_tells_each_member_what_they_are_owed(
-    db_session: Session, sent_messages: SentMessages
-) -> None:
-    """Three facts, in the order the reader asks them: what the season
-    cost, what came back, and what that leaves outstanding."""
-    season = _season(db_session, club_name="晴光館")
-    member = PlayerRow(name="有退費的", line_user_id="Urefund")
-    db_session.add(member)
-    db_session.flush()
-    _charge(db_session, season, member, "-500")
+def _fee(fee: str, earlier: str, due: str) -> reminders.FeeDue:
+    return reminders.FeeDue(1, Decimal(fee), Decimal(earlier), Decimal(due))
 
-    told = reminders.notify_season_settled(
-        db_session, season, [_settlement(member, "235", absences=2)]
+
+def test_the_fee_notice_names_the_fee_the_credit_and_what_is_due() -> None:
+    text = reminders._fee_notice_text(
+        "晴光館", "10/7–12/23", _fee("4700", "470", "4230")
     )
 
-    assert told == 1
-    user_id, text = sent_messages[0]
-    assert user_id == "Urefund"
-    assert "晴光館" in text
-    assert "季費 $500" in text
-    assert "請假 2 場退費 $235" in text
-    # Club-wide, so a balance left over from an earlier season shows too.
-    assert "目前應繳 $500" in text
+    assert text.splitlines()[:4] == [
+        "晴光館 季費（10/7–12/23）",
+        "季費 $4700",
+        "上季餘額扣除 $470",
+        "應繳 $4230",
+    ]
 
 
-def test_a_member_with_nothing_owed_is_not_told_about_zero(
-    db_session: Session, sent_messages: SentMessages
-) -> None:
-    # "請假 0 場退費 $0" reads like something went wrong. Somebody who
-    # played every night they paid for is simply not told about refunds.
-    season = _season(db_session)
-    member = PlayerRow(name="沒退費的", line_user_id="Unothing")
-    db_session.add(member)
-    db_session.flush()
+def test_what_last_season_left_unpaid_is_added_on() -> None:
+    text = reminders._fee_notice_text(
+        "晴光館", "10/7–12/23", _fee("4700", "-465", "5165")
+    )
 
-    reminders.notify_season_settled(db_session, season, [_settlement(member, "0")])
-
-    _user_id, text = sent_messages[0]
-    assert "退費" not in text
-    assert "目前已結清" in text, "a settled-up member is told so, not left to infer it"
+    assert "上季未繳 $465" in text
+    assert "應繳 $5165" in text
 
 
-def test_the_notice_says_when_the_club_owes_the_member(
-    db_session: Session, sent_messages: SentMessages
-) -> None:
-    season = _season(db_session)
-    member = PlayerRow(name="多付的", line_user_id="Uowed")
-    db_session.add(member)
-    db_session.flush()
-    # Paid more than they were charged — the club owes the difference.
-    _charge(db_session, season, member, "150")
+def test_nothing_from_last_season_is_not_mentioned_at_all() -> None:
+    # "上季餘額扣除 $0" reads like something went wrong.
+    text = reminders._fee_notice_text("晴光館", "10/7–12/23", _fee("4700", "0", "4700"))
 
-    reminders.notify_season_settled(db_session, season, [_settlement(member, "0")])
-
-    _user_id, text = sent_messages[0]
-    assert "目前應退 $150" in text
+    assert "上季" not in text
