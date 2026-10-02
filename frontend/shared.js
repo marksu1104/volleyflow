@@ -2658,6 +2658,7 @@ const _API_ERROR_PATTERNS = [
     /settled — its books can't be deleted$/,
     () => "有一季已經結算，帳本不能刪除",
   ],
+  [/^This season has payments recorded/, () => "此季已有收款紀錄，無法刪除"],
   [/^That would make the season's venue cost negative/, () => "這樣會讓場地費變成負的"],
 
   // Not found.

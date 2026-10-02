@@ -107,9 +107,12 @@ def delete_season(
 
     Refused once settled. A settled season is closed books: the design rules
     call for every data change to be auditable, and destroying finished
-    accounts is the one thing that can't be. Before settlement the only
-    ledger entries a season owns are its own fee charges, which are
-    meaningless without it.
+    accounts is the one thing that can't be.
+
+    Refused, too, once anybody has paid into it. The fee charges are
+    meaningless without the season, but a payment is cash the organizer
+    actually received; deleting it along with the rest made that money
+    vanish from the books, and the confirmation never said so.
     """
     season = db.get(SeasonRow, season_id)
     if season is None:
@@ -119,6 +122,19 @@ def delete_season(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "This season is settled — its books can't be deleted",
+        )
+    paid_into = (
+        db.query(LedgerEntryRow.id)
+        .filter(
+            LedgerEntryRow.season_id == season_id,
+            LedgerEntryRow.entry_type == EntryType.PAYMENT,
+        )
+        .first()
+    )
+    if paid_into is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This season has payments recorded — it can't be deleted",
         )
 
     _delete_season_rows(db, season)

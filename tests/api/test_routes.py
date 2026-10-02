@@ -2270,6 +2270,28 @@ def test_delete_season_rejects_a_settled_one(client: TestClient) -> None:
     assert response.status_code == 400
 
 
+def test_delete_season_rejects_one_somebody_has_paid_into(
+    client: TestClient,
+) -> None:
+    # The fee charges go with the season; cash the organizer received
+    # must not. Deleting used to take the payment with it.
+    season = _start_season(client, member_names=["Alice"])
+    alice_id = season["member_ids"][0]
+    client.post(
+        f"/clubs/{season['club_id']}/players/{alice_id}/payments",
+        json={"amount": "500", "season_id": season["id"]},
+    )
+
+    response = client.delete(f"/seasons/{season['id']}")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "This season has payments recorded — it can't be deleted"
+    )
+    ledger = client.get(f"/clubs/{season['club_id']}/players/{alice_id}/ledger")
+    assert any(e["entry_type"] == "payment" for e in ledger.json()["entries"])
+
+
 def test_a_member_cannot_delete_a_season(client: TestClient) -> None:
     season = _start_season(client, member_names=["Alice"])
     carol = identify(client, "Carol")
