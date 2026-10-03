@@ -104,3 +104,72 @@ def test_several_bringers_across_games_each_keep_their_own_tag(
             w["player_name"]: w["brought_by_name"] for w in game["waitlist_entries"]
         }
         assert shown == expected[game["id"]]
+
+
+def _named_from_the_queue(
+    client: TestClient,
+) -> tuple[dict[str, Any], int, dict[str, Any], dict[str, Any]]:
+    """The sequence production went through on 2026-10-03.
+
+    A full game. 先到的 queues on their own, then 會員丙 queues 朋友丁.
+    固定甲 takes leave and the queue fills the slot with 先到的. Then
+    朋友丁 is named 固定甲's 代打 straight from the queue, which bumps
+    先到的 back out.
+    """
+    club = create_club(client, name="代打標籤")
+    season = start_season(
+        client,
+        club_id=club["id"],
+        organizer_token=club["organizer_token"],
+        member_names=["固定甲", "固定乙"],
+        capacity=2,
+        game_dates=["2031-01-07"],
+    )
+    season["club_id"] = club["id"]
+    game_id = season["games"][0]["id"]
+    first = identify(client, "先到的")
+    join_club(client, club["id"], auth_headers(first["token"]))
+    client.post(
+        "/drop-ins",
+        json={"player_name": "先到的", "game_id": game_id},
+        headers=auth_headers(first["token"]),
+    )
+    bringer = auth_headers(identify(client, "會員丙")["token"])
+    join_club(client, club["id"], bringer)
+    client.post(
+        f"/games/{game_id}/drop-ins",
+        json={"people": [{"player_name": "朋友丁", "gender": "male"}]},
+        headers=bringer,
+    )
+    absence = client.post(
+        "/absences", json={"player_name": "固定甲", "game_id": game_id}
+    ).json()
+    named = client.put(
+        f"/absences/{absence['id']}/substitute", json={"player_name": "朋友丁"}
+    )
+    assert named.status_code == 200, named.text
+    game = client.get(f"/seasons/{season['id']}").json()["games"][0]
+    sub = next(d for d in game["confirmed_drop_ins"] if d["player_name"] == "朋友丁")
+    return season, game_id, absence, sub
+
+
+def test_a_substitute_released_by_cancelling_the_absence_goes_back_as_queued(
+    client: TestClient,
+) -> None:
+    season, _game_id, absence, _sub = _named_from_the_queue(client)
+
+    client.post(f"/absences/{absence['id']}/cancel")
+
+    assert _tags(client, season)["queue"]["朋友丁"] == "會員丙", (
+        "who queued them, not the absent member the 代打 was for"
+    )
+
+
+def test_a_substitute_taken_off_court_goes_back_as_queued(
+    client: TestClient,
+) -> None:
+    season, _game_id, _absence, sub = _named_from_the_queue(client)
+
+    client.post(f"/drop-ins/{sub['id']}/cancel")
+
+    assert _tags(client, season)["queue"].get("朋友丁") == "會員丙"

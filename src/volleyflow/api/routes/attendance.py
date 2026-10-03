@@ -299,6 +299,7 @@ def set_substitute(
         .first()
     )
     came_from_queue_at = queued.queued_at if queued is not None else None
+    queued_by = queued.brought_by_player_id if queued is not None else None
     if queued is not None:
         db.delete(queued)
         db.flush()
@@ -311,6 +312,7 @@ def set_substitute(
         signed_up_at=_now(),
         covers_absence_id=absence_id,
         from_waitlist_at=came_from_queue_at,
+        queued_by_player_id=queued_by,
         # The member whose slot this is, not whoever tapped the button.
         # A 代打 is usually a friend with no account who will never open
         # the app or pay through it — the member who arranged them hands

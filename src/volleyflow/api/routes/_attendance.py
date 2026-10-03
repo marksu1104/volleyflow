@@ -369,6 +369,16 @@ def _is_absence_covered(db: Session, absence_row: AbsenceRow) -> bool:
     return absences_by_id[absence_row.id] in covered
 
 
+def _queue_bringer(drop_in: DropInRow) -> int | None:
+    """Who signed this person up, as the queue should show it when they go
+    back to it. For a 代打 named from the queue that is whoever queued
+    them — not the absent member the 代打 arrangement records as the
+    bringer (see DropInRow.queued_by_player_id)."""
+    if drop_in.covers_absence_id is not None and drop_in.from_waitlist_at is not None:
+        return drop_in.queued_by_player_id
+    return drop_in.brought_by_player_id
+
+
 def _give_back_queue_place(db: Session, drop_in: DropInRow) -> None:
     """Returns a signup's queue place, when it had one.
 
@@ -392,7 +402,7 @@ def _give_back_queue_place(db: Session, drop_in: DropInRow) -> None:
             player_id=drop_in.player_id,
             game_id=drop_in.game_id,
             queued_at=drop_in.from_waitlist_at,
-            brought_by_player_id=drop_in.brought_by_player_id,
+            brought_by_player_id=_queue_bringer(drop_in),
         )
     )
     db.flush()
@@ -435,7 +445,7 @@ def _displace_latest_drop_in(
             player_id=displaced.player_id,
             game_id=game.id,
             queued_at=displaced.from_waitlist_at or displaced.signed_up_at,
-            brought_by_player_id=displaced.brought_by_player_id,
+            brought_by_player_id=_queue_bringer(displaced),
         )
     )
     db.flush()
@@ -493,8 +503,9 @@ def _release_whoever_is_covering(
         WaitlistEntryRow(
             player_id=releasing.player_id,
             game_id=absence.game_id,
-            queued_at=releasing.signed_up_at,
-            brought_by_player_id=releasing.brought_by_player_id,
+            # The place they held, not the moment they were named a 代打.
+            queued_at=releasing.from_waitlist_at or releasing.signed_up_at,
+            brought_by_player_id=_queue_bringer(releasing),
         )
     )
     db.flush()
@@ -550,8 +561,8 @@ def _make_room_for_substitute(
         WaitlistEntryRow(
             player_id=displaced.player_id,
             game_id=game.id,
-            queued_at=displaced.signed_up_at,
-            brought_by_player_id=displaced.brought_by_player_id,
+            queued_at=displaced.from_waitlist_at or displaced.signed_up_at,
+            brought_by_player_id=_queue_bringer(displaced),
         )
     )
     db.flush()
