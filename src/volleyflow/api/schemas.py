@@ -688,6 +688,18 @@ class SeasonSettleRequest(BaseModel):
     money over or taking it back on the day."""
 
 
+class FeeNoticeRecipientOut(BaseModel):
+    player_id: int
+    name: str
+    due: Decimal
+    text: str
+    """The message exactly as it would be sent."""
+
+
+class FeeNoticePreviewOut(BaseModel):
+    recipients: list[FeeNoticeRecipientOut]
+
+
 class FeeNoticeOut(BaseModel):
     sent: int
     """How many members the 繳費通知 reached."""

@@ -830,51 +830,50 @@
     btn.disabled = state.kind === "blocked";
   }
 
-  /** The message exactly as the server words it (reminders.
-   * _fee_notice_text), less the app link, so what the organizer
-   * approves is what members read. */
-  function feeNoticeText(season, member, clubName) {
-    const row = balanceOf(member.id);
-    const split = splitLedger(row);
-    const dates = season.games.map((g) => g.date).sort();
-    const label = dates.length ? `${monthDay(dates[0])}–${monthDay(dates[dates.length - 1])}` : "";
-    const lines = [
-      label ? `${clubName} 季費（${label}）` : `${clubName} 季費`,
-      `季費 $${-Number(row.season_fee_charged)}`,
-    ];
-    if (split.earlierTotal > 0) lines.push(`上季餘額扣除 $${split.earlierTotal}`);
-    else if (split.earlierTotal < 0) lines.push(`上季未繳 $${-split.earlierTotal}`);
-    lines.push(`應繳 $${-split.due}`);
-    return lines.join("\n");
-  }
-
-  function currentClubName() {
-    const picker = document.getElementById("club-picker");
-    const option = picker && picker.selectedOptions && picker.selectedOptions[0];
-    return option ? option.textContent.trim() : "";
-  }
-
-  function openFeeNotice() {
+  /** Asks the server who would be sent the notice and what each would
+   * read, and shows that. The text is the server's own (GET
+   * /seasons/{id}/fee-notice), never rebuilt here: a copy of the wording
+   * in the browser could drift from what is sent, and a LINE message
+   * cannot be taken back. */
+  let noticeLoad = 0;
+  async function openFeeNotice() {
     const state = feeNoticeState(currentSeason, todayString());
     if (state.kind !== "ready") return;
-    document.getElementById("notice-list").innerHTML = state.recipients
-      .map(
-        (m) =>
-          `<div><span>${escapeHtml(m.name)}</span><span>應繳 $${-splitLedger(balanceOf(m.id)).due}</span></div>`
-      )
-      .join("");
-    const first = state.recipients[0];
-    document.getElementById("notice-sample-name").textContent = first.name;
-    document.getElementById("notice-sample").textContent = feeNoticeText(
-      currentSeason,
-      first,
-      currentClubName()
-    );
+    const ticket = ++noticeLoad;
+    const list = document.getElementById("notice-list");
+    const sample = document.getElementById("notice-sample");
+    const send = document.getElementById("notice-send");
+    list.innerHTML = blockLoadingHtml("載入中");
+    sample.textContent = "";
+    document.getElementById("notice-sample-name").textContent = "";
+    send.disabled = true;
+    send.textContent = "傳送";
     const skipped = document.getElementById("notice-skipped");
     skipped.hidden = state.withoutLine === 0;
     skipped.textContent = `另有 ${state.withoutLine} 位未使用 LINE，不傳送。`;
-    document.getElementById("notice-send").textContent = `傳送給 ${state.recipients.length} 人`;
     document.getElementById("notice-backdrop").hidden = false;
+    try {
+      const res = await fetch(`${API_BASE}/seasons/${currentSeason.id}/fee-notice`, {
+        headers: authHeader(),
+      });
+      if (!res.ok) throw new Error(`伺服器回應 ${res.status}`);
+      const { recipients } = await res.json();
+      if (ticket !== noticeLoad) return;
+      if (!recipients.length) {
+        list.innerHTML = '<div class="empty">無需通知的成員。</div>';
+        return;
+      }
+      list.innerHTML = recipients
+        .map((r) => `<div><span>${escapeHtml(r.name)}</span><span>應繳 $${Number(r.due)}</span></div>`)
+        .join("");
+      document.getElementById("notice-sample-name").textContent = recipients[0].name;
+      sample.textContent = recipients[0].text;
+      send.textContent = `傳送給 ${recipients.length} 人`;
+      send.disabled = false;
+    } catch (e) {
+      if (ticket !== noticeLoad) return;
+      list.innerHTML = `<div class="empty">讀取失敗：${escapeHtml(e.message)}</div>`;
+    }
   }
 
   function closeFeeNotice() {

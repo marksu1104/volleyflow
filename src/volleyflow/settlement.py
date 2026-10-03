@@ -57,6 +57,9 @@ class MemberSettlement:
     player: Player
     season_fee: Decimal
     refund: Decimal
+    refunded_absences: int = 0
+    """How many of their absences were covered, and so refunded — what
+    next season's 繳費通知 states next to the refund ("2 次")."""
 
     @property
     def net(self) -> Decimal:
@@ -112,6 +115,7 @@ def settle_member(
         player=player,
         season_fee=fee,
         refund=sum(refunded, Decimal("0")),
+        refunded_absences=len(refunded),
     )
 
 

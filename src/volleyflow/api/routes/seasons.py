@@ -2,7 +2,6 @@
 
 from collections import defaultdict
 from datetime import date
-from decimal import Decimal
 
 from fastapi import (
     APIRouter,
@@ -32,7 +31,7 @@ from volleyflow.api.routes._attendance import (
     _within_change_deadline,
 )
 from volleyflow.api.routes._money import (
-    _fee_dues,
+    _fee_notice_plan,
     _gather_member_settlements,
     _member_settlement_out,
     _previous_season,
@@ -58,6 +57,8 @@ from volleyflow.api.schemas import (
     DropInDetailOut,
     DropInSummary,
     FeeNoticeOut,
+    FeeNoticePreviewOut,
+    FeeNoticeRecipientOut,
     GameDetailOut,
     GameOut,
     Gender,
@@ -88,7 +89,7 @@ from volleyflow.db.models import (
 )
 from volleyflow.ledger import EntryType
 from volleyflow.notify.reminders import (
-    FeeDue,
+    fee_notice_text,
     notify_fee_due,
     notify_promoted_from_waitlist,
 )
@@ -1140,7 +1141,37 @@ def settle_season(
     )
 
 
-_ZERO = Decimal(0)
+@router.get("/seasons/{season_id}/fee-notice", response_model=FeeNoticePreviewOut)
+def preview_fee_notice(
+    season_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> FeeNoticePreviewOut:
+    """Exactly who the 繳費通知 would go to now and what each would read —
+    the server's own text, so the confirmation sheet cannot drift from
+    the message (a copy of the wording in the browser could, and the
+    message cannot be taken back)."""
+    season_row = db.get(SeasonRow, season_id)
+    if season_row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    _require_organizer(db, season_row.club_id, current_player)
+    names: dict[int, str] = {
+        player_id: name
+        for player_id, name in db.query(PlayerRow.id, PlayerRow.name)
+        .join(SeasonMemberRow, SeasonMemberRow.player_id == PlayerRow.id)
+        .filter(SeasonMemberRow.season_id == season_id)
+    }
+    return FeeNoticePreviewOut(
+        recipients=[
+            FeeNoticeRecipientOut(
+                player_id=due.player_id,
+                name=names.get(due.player_id, ""),
+                due=due.due,
+                text=fee_notice_text(db, season_row, due),
+            )
+            for _, due in _fee_notice_plan(db, season_row)
+        ]
+    )
 
 
 @router.post("/seasons/{season_id}/fee-notice", response_model=FeeNoticeOut)
@@ -1184,23 +1215,9 @@ def send_fee_notice(
             status.HTTP_400_BAD_REQUEST, "The previous season is not settled"
         )
 
-    pending = (
-        db.query(SeasonMemberRow)
-        .join(PlayerRow, PlayerRow.id == SeasonMemberRow.player_id)
-        .filter(
-            SeasonMemberRow.season_id == season_id,
-            SeasonMemberRow.fee_notice_sent_at.is_(None),
-            PlayerRow.line_user_id.is_not(None),
-        )
-        .all()
-    )
-    amounts = _fee_dues(db, season_row, [m.player_id for m in pending])
-    dues = [
-        FeeDue(player_id=m.player_id, fee=-fee, earlier=earlier, due=-through)
-        for m in pending
-        for fee, earlier, through in [amounts.get(m.player_id, (_ZERO, _ZERO, _ZERO))]
-        if through < 0
-    ]
+    plan = _fee_notice_plan(db, season_row)
+    pending = [member for member, _ in plan]
+    dues = [due for _, due in plan]
     owing = {d.player_id for d in dues}
     now = _now()
     for member in pending:

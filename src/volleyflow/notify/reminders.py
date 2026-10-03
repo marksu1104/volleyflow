@@ -47,6 +47,29 @@ logger = logging.getLogger("volleyflow.reminders")
 # Adding it costs nothing: it rides inside a message already being sent,
 # and the free tier counts messages, not characters.
 APP_URL = "https://liff.line.me/2011156233-6CouG6VI"
+LEDGER_URL = "https://liff.line.me/2011156233-SWicoUre"
+"""我的帳務 (frontend/ledger.html) — its own LIFF app, since one LIFF app
+has one endpoint. `?club=` opens that club's breakdown directly."""
+
+_WEEKDAYS = "一二三四五六日"
+
+
+def _when(game: GameRow, season: SeasonRow) -> str:
+    """ "10/7（二）20:00" — the way the app itself writes a game. The time
+    is the game's own when it has one, else the season's usual one."""
+    d = game.date
+    text = f"{d.month}/{d.day}（{_WEEKDAYS[d.weekday()]}）"
+    start = game.start_time or season.game_start_time
+    return f"{text} {start:%H:%M}" if start is not None else text
+
+
+def _message(title: str, club: str, body: list[str], link: tuple[str, str]) -> str:
+    """Every notice has one shape (agreed 2026-10-03): 【球隊】 and what
+    the notice is, the facts one per line, then where to go. Blank lines
+    between the three, because LINE shows them as one block otherwise."""
+    label, url = link
+    return "\n".join([f"【{club}】{title}", "", *body, "", f"{label}：", url])
+
 
 ZERO = Decimal("0")
 
@@ -137,9 +160,15 @@ def send_game_reminder(session: Session, game: GameRow) -> None:
 
     # The club's name leads, because one person can organize more than
     # one club and a date alone doesn't say which.
-    text = (
-        f"注意：{club_name} {game.date} 這場人數不足，目前只有 {len(roster)} 人"
-        f"（門檻 {season.minimum_roster} 人）\n{APP_URL}"
+    text = _message(
+        "人數不足",
+        club_name,
+        [
+            f"場次：{_when(game, season)}",
+            f"目前人數：{len(roster)} 人",
+            f"最低人數：{season.minimum_roster} 人",
+        ],
+        ("場次與報名", APP_URL),
     )
     for line_user_id in recipients:
         try:
@@ -180,9 +209,15 @@ def send_join_request_digests(session: Session) -> int:
     for club_id, count in waiting:
         club = session.get(ClubRow, club_id)
         club_name = club.name if club is not None else ""
-        text = (
-            f"「{club_name}」有 {count} 位新成員等待核准，"
-            f"請到 VolleyFlow 的「管理成員」處理。\n{APP_URL}"
+        # Not a link to the 名單 page itself: the app link opens the
+        # member page, and a path appended to a LIFF link lands on the
+        # wrong file. So the link says only where it goes, and the line
+        # above it says where to go from there.
+        text = _message(
+            "新成員待核准",
+            club_name,
+            [f"待核准：{count} 人", "請至「管理 › 名單」核准或拒絕。"],
+            ("VolleyFlow", APP_URL),
         )
         for line_user_id in _organizer_line_ids(session, club_id):
             try:
@@ -263,9 +298,16 @@ def notify_promoted_from_waitlist(
         # The club's name leads, for the same reason the short-roster
         # alert carries it: one person can play in more than one club and
         # a date alone doesn't say which.
-        text = (
-            f"{_club_name(session, season.club_id)} {game.date} 這一場有名額，"
-            f"你已從候補遞補上場。\n{APP_URL}"
+        text = _message(
+            "候補遞補通知",
+            _club_name(session, season.club_id),
+            [
+                f"場次：{_when(game, season)}",
+                "狀態：已由候補轉為上場",
+                "",
+                "如無法出席，請於 App 取消報名。",
+            ],
+            ("場次與報名", APP_URL),
         )
         for player_id in player_ids:
             line_user_id = reachable.get(player_id)
@@ -285,14 +327,17 @@ def notify_promoted_from_waitlist(
 
 @dataclass(frozen=True)
 class FeeDue:
-    """What one member is asked to pay for a season, in the three parts
-    the message states: this season's fee, what earlier seasons left
-    (positive: a credit coming off), and what that comes to."""
+    """What one member is asked to pay for a season. Amounts are what the
+    message states, all positive except `earlier`, which is signed the
+    ledger's way: positive is a credit coming off."""
 
     player_id: int
     fee: Decimal
     earlier: Decimal
     due: Decimal
+    previous_refund: Decimal = Decimal(0)
+    """Last season's absence refund, when it is part of `earlier`."""
+    previous_absences: int = 0
 
 
 def notify_fee_due(session: Session, season: SeasonRow, dues: list[FeeDue]) -> set[int]:
@@ -300,52 +345,73 @@ def notify_fee_due(session: Session, season: SeasonRow, dues: list[FeeDue]) -> s
 
     The only message about money, and sent once a season: a kept refund
     or an unpaid balance from last season is folded in here rather than
-    announced at settlement, so nobody is told one figure in December and
-    a different one in January. Anyone LINE refuses — no account, or the
+    announced at settlement. Anyone LINE refuses — no account, or the
     Official Account never added — is left out of the result, so the
     caller can leave them free to be sent it later.
     """
-    name = _club_name(session, season.club_id)
-    label = _season_label(session, season.id)
     reachable = _line_ids_for(session, [d.player_id for d in dues])
-
     told: set[int] = set()
     for due in dues:
         line_user_id = reachable.get(due.player_id)
         if line_user_id is None:
             continue
         try:
-            push_to_user(line_user_id, _fee_notice_text(name, label, due))
+            push_to_user(line_user_id, fee_notice_text(session, season, due))
             told.add(due.player_id)
         except Exception:
             logger.exception("Couldn't send player %s their fee notice", due.player_id)
     return told
 
 
-def _season_label(session: Session, season_id: int) -> str:
-    """ "10/7–12/23": seasons have no names, and their dates are how the
-    app itself tells them apart."""
-    first, last = (
-        session.query(func.min(GameRow.date), func.max(GameRow.date))
-        .filter(GameRow.season_id == season_id)
-        .one()
+def fee_notice_text(session: Session, season: SeasonRow, due: FeeDue) -> str:
+    """The message itself — also what the confirmation sheet shows, so
+    what the organizer approves is word for word what is sent."""
+    games = (
+        session.query(GameRow.date)
+        .filter(
+            GameRow.season_id == season.id,
+            GameRow.status != GameStatus.CANCELLED_REFUNDED,
+        )
+        .order_by(GameRow.date)
+        .all()
     )
-    if first is None or last is None:
-        return ""
-    return f"{first.month}/{first.day}–{last.month}/{last.day}"
+    body = []
+    if games:
+        first, last = games[0][0], games[-1][0]
+        span = f"{first.month}/{first.day}–{last.month}/{last.day}"
+        body.append(f"季別：{span}，共 {len(games)} 場")
+    body.append(f"本季季費：${due.fee}")
+    body.extend(_earlier_lines(due))
+    body.append(f"應繳金額：${due.due}")
+    return _message(
+        "季費繳費通知",
+        _club_name(session, season.club_id),
+        body,
+        ("帳務明細", f"{LEDGER_URL}?club={season.club_id}"),
+    )
 
 
-def _fee_notice_text(club: str, label: str, due: FeeDue) -> str:
-    """Three lines a member can check against the app: the fee, what last
-    season left, and what is owed. The earlier line only when there is
-    one — "上季餘額扣除 $0" reads like something went wrong."""
-    lines = [f"{club} 季費（{label}）" if label else f"{club} 季費", f"季費 ${due.fee}"]
-    if due.earlier > 0:
-        lines.append(f"上季餘額扣除 ${due.earlier}")
-    elif due.earlier < 0:
-        lines.append(f"上季未繳 ${-due.earlier}")
-    lines.append(f"應繳 ${due.due}")
-    return "\n".join(lines) + f"\n{APP_URL}"
+def _earlier_lines(due: FeeDue) -> list[str]:
+    """What last season left, in the words a member can check: the
+    refund for their absences, and whatever else is outstanding either
+    way. Nothing at all when last season left nothing — "上季餘額：$0"
+    reads like something went wrong. A refund handed over in cash at
+    settlement is already squared, so `earlier` is 0 and it isn't
+    mentioned either."""
+    if due.earlier == 0:
+        return []
+    lines = []
+    rest = due.earlier
+    if due.previous_refund > 0:
+        lines.append(
+            f"上季請假退費：−${due.previous_refund}（{due.previous_absences} 次）"
+        )
+        rest -= due.previous_refund
+    if rest < 0:
+        lines.append(f"上季未繳：+${-rest}")
+    elif rest > 0:
+        lines.append(f"上季餘額：−${rest}")
+    return lines
 
 
 if __name__ == "__main__":

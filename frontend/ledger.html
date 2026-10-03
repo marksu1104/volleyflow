@@ -201,16 +201,21 @@
           headers: authHeader(),
         }),
       ]);
-      // Newest first (SeasonRow.id desc), so [0] is the season in play.
-      // A club with no season yet is normal — someone who joined before
-      // the organizer set one up — and the breakdown then has no counts
-      // to draw on, which summaryRows handles by putting everything
-      // under 其他季別.
+      // The season in play — the same one every page opens on
+      // (defaultSeasonId), not simply the newest: a season booked ahead
+      // is newer, and its fee is not due yet. A club with no season yet
+      // is normal — someone who joined before the organizer set one up
+      // — and the breakdown then has no counts to draw on, which
+      // summaryRows handles by putting everything under 其他季別.
       const season = seasons.length
-        ? await getJson(`${API_BASE}/seasons/${seasons[0].id}`, { headers: authHeader() })
+        ? await getJson(`${API_BASE}/seasons/${defaultSeasonId(seasons)}`, {
+            headers: authHeader(),
+          })
         : null;
 
-      const n = Number(ledger.balance);
+      // Up to that season, matching the list behind this sheet and the
+      // 繳費通知 that links here — see ledgerUpTo.
+      const n = ledgerUpTo(ledger, season).total;
       total.className = "lg-total " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
       total.innerHTML =
         `<span>${n === 0 ? "目前已結清" : n > 0 ? "應退給你" : "你應繳"}</span>` +
@@ -270,7 +275,18 @@
     me = identified;
     state.innerHTML = "";
     document.getElementById("content").hidden = false;
+    // The 繳費通知's 帳務明細 link names its club, so the breakdown it
+    // is about opens straight away. Stripped from the URL after use, the
+    // way member.html treats ?club=, so a reload shows the list.
+    const params = new URLSearchParams(location.search);
+    const linked = params.get("club");
+    if (linked) {
+      params.delete("club");
+      const rest = params.toString();
+      history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : ""));
+    }
     await renderClubs();
+    if (linked && myClubs.some((c) => String(c.id) === String(linked))) openDetail(linked);
   })();
 </script>
 </body>

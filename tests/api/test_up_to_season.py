@@ -107,3 +107,28 @@ def test_the_members_ledger_says_when_each_season_starts(client: TestClient) -> 
         str(autumn["id"]): "2031-10-07",
         str(winter["id"]): "2032-01-06",
     }
+
+
+def test_my_clubs_list_counts_up_to_the_season_in_play(client: TestClient) -> None:
+    # 我的帳務's figure per club. Winter is booked already and has
+    # charged its fee, but autumn is the season under way.
+    from datetime import date, timedelta
+
+    def days(n: int) -> str:
+        return (date.today() + timedelta(days=n)).isoformat()
+
+    autumn = start_season(
+        client, member_names=["Test Organizer"], game_dates=[days(-7), days(7)]
+    )
+    start_season(
+        client,
+        member_names=["Test Organizer"],
+        game_dates=[days(90)],
+        club_id=autumn["club_id"],
+    )
+    me = autumn["member_ids"][0]
+    autumn_fee = _alice(client, autumn)["season_fee_charged"]
+
+    clubs = client.get(f"/players/{me}/clubs").json()
+
+    assert Decimal(clubs[0]["balance"]) == Decimal(autumn_fee)

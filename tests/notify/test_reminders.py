@@ -284,7 +284,7 @@ def test_the_count_excludes_absent_members_and_includes_drop_ins(
     reminders.send_game_reminder(db_session, game)
 
     assert len(sent_messages) == 1
-    assert "只有 2 人" in sent_messages[0][1]
+    assert "目前人數：2 人" in sent_messages[0][1]
 
 
 def test_nothing_is_sent_to_a_group_even_if_one_is_configured(
@@ -359,7 +359,7 @@ def test_people_waiting_to_join_are_one_message_to_the_organizer(
     user_id, text = sent_messages[0]
     assert user_id == "Uorganizer"
     assert "晴光館" in text
-    assert "2 位" in text
+    assert "待核准：2 人" in text
 
 
 def test_nobody_waiting_to_join_sends_nothing(
@@ -424,8 +424,10 @@ def test_every_message_carries_a_way_back_into_the_app(
     )
 
     assert len(sent_messages) == 4, "短名單、待核准、候補遞補、繳費通知"
-    for _user_id, text in sent_messages:
-        assert "https://liff.line.me/2011156233-6CouG6VI" in text
+    links = [text.splitlines()[-1] for _user_id, text in sent_messages]
+    assert links[:3] == ["https://liff.line.me/2011156233-6CouG6VI"] * 3
+    # The fee notice opens 我的帳務, on this club.
+    assert links[3] == f"https://liff.line.me/2011156233-SWicoUre?club={season.club_id}"
 
 
 def test_a_promoted_player_is_told_which_night_is_theirs(
@@ -448,7 +450,7 @@ def test_a_promoted_player_is_told_which_night_is_theirs(
     user_id, text = sent_messages[0]
     assert user_id == "Uqueued"
     assert "晴光館" in text
-    assert "2026-08-25" in text
+    assert "場次：8/25（二）" in text
 
 
 def test_a_promoted_guest_without_line_is_skipped_rather_than_crashing(
@@ -490,8 +492,8 @@ def test_one_removal_can_promote_people_into_different_nights(
 
     assert told == 2
     by_user = dict(sent_messages)
-    assert "2026-08-25" in by_user["Utuesday"]
-    assert "2026-08-28" in by_user["Ufriday"]
+    assert "場次：8/25（二）" in by_user["Utuesday"]
+    assert "場次：8/28（五）" in by_user["Ufriday"]
 
 
 def test_one_unreachable_promoted_player_does_not_stop_the_others(
@@ -523,34 +525,73 @@ def test_one_unreachable_promoted_player_does_not_stop_the_others(
     assert delivered == ["Ufine"]
 
 
-def _fee(fee: str, earlier: str, due: str) -> reminders.FeeDue:
-    return reminders.FeeDue(1, Decimal(fee), Decimal(earlier), Decimal(due))
+def test_every_notice_has_the_same_shape(
+    db_session: Session, sent_messages: SentMessages
+) -> None:
+    """【球隊】 and what the notice is, a blank line, the facts, a blank
+    line, then where the link goes and the link (agreed 2026-10-03)."""
+    season = _season(db_session, minimum_roster=5, club_name="晴光館")
+    game = _short_game(db_session, season)
 
+    reminders.send_game_reminder(db_session, game)
 
-def test_the_fee_notice_names_the_fee_the_credit_and_what_is_due() -> None:
-    text = reminders._fee_notice_text(
-        "晴光館", "10/7–12/23", _fee("4700", "470", "4230")
-    )
-
-    assert text.splitlines()[:4] == [
-        "晴光館 季費（10/7–12/23）",
-        "季費 $4700",
-        "上季餘額扣除 $470",
-        "應繳 $4230",
+    assert sent_messages[0][1].splitlines() == [
+        "【晴光館】人數不足",
+        "",
+        "場次：8/25（二）",
+        "目前人數：0 人",
+        "最低人數：5 人",
+        "",
+        "場次與報名：",
+        "https://liff.line.me/2011156233-6CouG6VI",
     ]
 
 
-def test_what_last_season_left_unpaid_is_added_on() -> None:
-    text = reminders._fee_notice_text(
-        "晴光館", "10/7–12/23", _fee("4700", "-465", "5165")
+def _due(earlier: str, refund: str = "0", absences: int = 0) -> reminders.FeeDue:
+    return reminders.FeeDue(
+        1,
+        Decimal(4700),
+        Decimal(earlier),
+        Decimal(4700) - Decimal(earlier),
+        previous_refund=Decimal(refund),
+        previous_absences=absences,
     )
 
-    assert "上季未繳 $465" in text
-    assert "應繳 $5165" in text
+
+def test_the_fee_notice_states_the_season_the_refund_and_what_is_due(
+    db_session: Session,
+) -> None:
+    season = _season(db_session, club_name="晴光館")
+    for day in (7, 14):
+        db_session.add(GameRow(season_id=season.id, date=date(2026, 10, day)))
+    db_session.flush()
+
+    text = reminders.fee_notice_text(db_session, season, _due("470", "470", 2))
+
+    assert text.splitlines() == [
+        "【晴光館】季費繳費通知",
+        "",
+        "季別：10/7–10/14，共 2 場",
+        "本季季費：$4700",
+        "上季請假退費：−$470（2 次）",
+        "應繳金額：$4230",
+        "",
+        "帳務明細：",
+        f"https://liff.line.me/2011156233-SWicoUre?club={season.club_id}",
+    ]
+
+
+def test_last_season_unpaid_beside_the_refund_is_its_own_line() -> None:
+    lines = reminders._earlier_lines(_due("-230", "470", 2))
+
+    assert lines == ["上季請假退費：−$470（2 次）", "上季未繳：+$700"]
+
+
+def test_a_credit_that_is_not_a_refund_is_called_last_seasons_balance() -> None:
+    assert reminders._earlier_lines(_due("100")) == ["上季餘額：−$100"]
 
 
 def test_nothing_from_last_season_is_not_mentioned_at_all() -> None:
-    # "上季餘額扣除 $0" reads like something went wrong.
-    text = reminders._fee_notice_text("晴光館", "10/7–12/23", _fee("4700", "0", "4700"))
-
-    assert "上季" not in text
+    # A refund already paid out in cash at settlement leaves nothing over,
+    # so it isn't brought up again; "上季餘額：$0" reads like an error.
+    assert reminders._earlier_lines(_due("0", "470", 2)) == []

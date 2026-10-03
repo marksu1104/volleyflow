@@ -19,6 +19,7 @@ from volleyflow.api.invites import club_id_from_invite_token, invite_token
 from volleyflow.api.routes._attendance import (
     _delete_season_rows,
 )
+from volleyflow.api.routes._money import _club_balances_up_to_now
 from volleyflow.api.routes._people import (
     _MY_GUESTS_LIMIT,
     _gender,
@@ -29,6 +30,7 @@ from volleyflow.api.routes._people import (
     _require_club_access,
     _require_club_member,
     _require_organizer,
+    _today_in_taiwan,
     get_current_player,
 )
 from volleyflow.api.schemas import (
@@ -217,15 +219,11 @@ def list_player_clubs(
     # Safe to key on player_id alone: linking refuses when the LINE row
     # already has ledger entries, and merging re-points them, so a
     # player's money never sits under an id they no longer are.
-    owed = {
-        club_id: total
-        for club_id, total in db.query(
-            LedgerEntryRow.club_id, func.sum(LedgerEntryRow.amount)
-        )
-        .filter(LedgerEntryRow.player_id == player_id)
-        .group_by(LedgerEntryRow.club_id)
-        .all()
-    }
+    #
+    # Up to each club's season in play, not the whole ledger: a season
+    # booked ahead has charged its fee already, and counting it here put
+    # a figure on 我的帳務 that no 繳費通知 had asked for.
+    owed = _club_balances_up_to_now(db, player_id, _today_in_taiwan())
     return [
         MyClubOut(
             id=club.id,

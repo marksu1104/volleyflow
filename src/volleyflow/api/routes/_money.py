@@ -41,6 +41,7 @@ from volleyflow.db.models import (
     SeasonRow,
 )
 from volleyflow.ledger import EntryType
+from volleyflow.notify.reminders import FeeDue
 from volleyflow.players import Player
 from volleyflow.schedule import Game, GameStatus, Season
 from volleyflow.settlement import (
@@ -144,6 +145,134 @@ def _fee_dues(
         player_id: (Decimal(fee), Decimal(through) - Decimal(season), Decimal(through))
         for player_id, fee, season, through in rows
     }
+
+
+def _fee_notice_plan(
+    db: Session, season_row: SeasonRow
+) -> list[tuple[SeasonMemberRow, FeeDue]]:
+    """Who this season's 繳費通知 would go to right now, and what each is
+    told: members with LINE, not yet sent it, who owe something up to
+    this season. Shared by the preview and the send, so the sheet the
+    organizer approves lists exactly the people who will hear."""
+    pending = (
+        db.query(SeasonMemberRow)
+        .join(PlayerRow, PlayerRow.id == SeasonMemberRow.player_id)
+        .filter(
+            SeasonMemberRow.season_id == season_row.id,
+            SeasonMemberRow.fee_notice_sent_at.is_(None),
+            PlayerRow.line_user_id.is_not(None),
+        )
+        .order_by(PlayerRow.name)
+        .all()
+    )
+    amounts = _fee_dues(db, season_row, [m.player_id for m in pending])
+
+    refunds: dict[int, tuple[Decimal, int]] = {}
+    previous = _previous_season(db, season_row)
+    if previous is not None and previous.settled_at is not None:
+        written: dict[int, Decimal] = {
+            player_id: Decimal(total)
+            for player_id, total in db.query(
+                LedgerEntryRow.player_id, func.sum(LedgerEntryRow.amount)
+            )
+            .filter(
+                LedgerEntryRow.season_id == previous.id,
+                LedgerEntryRow.entry_type == EntryType.ABSENCE_REFUND,
+            )
+            .group_by(LedgerEntryRow.player_id)
+            .all()
+        }
+        _, settlements = _gather_member_settlements(db, previous.id)
+        for ms in settlements:
+            refund = Decimal(written.get(ms.player.id) or 0)
+            if refund > 0:
+                refunds[ms.player.id] = (refund, ms.refunded_absences)
+
+    plan = []
+    zero = Decimal(0)
+    for member in pending:
+        fee, earlier, through = amounts.get(member.player_id, (zero, zero, zero))
+        if through >= 0:
+            continue
+        refund, absences = refunds.get(member.player_id, (zero, 0))
+        plan.append(
+            (
+                member,
+                FeeDue(
+                    player_id=member.player_id,
+                    fee=-fee,
+                    earlier=earlier,
+                    due=-through,
+                    previous_refund=refund,
+                    previous_absences=absences,
+                ),
+            )
+        )
+    return plan
+
+
+def _club_balances_up_to_now(
+    db: Session, player_id: int, today: date
+) -> dict[int, Decimal]:
+    """This player's balance in each club, up to that club's season in
+    play — the same season every page opens on (shared.js
+    defaultSeasonId): the one under way, else the next to start, else
+    the last to finish. A season booked further ahead has already
+    charged its fee, but it is not due yet, and the 繳費通知 for this
+    season doesn't count it either."""
+    sums = (
+        db.query(
+            LedgerEntryRow.club_id,
+            LedgerEntryRow.season_id,
+            func.sum(LedgerEntryRow.amount),
+        )
+        .filter(LedgerEntryRow.player_id == player_id)
+        .group_by(LedgerEntryRow.club_id, LedgerEntryRow.season_id)
+        .all()
+    )
+    club_ids = {club_id for club_id, _, _ in sums}
+    spans: dict[int, dict[int, tuple[date, date]]] = defaultdict(dict)
+    for club_id, season_id, first, last in (
+        db.query(
+            SeasonRow.club_id,
+            GameRow.season_id,
+            func.min(GameRow.date),
+            func.max(GameRow.date),
+        )
+        .join(SeasonRow, SeasonRow.id == GameRow.season_id)
+        .filter(SeasonRow.club_id.in_(club_ids))
+        .group_by(SeasonRow.club_id, GameRow.season_id)
+        .all()
+    ):
+        spans[club_id][season_id] = (first, last)
+
+    totals: dict[int, Decimal] = defaultdict(Decimal)
+    for club_id, season_id, amount in sums:
+        club_spans = spans[club_id]
+        current = _season_in_play(club_spans, today)
+        later = (
+            current is not None
+            and season_id in club_spans
+            and club_spans[season_id][0] > club_spans[current][0]
+        )
+        if not later:
+            totals[club_id] += Decimal(amount)
+    return dict(totals)
+
+
+def _season_in_play(spans: dict[int, tuple[date, date]], today: date) -> int | None:
+    """shared.js defaultSeasonId, for the server: the season under way
+    (the one ending soonest, if they overlap), else the next to start,
+    else the last to finish."""
+    running = [s for s, (first, last) in spans.items() if first <= today <= last]
+    if running:
+        return min(running, key=lambda s: spans[s][1])
+    upcoming = [s for s, (first, _) in spans.items() if first > today]
+    if upcoming:
+        return min(upcoming, key=lambda s: spans[s][0])
+    if spans:
+        return max(spans, key=lambda s: spans[s][1])
+    return None
 
 
 def _counts_up_to(season_ids: list[int] | None) -> ColumnElement[bool]:

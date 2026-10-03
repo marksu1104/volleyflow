@@ -68,14 +68,6 @@ test("a season already over has no card at all", () => {
   assert.equal(api.feeNoticeState(season, "2026-12-24").kind, "none");
 });
 
-test("the preview is the message members will read", () => {
-  const { api, season } = setup();
-
-  const text = api.feeNoticeText(season, season.members[0], "週二排球");
-
-  assert.equal(text, "週二排球 季費（10/7–12/23）\n季費 $4700\n上季餘額扣除 $470\n應繳 $4230");
-});
-
 test("switching club or season clears the old figures and shows 載入中", () => {
   // Reported 2026-10-03: the previous season's money stayed on screen
   // until the new one arrived, so the switch looked like it hadn't taken.

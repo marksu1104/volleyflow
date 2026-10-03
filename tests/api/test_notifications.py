@@ -40,6 +40,12 @@ def _in_days(days: int) -> str:
     return (date.today() + timedelta(days=days)).isoformat()
 
 
+def _month_day(iso: str) -> str:
+    """How the messages write a date: 10/7, not 2026-10-07."""
+    _, month, day = iso.split("-")
+    return f"{int(month)}/{int(day)}"
+
+
 def _queued_behind_a_full_game(
     client: TestClient, name: str = "Carol"
 ) -> tuple[dict[str, str | int], int, dict[str, str]]:
@@ -72,7 +78,7 @@ def test_an_absence_promoting_somebody_tells_the_person_it_promoted(
     assert [user_id for user_id, _ in sent_messages] == [carol["token"]], (
         "the queue put Carol on court; nobody else needs telling"
     )
-    assert "2026-08-18" in sent_messages[0][1], "which night the message is about"
+    assert "場次：8/18（二）" in sent_messages[0][1], "which night it is about"
 
 
 def test_a_cancelled_drop_in_promoting_somebody_tells_them_too(
@@ -183,8 +189,8 @@ def test_taking_somebody_off_the_roster_tells_whoever_the_queue_promoted(
     assert removed.status_code == 204, removed.text
     dates = sorted(text for _user_id, text in sent_messages)
     assert len(dates) == 2, "Alice's place opened at both games"
-    assert first in dates[0]
-    assert second in dates[1]
+    assert _month_day(first) in dates[0]
+    assert _month_day(second) in dates[1]
 
 
 def _settled_season(client: TestClient) -> dict[str, Any]:
@@ -255,9 +261,56 @@ def test_the_fee_notice_states_the_fee_last_seasons_credit_and_what_is_due(
     assert response.json() == {"sent": 1, "unreachable": 0}
     [(user_id, text)] = sent_messages
     assert user_id == autumn["organizer_token"]
-    assert f"季費 ${fee}" in text
-    assert "上季餘額扣除 $100" in text
-    assert f"應繳 ${fee - 100}" in text
+    assert f"本季季費：${fee}" in text
+    assert "上季餘額：−$100" in text
+    assert f"應繳金額：${fee - 100}" in text
+
+
+def test_the_preview_is_word_for_word_what_gets_sent(
+    client: TestClient, sent_messages: SentMessages
+) -> None:
+    # The confirmation sheet shows this, and a LINE message cannot be
+    # taken back — so it is the server's text, not a copy of it.
+    winter = _next_season(client, _settled_season(client))
+
+    preview = client.get(f"/seasons/{winter['id']}/fee-notice").json()
+    client.post(f"/seasons/{winter['id']}/fee-notice")
+
+    assert [r["name"] for r in preview["recipients"]] == ["Test Organizer"]
+    assert [r["text"] for r in preview["recipients"]] == [t for _u, t in sent_messages]
+
+
+def test_the_refund_last_season_kept_is_named_with_how_many_absences(
+    client: TestClient, sent_messages: SentMessages
+) -> None:
+    autumn = start_season(
+        client,
+        member_names=["Test Organizer", "Bob"],
+        capacity=2,
+        game_dates=["2026-08-18", "2026-08-25"],
+    )
+    # One night off, filled: a refund smaller than winter's fee.
+    first_night = autumn["games"][0]["id"]
+    client.post(
+        "/absences", json={"player_name": "Test Organizer", "game_id": first_night}
+    )
+    client.post("/drop-ins", json={"player_name": "代打", "game_id": first_night})
+    # Paid up front, so the refund is a credit kept for winter.
+    me = _organizer_id(client, autumn)
+    fee = -int(_row(client, autumn, me)["season_fee_charged"])
+    client.post(
+        f"/clubs/{autumn['club_id']}/players/{me}/payments",
+        json={"amount": str(fee), "season_id": autumn["id"]},
+    )
+    settled = client.post(f"/seasons/{autumn['id']}/settle", json={}).json()
+    refund = next(
+        m["refund"] for m in settled["members"] if m["player_name"] == "Test Organizer"
+    )
+    winter = _next_season(client, autumn)
+
+    [recipient] = client.get(f"/seasons/{winter['id']}/fee-notice").json()["recipients"]
+
+    assert f"上季請假退費：−${refund}（1 次）" in recipient["text"]
 
 
 def test_each_member_gets_the_fee_notice_once_a_season(
