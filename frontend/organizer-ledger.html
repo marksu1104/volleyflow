@@ -278,6 +278,25 @@
 
   const ledgerLoad = staleGuard();
 
+  /** Changing club or season: the figures on screen belong to the old
+   * one, so they come down at once and the lower half shows the same
+   * 載入中 as the first load until the new season paints. Leaving them
+   * up while the request was out read as the switch not having taken
+   * (2026-10-03). Taking a ticket drops any paint still on its way for
+   * the old season, which would otherwise put it back. */
+  function showSwitching() {
+    ledgerLoad.take();
+    document.getElementById("ledger-tabs").hidden = true;
+    document.querySelectorAll(".tab").forEach((el) => {
+      el.hidden = true;
+    });
+    showPageLoading(document.getElementById("no-season"));
+  }
+  // Alongside the pickers' own onchange (initClubAndSeasonPickers), not
+  // instead of it: those fetch, this only clears the screen first.
+  document.getElementById("club-picker").addEventListener("change", showSwitching);
+  document.getElementById("season-picker").addEventListener("change", showSwitching);
+
   async function loadLedger(seasonId) {
     // Two of these run on nearly every page load — see staleGuard — and
     // whichever finishes last wins. Without the ticket the loser can be

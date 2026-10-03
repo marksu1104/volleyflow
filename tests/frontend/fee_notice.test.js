@@ -75,3 +75,15 @@ test("the preview is the message members will read", () => {
 
   assert.equal(text, "週二排球 季費（10/7–12/23）\n季費 $4700\n上季餘額扣除 $470\n應繳 $4230");
 });
+
+test("switching club or season clears the old figures and shows 載入中", () => {
+  // Reported 2026-10-03: the previous season's money stayed on screen
+  // until the new one arrived, so the switch looked like it hadn't taken.
+  const api = load("organizer-ledger.html");
+  api.elements["ledger-tabs"].hidden = false;
+
+  api.showSwitching();
+
+  assert.equal(api.elements["ledger-tabs"].hidden, true);
+  assert.match(api.elements["no-season"].innerHTML, /載入中/);
+});
