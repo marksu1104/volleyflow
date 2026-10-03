@@ -173,3 +173,73 @@ def test_a_substitute_taken_off_court_goes_back_as_queued(
     client.post(f"/drop-ins/{sub['id']}/cancel")
 
     assert _tags(client, season)["queue"].get("朋友丁") == "會員丙"
+
+
+def _linked_member(client: TestClient, season: dict[str, Any]) -> dict[str, Any]:
+    """固定甲, signed in: the roster entry linked to a LINE account."""
+    person = identify(client, "固定甲的帳號")
+    join_club(client, season["club_id"], auth_headers(person["token"]))
+    client.post(
+        f"/clubs/{season['club_id']}/players/{season['member_ids'][0]}/link",
+        json={"line_player_id": person["id"]},
+    )
+    return person
+
+
+def _season_with_a_leave(
+    client: TestClient,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    season = start_season(client, member_names=["固定甲"], game_dates=["2031-01-07"])
+    member = _linked_member(client, season)
+    absence = client.post(
+        "/absences",
+        json={"player_name": "固定甲", "game_id": season["games"][0]["id"]},
+        headers=auth_headers(member["token"]),
+    ).json()
+    return season, member, absence
+
+
+def test_a_substitute_the_member_names_is_brought_by_that_member(
+    client: TestClient,
+) -> None:
+    season, member, absence = _season_with_a_leave(client)
+
+    client.put(
+        f"/absences/{absence['id']}/substitute",
+        json={"player_name": "代打戊"},
+        headers=auth_headers(member["token"]),
+    )
+
+    assert _tags(client, season)["court"] == {"代打戊": "固定甲"}
+
+
+def test_a_substitute_the_organizer_names_is_brought_by_the_organizer(
+    client: TestClient,
+) -> None:
+    # Whoever puts somebody on the list answers for them (2026-10-03) —
+    # one rule for every signup, 代打 included.
+    season, _member, absence = _season_with_a_leave(client)
+
+    client.put(f"/absences/{absence['id']}/substitute", json={"player_name": "代打戊"})
+
+    assert _tags(client, season)["court"] == {"代打戊": "Test Organizer"}
+
+
+def test_the_member_a_substitute_covers_may_still_take_it_back(
+    client: TestClient,
+) -> None:
+    # The bringer no longer says whose leave it is, so the roster has to
+    # find that through the absence — or the member loses 取消代打.
+    season, member, absence = _season_with_a_leave(client)
+    client.put(f"/absences/{absence['id']}/substitute", json={"player_name": "代打戊"})
+    game = client.get(
+        f"/seasons/{season['id']}", headers=auth_headers(member["token"])
+    ).json()["games"][0]
+    [sub] = game["confirmed_drop_ins"]
+
+    cancelled = client.post(
+        f"/drop-ins/{sub['id']}/cancel", headers=auth_headers(member["token"])
+    )
+
+    assert sub["signed_up_by_me"] is True
+    assert cancelled.status_code == 200

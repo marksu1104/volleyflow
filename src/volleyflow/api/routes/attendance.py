@@ -299,7 +299,13 @@ def set_substitute(
         .first()
     )
     came_from_queue_at = queued.queued_at if queued is not None else None
-    queued_by = queued.brought_by_player_id if queued is not None else None
+    # Who put them on the list: whoever queued them, if they were waiting
+    # already; otherwise whoever is naming them now. Never the absent
+    # member as such — see DropInRow.brought_by_player_id.
+    if queued is not None:
+        brought_by = queued.brought_by_player_id
+    else:
+        brought_by = None if player.id == current_player.id else current_player.id
     if queued is not None:
         db.delete(queued)
         db.flush()
@@ -312,15 +318,7 @@ def set_substitute(
         signed_up_at=_now(),
         covers_absence_id=absence_id,
         from_waitlist_at=came_from_queue_at,
-        queued_by_player_id=queued_by,
-        # The member whose slot this is, not whoever tapped the button.
-        # A 代打 is usually a friend with no account who will never open
-        # the app or pay through it — the member who arranged them hands
-        # the money over. Without this the money screen showed "Zoe owes
-        # $235" with nothing to say who to ask, which is exactly the
-        # "應該要跟某某某代打的人收帳" report. Same column the ordinary
-        # +1 signup fills in.
-        brought_by_player_id=absence.player_id,
+        brought_by_player_id=brought_by,
     )
     db.add(drop_in)
     _record_drop_in_charge(db, drop_in, season, reverse=False)

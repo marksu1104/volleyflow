@@ -359,29 +359,17 @@ class DropInRow(Base):
     brought_by_player_id: Mapped[int | None] = mapped_column(
         ForeignKey("players.id"), default=None
     )
-    """Who signed this person up, when it wasn't themselves.
+    """Who put this person on the list, when it wasn't themselves — and so
+    who the organizer asks to make sure they pay.
 
-    The fee is charged to the guest's own ledger, but a guest has no
-    LINE account and will never open the app or pay from it — the member
-    who brought them hands over the cash. Without this, the organizer's
-    money screen says "Jason owes $235" with nothing to say who to ask,
-    and on a night when three different members each bring someone it is
-    guesswork. Shown only on the money screen, never on the roster: it
-    answers "who do I collect from", which is a question only asked
-    there.
-
-    Null when somebody signed themselves up, and for every drop-in
-    recorded before this column existed."""
-    queued_by_player_id: Mapped[int | None] = mapped_column(
-        ForeignKey("players.id"), default=None
-    )
-    """Who had signed this person up while they waited in the queue, for a
-    代打 named straight from it. Naming a 代打 makes the absent member
-    `brought_by_player_id` — they arranged it and they pay — so without
-    this the original bringer was lost, and when the 代打 went back to
-    the queue the roster said the absent member had signed them up.
-    Reported from real use on 2026-10-03. Null whenever the person never
-    came from the queue as a 代打, and for rows from before it existed."""
+    The fee is charged to the person's own ledger, never the bringer's;
+    the bringer is who is answerable for it. Set once and never changed
+    (decided 2026-10-03): not when they move between court and queue,
+    and not when they are named a 代打. Naming a 代打 used to overwrite
+    this with the absent member, which lost the original bringer and,
+    once the 代打 went back to the queue, showed somebody who had never
+    signed them up. A 代打 typed in fresh is brought by whoever typed
+    them in, the same rule as any other signup."""
     charged_amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 0), default=None)
     """What this drop-in was actually charged, so cancelling refunds
     exactly that — not a share recomputed at cancellation time, which can

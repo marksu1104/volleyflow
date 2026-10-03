@@ -792,6 +792,11 @@ def get_season(
     # An explicit substitute (covers_absence_id) always pairs with that
     # absence regardless of order, exactly as covered_absences does.
     absences_by_game: dict[int, list[tuple[int, str]]] = defaultdict(list)
+    # The caller's own leave. A 代打 covering one of these is theirs to
+    # take back (the server allows it in _require_may_cancel_drop_in), and it
+    # is no longer found through the bringer, which stays whoever put
+    # the 代打 on the list.
+    my_absence_ids: set[int] = set()
     for absence, player in (
         db.query(AbsenceRow, PlayerRow)
         .join(PlayerRow, AbsenceRow.player_id == PlayerRow.id)
@@ -812,6 +817,8 @@ def get_season(
         .all()
     ):
         absences_by_game[absence.game_id].append((absence.id, player.name))
+        if absence.player_id == current_player.id:
+            my_absence_ids.add(absence.id)
 
     # (drop_in_id, player_id, name, gender, covers_absence_id, brought_by,
     #  bringer_name)
@@ -977,6 +984,7 @@ def get_season(
                         signed_up_by_me=(
                             player_id == current_player.id
                             or brought_by == current_player.id
+                            or covers in my_absence_ids
                         ),
                         brought_by_name=bringer_name,
                     )
@@ -985,7 +993,7 @@ def get_season(
                         player_id,
                         name,
                         gender,
-                        _covers,
+                        covers,
                         brought_by,
                         bringer_name,
                     ) in drop_ins
