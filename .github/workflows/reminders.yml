@@ -1,10 +1,11 @@
-name: Send game reminders
+name: Send join request digests
 
 on:
   schedule:
-    # 01:00 UTC = 09:00 Taiwan time. Runs daily; the script itself finds
-    # whether any game is scheduled for tomorrow and no-ops otherwise, so
-    # it doesn't need to know the group's actual game day.
+    # 01:00 UTC = 09:00 Taiwan time, once a day: one message per club
+    # with people waiting to join. The roster status that used to be
+    # checked here now goes out at each game's change deadline — see
+    # deadline-notices.yml.
     - cron: "0 1 * * *"
   workflow_dispatch: {}
 
@@ -22,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
-      - name: Send reminders
+      - name: Send join request digests
         # PRODUCTION_DATABASE_URL, not DATABASE_URL — that secret is the
         # Neon dev branch (see ci.yml's Postgres-tests step). Pointed at
         # dev since this workflow was created, so every run "succeeded"

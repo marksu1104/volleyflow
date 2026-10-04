@@ -1,7 +1,7 @@
 """Season and Game: what's on the calendar, and each game's status."""
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from enum import Enum
 
@@ -96,3 +96,11 @@ class Season:
         return sum(
             1 for game in self.games if game.status != GameStatus.CANCELLED_REFUNDED
         )
+
+
+def change_deadline(day: date, start: time | None, hours: int) -> datetime:
+    """When members stop being able to change a game: `hours` before it
+    starts, in the club's own wall-clock time. A game with no start time
+    counts from the start of its day, so it closes early rather than
+    late. Also when the roster status and promotion notices go out."""
+    return datetime.combine(day, start or time(0, 0)) - timedelta(hours=hours)

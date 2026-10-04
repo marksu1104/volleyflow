@@ -33,6 +33,7 @@ from volleyflow.db.models import (
     PlayerRow,
     SeasonRow,
 )
+from volleyflow.notify.reminders import notify_game_cancelled
 from volleyflow.schedule import GameStatus
 
 router = APIRouter()
@@ -85,6 +86,8 @@ def cancel_game(
         _sync_season_fee_ledger(db, season)
     db.commit()
     db.refresh(game)
+    # After the commit: a message cannot be taken back.
+    notify_game_cancelled(db, game)
     return GameOut(id=game.id, date=game.date, status=game.status)
 
 

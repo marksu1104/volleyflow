@@ -19,12 +19,15 @@ identity; the fake verify_id_token makes their token *be* their
 line_user_id, which is why the assertions below compare against tokens.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from tests.api.factories import auth_headers, identify, join_club, start_season
+from volleyflow.db.models import GameRow
+from volleyflow.notify import reminders
 
 SentMessages = list[tuple[str, str]]
 
@@ -68,106 +71,81 @@ def _queued_behind_a_full_game(
     return season, game_id, person
 
 
-def test_an_absence_promoting_somebody_tells_the_person_it_promoted(
-    client: TestClient, sent_messages: SentMessages
+def _past_the_deadline(db_session: Session, game_id: int) -> None:
+    """As if the deadline job had already run for this game."""
+    game = db_session.get(GameRow, game_id)
+    assert game is not None
+    game.roster_notice_sent_at = datetime.now()
+    db_session.commit()
+
+
+def test_a_promotion_before_the_deadline_is_held_until_it(
+    client: TestClient, sent_messages: SentMessages, db_session: Session
 ) -> None:
-    season, game_id, carol = _queued_behind_a_full_game(client)
+    """Somebody takes leave, the queue fills the slot — and nobody is
+    told yet, because a 代打 named an hour later could undo it
+    (2026-10-05). The deadline job tells whoever is promoted by then."""
+    _season, game_id, carol = _queued_behind_a_full_game(client)
+
+    client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
+    assert sent_messages == [], "held until the deadline"
+
+    # 2031-08-19 has no start time, and the test factory's deadline is
+    # 0 hours, so it passes at 00:00 on the 19th.
+    reminders.send_deadline_notices(db_session, datetime(2031, 8, 19, 0, 5))
+
+    promoted = [text for user_id, text in sent_messages if user_id == carol["token"]]
+    assert len(promoted) == 1
+    assert "遞補上場：Carol" in promoted[0]
+    assert "場次：8/19（二）" in promoted[0]
+
+
+def test_after_the_deadline_a_promotion_is_told_at_once(
+    client: TestClient, sent_messages: SentMessages, db_session: Session
+) -> None:
+    # The batch has gone and only the organizer can still change the
+    # game, so whoever comes off the queue now hears straight away.
+    _season, game_id, carol = _queued_behind_a_full_game(client)
+    _past_the_deadline(db_session, game_id)
 
     client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
 
-    assert [user_id for user_id, _ in sent_messages] == [carol["token"]], (
-        "the queue put Carol on court; nobody else needs telling"
-    )
-    assert "場次：8/19（二）" in sent_messages[0][1], "which night it is about"
-
-
-def test_a_cancelled_drop_in_promoting_somebody_tells_them_too(
-    client: TestClient, sent_messages: SentMessages
-) -> None:
-    # The second of the two automatic paths. Both promote through
-    # _promote_from_waitlist, but each commits in its own route, and the
-    # push has to sit after that commit in both.
-    season = start_season(
-        client, member_names=["Alice"], capacity=2, game_dates=["2031-08-19"]
-    )
-    game_id = season["games"][0]["id"]
-    leaving = client.post(
-        "/drop-ins", json={"player_name": "先報名的", "game_id": game_id}
-    ).json()
-    carol = identify(client, "Carol")
-    join_club(client, season["club_id"], auth_headers(carol["token"]))
-    queued = client.post(
-        "/drop-ins",
-        json={"player_name": "Carol", "game_id": game_id},
-        headers=auth_headers(carol["token"]),
-    ).json()
-    assert queued["status"] == "waitlisted"
-
-    # POST .../cancel, not DELETE: a signup is withdrawn, not erased —
-    # the row is kept with cancelled_at set so the ledger still shows the
-    # charge and its refund.
-    cancelled = client.post(f"/drop-ins/{leaving['id']}/cancel")
-
-    assert cancelled.status_code == 200, cancelled.text
     assert [user_id for user_id, _ in sent_messages] == [carol["token"]]
 
 
-def test_the_organizer_promoting_by_hand_tells_that_person(
-    client: TestClient, sent_messages: SentMessages
+def test_a_promoted_guest_is_announced_to_whoever_signed_them_up(
+    client: TestClient, sent_messages: SentMessages, db_session: Session
 ) -> None:
-    # The queue's own order is overridden here, so the person has even
-    # less reason to expect it than usual.
-    _season, game_id, carol = _queued_behind_a_full_game(client)
-    entry = client.get(f"/seasons/{_season['id']}").json()["games"][0][
-        "waitlist_entries"
-    ][0]
+    season = start_season(
+        client, member_names=["Alice"], capacity=1, game_dates=["2031-08-19"]
+    )
+    game_id = season["games"][0]["id"]
+    host = identify(client, "Host")
+    join_club(client, season["club_id"], auth_headers(host["token"]))
+    client.post(
+        f"/games/{game_id}/drop-ins",
+        json={"people": [{"player_name": "Host的朋友", "gender": "male"}]},
+        headers=auth_headers(host["token"]),
+    )
+    _past_the_deadline(db_session, game_id)
 
     client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
-    sent_messages.clear()
-    dave = identify(client, "Dave")
-    join_club(client, _season["club_id"], auth_headers(dave["token"]))
-    daves_entry = client.post(
-        "/drop-ins",
-        json={"player_name": "Dave", "game_id": game_id},
-        headers=auth_headers(dave["token"]),
-    ).json()
-    assert daves_entry["status"] == "waitlisted"
-    carols_drop_in = client.get(f"/seasons/{_season['id']}").json()["games"][0][
-        "confirmed_drop_ins"
-    ][0]
 
-    client.post(
-        f"/waitlist/{daves_entry['id']}/promote",
-        json={"replacing_drop_in_id": carols_drop_in["id"]},
-    )
-
-    assert [user_id for user_id, _ in sent_messages] == [dave["token"]], (
-        "Dave was put on court; Carol coming off is not a promotion"
-    )
-    assert entry["player_name"] == "Carol"
+    [(user_id, text)] = sent_messages
+    assert user_id == host["token"], "the guest has no LINE; the host answers for them"
+    assert "遞補上場：Host的朋友" in text
+    assert "報名人：Host" in text
 
 
-def test_taking_somebody_off_the_roster_tells_whoever_the_queue_promoted(
-    client: TestClient, sent_messages: SentMessages
+def test_taking_somebody_off_the_roster_promotes_into_each_night_separately(
+    client: TestClient, sent_messages: SentMessages, db_session: Session
 ) -> None:
-    """The one path that can promote several people into several
-    different nights at once — which is why the notifier takes
-    (game_id, player_id) pairs rather than one game and a list.
-    """
-    # Future dates, and computed rather than written down.
-    # _offer_freed_slots_to_the_queue skips games already played on
-    # purpose — promoting somebody into last month's game would put them
-    # on a roster they never stood on — so this is the one test in this
-    # file that cannot use the fixed 2026-08 dates the others do. A
-    # hard-coded future date would only postpone the problem: it becomes
-    # a past date eventually, and this test would start failing for a
-    # reason that has nothing to do with the code.
+    """One action can promote people into several nights, so the
+    notifier takes (game_id, player_id) pairs."""
+    # Future dates, computed: the queue skips games already played.
     first, second = _in_days(7), _in_days(14)
     season = start_season(
-        client,
-        member_names=["Alice", "Bob"],
-        capacity=2,
-        game_dates=[first, second],
+        client, member_names=["Alice", "Bob"], capacity=2, game_dates=[first, second]
     )
     carol = identify(client, "Carol")
     join_club(client, season["club_id"], auth_headers(carol["token"]))
@@ -178,12 +156,10 @@ def test_taking_somebody_off_the_roster_tells_whoever_the_queue_promoted(
             headers=auth_headers(carol["token"]),
         ).json()
         assert queued["status"] == "waitlisted"
+        _past_the_deadline(db_session, game["id"])
     members = client.get(f"/seasons/{season['id']}").json()["members"]
     alice = next(m for m in members if m["name"] == "Alice")
 
-    # Asserted, not assumed: without this a refused request and a working
-    # one that simply sent nothing look identical, and the failure names
-    # the wrong cause.
     removed = client.delete(f"/seasons/{season['id']}/members/{alice['id']}")
 
     assert removed.status_code == 204, removed.text
@@ -191,6 +167,22 @@ def test_taking_somebody_off_the_roster_tells_whoever_the_queue_promoted(
     assert len(dates) == 2, "Alice's place opened at both games"
     assert _month_day(first) in dates[0]
     assert _month_day(second) in dates[1]
+
+
+def test_calling_a_game_off_tells_the_people_expected_at_it(
+    client: TestClient, sent_messages: SentMessages
+) -> None:
+    season = start_season(
+        client, member_names=["Test Organizer", "Bob"], game_dates=[_in_days(7)]
+    )
+
+    response = client.post(
+        f"/games/{season['games'][0]['id']}/cancel", json={"refunded": True}
+    )
+
+    assert response.status_code == 200, response.text
+    assert [user_id for user_id, _ in sent_messages] == [season["organizer_token"]]
+    assert "場次取消" in sent_messages[0][1]
 
 
 def _settled_season(client: TestClient) -> dict[str, Any]:

@@ -1,13 +1,22 @@
-"""Short-roster alerts, to the organizers of the club the game belongs to.
+"""Every LINE message the app sends, and when.
 
-Per the attendance rules: "If the roster is short, only the organizer is
-notified — never the waitlist."
+At a game's change deadline (decided 2026-10-05), once: the roster
+status to that club's organizers, and a promotion notice to everybody
+who came off the waiting list, and to whoever signed them up. Held until
+then because a roster keeps moving until the deadline — somebody takes
+leave, then names a 代打 — and a notice sent at the first move could be
+wrong by the second. After the deadline only the organizer can change
+anything, and a promotion they make is told straight away.
+
+Also: a game called off, to everybody expected at it; people waiting to
+join, to the organizer, once a day; and the season's 繳費通知, when the
+organizer sends it.
 """
 
 import logging
-from collections import defaultdict
+import sys
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import func
@@ -23,9 +32,10 @@ from volleyflow.db.models import (
     PlayerRow,
     SeasonMemberRow,
     SeasonRow,
+    WaitlistEntryRow,
 )
 from volleyflow.notify.line_client import push_to_user
-from volleyflow.schedule import GameStatus
+from volleyflow.schedule import GameStatus, change_deadline
 
 logger = logging.getLogger("volleyflow.reminders")
 
@@ -60,7 +70,7 @@ def _when(game: GameRow, season: SeasonRow) -> str:
     d = game.date
     text = f"{d.month}/{d.day}（{_WEEKDAYS[d.weekday()]}）"
     start = game.start_time or season.game_start_time
-    return f"{text} {start:%H:%M}" if start is not None else text
+    return f"{text}{start:%H:%M}" if start is not None else text
 
 
 def _message(title: str, club: str, body: list[str], link: tuple[str, str]) -> str:
@@ -74,41 +84,51 @@ def _message(title: str, club: str, body: list[str], link: tuple[str, str]) -> s
 ZERO = Decimal("0")
 
 
-def _expected_roster(session: Session, game: GameRow, season: SeasonRow) -> list[str]:
-    """Names expected to attend: fixed members minus this game's
-    absences, plus confirmed (non-cancelled) drop-ins.
-    """
-    absent_ids = {
-        row.player_id
-        for row in session.query(AbsenceRow).filter(AbsenceRow.game_id == game.id).all()
-    }
-    member_rows = (
-        session.query(PlayerRow)
-        .join(SeasonMemberRow, SeasonMemberRow.player_id == PlayerRow.id)
-        .filter(SeasonMemberRow.season_id == season.id)
-        .all()
-    )
-    attending_members = [p.name for p in member_rows if p.id not in absent_ids]
+@dataclass(frozen=True)
+class _Roster:
+    """Who is expected at a game, counted the way the roster screen does."""
 
-    drop_in_rows = (
-        session.query(PlayerRow)
-        .join(DropInRow, DropInRow.player_id == PlayerRow.id)
-        .filter(DropInRow.game_id == game.id, DropInRow.cancelled_at.is_(None))
-        .all()
+    playing: list[int]
+    absent: int
+    queued: int
+
+
+def _roster(session: Session, game: GameRow, season: SeasonRow) -> _Roster:
+    """Fixed members minus this game's live absences, plus confirmed
+    drop-ins. A cancelled absence is not an absence — it used to be
+    counted as one here, which under-reported every roster where
+    somebody had taken leave and then taken it back."""
+    absent_ids = {
+        player_id
+        for (player_id,) in session.query(AbsenceRow.player_id).filter(
+            AbsenceRow.game_id == game.id, AbsenceRow.cancelled_at.is_(None)
+        )
+    }
+    member_ids = [
+        player_id
+        for (player_id,) in session.query(SeasonMemberRow.player_id).filter(
+            SeasonMemberRow.season_id == season.id
+        )
+    ]
+    drop_in_ids = [
+        player_id
+        for (player_id,) in session.query(DropInRow.player_id).filter(
+            DropInRow.game_id == game.id, DropInRow.cancelled_at.is_(None)
+        )
+    ]
+    queued = (
+        session.query(func.count(WaitlistEntryRow.id))
+        .filter(WaitlistEntryRow.game_id == game.id)
+        .scalar()
     )
-    return attending_members + [p.name for p in drop_in_rows]
+    return _Roster(
+        playing=[p for p in member_ids if p not in absent_ids] + drop_in_ids,
+        absent=len([p for p in member_ids if p in absent_ids]),
+        queued=int(queued or 0),
+    )
 
 
 def _organizer_line_ids(session: Session, club_id: int) -> list[str]:
-    """Everyone who organizes this club and can be reached over LINE.
-
-    This used to be one environment variable, `LINE_ORGANIZER_USER_ID`,
-    which was right when the app ran one club and wrong from the day it
-    became multi-tenant (2026-09-06): every club's short game alerted the
-    developer, and no other club's organizer was ever told. Found on
-    2026-09-15 while getting ready to hand the app to other people, when
-    "the organizer" stopped meaning one person.
-    """
     rows = (
         session.query(PlayerRow.line_user_id)
         .join(ClubMemberRow, ClubMemberRow.player_id == PlayerRow.id)
@@ -122,78 +142,112 @@ def _organizer_line_ids(session: Session, club_id: int) -> list[str]:
     return [row[0] for row in rows]
 
 
-def send_game_reminder(session: Session, game: GameRow) -> None:
-    """The short-roster alert, to that club's organizers alone.
+def _push_each(line_user_ids: list[str], text: str, what: str) -> int:
+    """One try per person. LINE refuses a push to anybody who hasn't
+    added the Official Account, and letting that error escape stopped
+    everyone after them in the list (fixed 2026-09-15)."""
+    told = 0
+    for line_user_id in line_user_ids:
+        try:
+            push_to_user(line_user_id, text)
+            told += 1
+        except Exception:
+            logger.exception("Couldn't send %s to one recipient", what)
+    return told
 
-    There is deliberately no message to the group chat. One was built —
-    the roster and the price, the night before — and the organizer asked
-    for it to be dropped: the group already talks about the game in the
-    group, and a bot repeating the roster into that conversation is noise
-    rather than news. The only thing worth interrupting anyone for is the
-    thing nobody would otherwise notice in time, which is a game that
-    doesn't have enough people yet.
 
-    Each organizer is tried on their own. LINE only delivers a push to
-    somebody who has added the Official Account as a friend, and refuses
-    it with an error otherwise; letting that error escape stopped the
-    whole nightly run at the first organizer who hadn't, so every club
-    after them in the list went unalerted too.
-    """
+def roster_status_text(session: Session, game: GameRow, season: SeasonRow) -> str:
+    roster = _roster(session, game, season)
+    playing = len(roster.playing)
+    short = season.capacity - playing
+    body = [
+        f"場次：{_when(game, season)}",
+        f"上場：{playing}／{season.capacity} 人，"
+        + ("已滿" if short <= 0 else f"尚缺 {short} 人"),
+        f"請假：{roster.absent} 人",
+        f"候補：{roster.queued} 人",
+    ]
+    if playing < season.minimum_roster:
+        body.append(f"注意：低於最低人數 {season.minimum_roster} 人")
+    return _message(
+        "名單確定", _club_name(session, season.club_id), body, ("場次與報名", APP_URL)
+    )
+
+
+def send_roster_status(session: Session, game: GameRow) -> int:
+    """The roster status, to that club's organizers alone — never the
+    members, at the organizer's choice (2026-10-05): the app already shows
+    the roster to anyone who looks, and one message per game is what the
+    free tier can afford. Returns how many organizers it reached."""
     season = session.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
-
-    roster = _expected_roster(session, game, season)
-    if len(roster) >= season.minimum_roster:
-        return
-
-    club = session.get(ClubRow, season.club_id)
-    club_name = club.name if club is not None else ""
     recipients = _organizer_line_ids(session, season.club_id)
     if not recipients:
         logger.warning(
-            "Game %s in club %s is short-handed, but no organizer has a LINE "
-            "account to tell",
+            "Game %s in club %s reached its deadline, but no organizer has a "
+            "LINE account to tell",
             game.id,
             season.club_id,
         )
-        return
-
-    # The club's name leads, because one person can organize more than
-    # one club and a date alone doesn't say which.
-    text = _message(
-        "人數不足",
-        club_name,
-        [
-            f"場次：{_when(game, season)}",
-            f"目前人數：{len(roster)} 人",
-            f"最低人數：{season.minimum_roster} 人",
-        ],
-        ("場次與報名", APP_URL),
+        return 0
+    return _push_each(
+        recipients, roster_status_text(session, game, season), "a roster status"
     )
-    for line_user_id in recipients:
-        try:
-            push_to_user(line_user_id, text)
-        except Exception:
-            logger.exception(
-                "Couldn't alert an organizer of club %s — most often they "
-                "haven't added the Official Account as a friend",
-                season.club_id,
-            )
 
 
-def send_reminders_for_date(session: Session, target_date: date) -> int:
-    """Sends reminders for every scheduled game on `target_date`.
+def _taiwan_now() -> datetime:
+    """Wall-clock time where the clubs play — the terms a game's date and
+    start time are stored in."""
+    return (
+        datetime.now(UTC).astimezone(timezone(timedelta(hours=8))).replace(tzinfo=None)
+    )
 
-    Returns how many games were processed.
+
+def send_deadline_notices(session: Session, now: datetime) -> int:
+    """Everything due at a deadline that has passed, for every game still
+    to be played today or later. Run every ten minutes; returns how many
+    games it sent for.
+
+    Each game is marked and committed *before* anything is sent. A LINE
+    message cannot be taken back, so a run that overlaps another, or
+    fails half way, must find the game already claimed rather than send
+    it twice; the cost is that a failure mid-send leaves somebody untold,
+    which the organizer can see on the roster anyway.
     """
-    games = (
-        session.query(GameRow)
-        .filter(GameRow.date == target_date, GameRow.status == GameStatus.SCHEDULED)
+    due: list[GameRow] = []
+    for game, season in (
+        session.query(GameRow, SeasonRow)
+        .join(SeasonRow, SeasonRow.id == GameRow.season_id)
+        .filter(
+            GameRow.status == GameStatus.SCHEDULED,
+            GameRow.roster_notice_sent_at.is_(None),
+            GameRow.date >= now.date(),
+        )
+        .with_for_update(of=GameRow, skip_locked=True)
         .all()
-    )
-    for game in games:
-        send_game_reminder(session, game)
-    return len(games)
+    ):
+        deadline = change_deadline(
+            game.date,
+            game.start_time or season.game_start_time,
+            season.change_deadline_hours,
+        )
+        if deadline <= now:
+            game.roster_notice_sent_at = now
+            due.append(game)
+    session.commit()
+
+    for game in due:
+        send_roster_status(session, game)
+        promoted = [
+            (game.id, player_id)
+            for (player_id,) in session.query(DropInRow.player_id).filter(
+                DropInRow.game_id == game.id,
+                DropInRow.cancelled_at.is_(None),
+                DropInRow.from_waitlist_at.is_not(None),
+            )
+        ]
+        notify_promoted_from_waitlist(session, promoted)
+    return len(due)
 
 
 def send_join_request_digests(session: Session) -> int:
@@ -254,75 +308,95 @@ def _club_name(session: Session, club_id: int) -> str:
 def notify_promoted_from_waitlist(
     session: Session, promoted: list[tuple[int, int]]
 ) -> int:
-    """Tell whoever the queue just put on court. Returns how many were told.
+    """Tell each person who came off the waiting list, and whoever signed
+    them up, which night is theirs. Returns how many messages went out.
 
-    The one notification that changes what somebody does. Everything else
-    here reports something the reader could have looked up; this one
-    reaches a person who queued, went away, and has no reason to check
-    again — while the slot is already counted as theirs and the roster
-    says they are playing. Not telling them is how a game ends up a
-    player short with nobody at fault.
+    Only once that game's deadline notices have gone out
+    (`roster_notice_sent_at`). Before then this sends nothing: the batch
+    at the deadline tells everyone who is promoted by then, which spares
+    somebody a "you're in" that a 代打 named an hour later would undo.
+    After it, only the organizer can still change the game, and whoever
+    they promote is told straight away.
 
-    Takes `(game_id, player_id)` pairs rather than one game and a list of
-    people. Removing somebody from a season's roster frees their place at
-    *every* game they were expected at, so a single action can promote
-    several people into several different nights, and each of them has to
-    be told which night is theirs.
+    Takes `(game_id, player_id)` pairs: removing somebody from a season's
+    roster frees their place at every game, so one action can promote
+    several people into several nights.
 
-    **Call this after the commit, never before.** The promotion is one
-    write in a transaction that can still roll back; a push sent from
-    inside it would tell somebody they are playing in a game they were
-    never actually promoted to, and LINE has no way to take it back.
-
-    One try per person: LINE refuses a push to anybody who hasn't added
-    the Official Account, and letting that error escape would stop
-    everyone after them in the list — the failure send_game_reminder was
-    fixed for on 2026-09-15.
+    **Call this after the commit, never before** — a push sent from
+    inside a transaction that then rolls back cannot be taken back.
     """
-    if not promoted:
-        return 0
-
-    by_game: dict[int, list[int]] = defaultdict(list)
-    for game_id, player_id in promoted:
-        by_game[game_id].append(player_id)
-    reachable = _line_ids_for(session, [player_id for _, player_id in promoted])
-
     told = 0
-    for game_id, player_ids in by_game.items():
+    for game_id, player_id in promoted:
         game = session.get(GameRow, game_id)
-        if game is None:
+        if game is None or game.roster_notice_sent_at is None:
             continue
         season = session.get(SeasonRow, game.season_id)
         if season is None:
             continue
-        # The club's name leads, for the same reason the short-roster
-        # alert carries it: one person can play in more than one club and
-        # a date alone doesn't say which.
+        drop_in = (
+            session.query(DropInRow)
+            .filter(
+                DropInRow.game_id == game_id,
+                DropInRow.player_id == player_id,
+                DropInRow.cancelled_at.is_(None),
+            )
+            .first()
+        )
+        bringer_id = drop_in.brought_by_player_id if drop_in is not None else None
+        player = session.get(PlayerRow, player_id)
+        if player is None:
+            continue
+        bringer = session.get(PlayerRow, bringer_id) if bringer_id else None
+        body = [f"場次：{_when(game, season)}", f"遞補上場：{player.name}"]
+        if bringer is not None:
+            body.append(f"報名人：{bringer.name}")
         text = _message(
-            "候補遞補通知",
+            "遞補通知",
             _club_name(session, season.club_id),
-            [
-                f"場次：{_when(game, season)}",
-                "狀態：已由候補轉為上場",
-                "",
-                "如無法出席，請於 App 取消報名。",
-            ],
+            body,
             ("場次與報名", APP_URL),
         )
-        for player_id in player_ids:
-            line_user_id = reachable.get(player_id)
-            if line_user_id is None:
-                continue
-            try:
-                push_to_user(line_user_id, text)
-                told += 1
-            except Exception:
-                logger.exception(
-                    "Couldn't tell player %s they were promoted into game %s",
-                    player_id,
-                    game_id,
-                )
+        recipients = [
+            p.line_user_id
+            for p in (player, bringer)
+            if p is not None and p.line_user_id is not None
+        ]
+        told += _push_each(list(dict.fromkeys(recipients)), text, "a promotion notice")
     return told
+
+
+def notify_game_cancelled(session: Session, game: GameRow) -> int:
+    """Tell everybody expected at a game that it is off: the members not
+    on leave, the confirmed drop-ins, and whoever signed those up. Before
+    this, calling a game off reached nobody. Only for a game still to
+    come; returns how many messages went out. Call after the commit."""
+    if game.date < _taiwan_now().date():
+        return 0
+    season = session.get(SeasonRow, game.season_id)
+    if season is None:
+        return 0
+    roster = _roster(session, game, season)
+    bringers = [
+        bringer_id
+        for (bringer_id,) in session.query(DropInRow.brought_by_player_id).filter(
+            DropInRow.game_id == game.id,
+            DropInRow.cancelled_at.is_(None),
+            DropInRow.brought_by_player_id.is_not(None),
+        )
+    ]
+    reachable = _line_ids_for(session, list(dict.fromkeys(roster.playing + bringers)))
+    refunded = game.status == GameStatus.CANCELLED_REFUNDED
+    text = _message(
+        "場次取消",
+        _club_name(session, season.club_id),
+        [
+            f"場次：{_when(game, season)}",
+            "本場已取消。",
+            "費用：本場費用已退還" if refunded else "費用：照常計收",
+        ],
+        ("場次與報名", APP_URL),
+    )
+    return _push_each(list(dict.fromkeys(reachable.values())), text, "a cancellation")
 
 
 @dataclass(frozen=True)
@@ -415,13 +489,14 @@ def _earlier_lines(due: FeeDue) -> list[str]:
 
 
 if __name__ == "__main__":
+    # Two jobs, two schedules: `deadline` every ten minutes
+    # (deadline-notices.yml), the join digest once a day (reminders.yml).
     logging.basicConfig(level=logging.INFO)
+    job = sys.argv[1] if len(sys.argv) > 1 else "daily"
     with get_session() as db_session:
-        sent_count = send_reminders_for_date(
-            db_session, date.today() + timedelta(days=1)
-        )
-        waiting_clubs = send_join_request_digests(db_session)
-    print(
-        f"Sent reminders for {sent_count} game(s); "
-        f"{waiting_clubs} club(s) have people waiting to join"
-    )
+        if job == "deadline":
+            games = send_deadline_notices(db_session, _taiwan_now())
+            print(f"Sent deadline notices for {games} game(s)")
+        else:
+            waiting_clubs = send_join_request_digests(db_session)
+            print(f"{waiting_clubs} club(s) have people waiting to join")

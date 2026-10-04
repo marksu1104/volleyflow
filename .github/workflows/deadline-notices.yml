@@ -1,0 +1,37 @@
+name: Send deadline notices
+
+on:
+  schedule:
+    # Every ten minutes, 06:00-23:59 Taiwan time (22:00-15:59 UTC). Each
+    # game's notices go out on the first run after its change deadline
+    # passes; the game is marked as it is claimed, so overlapping or
+    # repeated runs never send twice. A deadline between midnight and
+    # 06:00 is sent at 06:00 rather than in the middle of the night.
+    - cron: "*/10 22-23,0-15 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  # One run at a time; a late run waits instead of racing the next one.
+  group: deadline-notices
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Send deadline notices
+        # PRODUCTION_DATABASE_URL, not DATABASE_URL — see reminders.yml.
+        run: uv run python -m volleyflow.notify.reminders deadline
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}

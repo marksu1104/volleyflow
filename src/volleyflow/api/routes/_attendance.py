@@ -6,7 +6,7 @@ the absorb/restore pairs that make adding and removing a fixed member
 undoable. Calls down into _money to record what those movements cost.
 """
 
-from datetime import datetime, time, timedelta
+from datetime import datetime
 from decimal import Decimal
 
 from fastapi import (
@@ -43,7 +43,7 @@ from volleyflow.db.models import (
     WaitlistEntryRow,
 )
 from volleyflow.ledger import EntryType
-from volleyflow.schedule import GameStatus
+from volleyflow.schedule import GameStatus, change_deadline
 from volleyflow.settlement import (
     covered_absences,
 )
@@ -284,9 +284,10 @@ def _deadline_at(game: GameRow, season: SeasonRow) -> datetime:
     deadline in hours before the game starts. The game's own start time
     if it has one, else the season's usual one, else the start of the
     day — so a game with no time at all closes early rather than late."""
-    starts = game.start_time or season.game_start_time or time(0, 0)
-    return datetime.combine(game.date, starts) - timedelta(
-        hours=season.change_deadline_hours
+    return change_deadline(
+        game.date,
+        game.start_time or season.game_start_time,
+        season.change_deadline_hours,
     )
 
 

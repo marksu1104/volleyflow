@@ -222,6 +222,11 @@ class GameRow(Base):
     ac_surcharge and re-syncs every member's charge; see
     routes.set_game_air_conditioning."""
     location: Mapped[str | None] = mapped_column(default=None)
+    roster_notice_sent_at: Mapped[datetime | None] = mapped_column(default=None)
+    """When this game's deadline notices went out — the organizer's roster
+    status and the promotion notices held until then. Set before sending,
+    so the job that runs every ten minutes sends them exactly once; a
+    promotion after it is told straight away instead."""
     start_time: Mapped[time | None] = mapped_column(default=None)
     end_time: Mapped[time | None] = mapped_column(default=None)
     """This one night's venue and time, when they differ from the rest
