@@ -223,7 +223,7 @@ def start_season(
         game_start_time=payload.game_start_time,
         game_end_time=payload.game_end_time,
         location=payload.location,
-        change_deadline_days=payload.change_deadline_days,
+        change_deadline_hours=payload.change_deadline_hours,
     )
     db.add(season)
     db.flush()
@@ -266,7 +266,7 @@ def start_season(
         game_start_time=season.game_start_time,
         game_end_time=season.game_end_time,
         location=season.location,
-        change_deadline_days=season.change_deadline_days,
+        change_deadline_hours=season.change_deadline_hours,
         games=[GameOut(id=g.id, date=g.date, status=g.status) for g in games],
         member_ids=member_ids,
     )
@@ -293,7 +293,7 @@ def _season_out(db: Session, season: SeasonRow) -> SeasonOut:
         game_start_time=season.game_start_time,
         game_end_time=season.game_end_time,
         location=season.location,
-        change_deadline_days=season.change_deadline_days,
+        change_deadline_hours=season.change_deadline_hours,
         games=[GameOut(id=g.id, date=g.date, status=g.status) for g in games],
         member_ids=member_ids,
     )
@@ -1010,7 +1010,7 @@ def get_season(
         game_start_time=season_row.game_start_time,
         game_end_time=season_row.game_end_time,
         location=season_row.location,
-        change_deadline_days=season_row.change_deadline_days,
+        change_deadline_hours=season_row.change_deadline_hours,
         # The headline figure a season is described by: what one game
         # costs one person before any air conditioning. Each game carries
         # its own share above, because a cooled night costs more.

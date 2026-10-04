@@ -35,7 +35,9 @@ def test_list_seasons_summarizes_each_season(client: TestClient) -> None:
 
 
 def test_list_seasons_reflects_settled_status(client: TestClient) -> None:
-    season = _start_season(client, member_names=["Alice"])
+    season = _start_season(
+        client, game_dates=["2026-08-18", "2026-08-25"], member_names=["Alice"]
+    )
     client.post(f"/seasons/{season['id']}/settle")
 
     body = client.get(f"/clubs/{season['club_id']}/seasons").json()
@@ -590,7 +592,7 @@ def test_set_substitute_allowed_past_the_change_deadline(
     """
     today = _today_in_taiwan().isoformat()
     season = _start_season(
-        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+        client, member_names=["Alice"], game_dates=[today], change_deadline_hours=24
     )
     game_id = season["games"][0]["id"]
     absence = AbsenceRow(
@@ -1215,7 +1217,7 @@ def test_record_absence_rejected_past_the_change_deadline(client: TestClient) ->
     """For an ordinary member. The organizer is exempt — see below."""
     today = _today_in_taiwan().isoformat()
     season = _start_season(
-        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+        client, member_names=["Alice"], game_dates=[today], change_deadline_hours=24
     )
     game_id = season["games"][0]["id"]
     alice = _member_with_login(client, season, "Alice")
@@ -1236,7 +1238,7 @@ def test_the_organizer_is_not_bound_by_the_change_deadline(client: TestClient) -
     """
     today = _today_in_taiwan().isoformat()
     season = _start_season(
-        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+        client, member_names=["Alice"], game_dates=[today], change_deadline_hours=24
     )
     game_id = season["games"][0]["id"]
 
@@ -1257,7 +1259,7 @@ def test_the_organizer_is_not_bound_by_the_change_deadline(client: TestClient) -
 def test_record_absence_allowed_within_the_change_deadline(client: TestClient) -> None:
     future = (_today_in_taiwan() + timedelta(days=10)).isoformat()
     season = _start_season(
-        client, member_names=["Alice"], game_dates=[future], change_deadline_days=1
+        client, member_names=["Alice"], game_dates=[future], change_deadline_hours=24
     )
     game_id = season["games"][0]["id"]
 
@@ -1271,7 +1273,7 @@ def test_record_absence_allowed_within_the_change_deadline(client: TestClient) -
 def test_sign_up_rejected_past_the_change_deadline(client: TestClient) -> None:
     today = _today_in_taiwan().isoformat()
     season = _start_season(
-        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+        client, member_names=["Alice"], game_dates=[today], change_deadline_hours=24
     )
     game_id = season["games"][0]["id"]
 
@@ -1297,7 +1299,7 @@ def test_game_detail_locked_reflects_the_change_deadline(client: TestClient) -> 
         client,
         member_names=["Alice"],
         game_dates=[today, future],
-        change_deadline_days=1,
+        change_deadline_hours=24,
     )
     alice = _member_with_login(client, season, "Alice")
 
@@ -1313,7 +1315,7 @@ def test_game_detail_locked_reflects_the_change_deadline(client: TestClient) -> 
 def test_nothing_is_locked_for_the_organizer(client: TestClient) -> None:
     today = _today_in_taiwan().isoformat()
     season = _start_season(
-        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+        client, member_names=["Alice"], game_dates=[today], change_deadline_hours=24
     )
 
     body = client.get(f"/seasons/{season['id']}").json()
@@ -1326,7 +1328,7 @@ def test_cancel_absence_rejected_past_the_change_deadline(
 ) -> None:
     today = _today_in_taiwan().isoformat()
     season = _start_season(
-        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+        client, member_names=["Alice"], game_dates=[today], change_deadline_hours=24
     )
     game_id = season["games"][0]["id"]
     absence = AbsenceRow(
@@ -1351,7 +1353,7 @@ def test_cancel_drop_in_rejected_past_the_change_deadline(
 ) -> None:
     today = _today_in_taiwan().isoformat()
     season = _start_season(
-        client, member_names=["Alice"], game_dates=[today], change_deadline_days=1
+        client, member_names=["Alice"], game_dates=[today], change_deadline_hours=24
     )
     game_id = season["games"][0]["id"]
     bob = PlayerRow(name="Bob")
@@ -1501,7 +1503,9 @@ def test_update_season_can_clear_a_nullable_field_back_to_null(
 def test_update_season_rejects_venue_cost_change_once_settled(
     client: TestClient,
 ) -> None:
-    season = _start_season(client, member_names=["Alice"])
+    season = _start_season(
+        client, game_dates=["2026-08-18", "2026-08-25"], member_names=["Alice"]
+    )
     client.post(f"/seasons/{season['id']}/settle")
 
     response = client.patch(
@@ -1583,7 +1587,9 @@ def test_add_member_rejects_a_duplicate(client: TestClient) -> None:
 
 
 def test_add_member_rejects_once_settled(client: TestClient) -> None:
-    season = _start_season(client, member_names=["Alice"])
+    season = _start_season(
+        client, game_dates=["2026-08-18", "2026-08-25"], member_names=["Alice"]
+    )
     client.post(f"/seasons/{season['id']}/settle")
 
     response = client.post(
@@ -1617,7 +1623,9 @@ def test_remove_member_leaves_the_season(client: TestClient) -> None:
 
 
 def test_remove_member_rejects_once_settled(client: TestClient) -> None:
-    season = _start_season(client, member_names=["Alice", "Bob"])
+    season = _start_season(
+        client, game_dates=["2026-08-18", "2026-08-25"], member_names=["Alice", "Bob"]
+    )
     bob_id = next(
         m["id"]
         for m in client.get(f"/seasons/{season['id']}").json()["members"]
@@ -2262,7 +2270,9 @@ def test_delete_season_clears_the_fees_it_charged(client: TestClient) -> None:
 
 
 def test_delete_season_rejects_a_settled_one(client: TestClient) -> None:
-    season = _start_season(client, member_names=["Alice"])
+    season = _start_season(
+        client, game_dates=["2026-08-18", "2026-08-25"], member_names=["Alice"]
+    )
     client.post(f"/seasons/{season['id']}/settle")
 
     response = client.delete(f"/seasons/{season['id']}")
@@ -2315,7 +2325,9 @@ def test_delete_club_removes_its_seasons_too(client: TestClient) -> None:
 
 
 def test_delete_club_rejects_when_a_season_is_settled(client: TestClient) -> None:
-    season = _start_season(client, member_names=["Alice"])
+    season = _start_season(
+        client, game_dates=["2026-08-18", "2026-08-25"], member_names=["Alice"]
+    )
     client.post(f"/seasons/{season['id']}/settle")
 
     response = client.delete(f"/clubs/{season['club_id']}")
@@ -3410,7 +3422,9 @@ def test_a_member_cannot_change_the_air_conditioning(client: TestClient) -> None
 def test_the_air_conditioning_cannot_be_changed_after_settling(
     client: TestClient, db_session: Session
 ) -> None:
-    season = _start_season(client, member_names=["Alice"])
+    season = _start_season(
+        client, game_dates=["2026-08-18", "2026-08-25"], member_names=["Alice"]
+    )
     season_id, game_id = season["id"], season["games"][0]["id"]
     db_session.execute(
         text("UPDATE seasons SET ac_surcharge = 500 WHERE id = :s"), {"s": season_id}
@@ -3507,7 +3521,9 @@ def test_changing_the_air_conditioning_price_is_blocked_after_settling(
 ) -> None:
     # A game's price is the venue cost minus the surcharge, so moving
     # either would re-price a season whose ledger is already closed.
-    season = _start_season(client, member_names=["Alice"])
+    season = _start_season(
+        client, game_dates=["2026-08-18", "2026-08-25"], member_names=["Alice"]
+    )
     client.post(f"/seasons/{season['id']}/settle")
 
     response = client.patch(f"/seasons/{season['id']}", json={"ac_surcharge": "500"})

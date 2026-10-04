@@ -131,7 +131,7 @@ class SeasonRow(Base):
             "minimum_roster >= 0", name="ck_seasons_minimum_roster_non_negative"
         ),
         CheckConstraint(
-            "change_deadline_days >= 0",
+            "change_deadline_hours >= 0",
             name="ck_seasons_change_deadline_non_negative",
         ),
         CheckConstraint(
@@ -175,10 +175,14 @@ class SeasonRow(Base):
     location: Mapped[str | None] = mapped_column(default=None)
     """The venue name, e.g. "晴光館". Same reasoning as the time slot:
     display-only, optional."""
-    change_deadline_days: Mapped[int | None] = mapped_column(default=None)
-    """How many days before a game attendance changes (absence, signup,
-    cancelling either) are still allowed — 1 means "up to the day
-    before." None means no deadline, the attendance rules' stated default."""
+    change_deadline_hours: Mapped[int] = mapped_column(default=24, server_default="24")
+    """How many hours before a game starts attendance changes (absence,
+    signup, cancelling either) close for members — 24 means "until this
+    time the day before". Every season has one (decided 2026-10-05): the
+    roster status and the promotion notices go out when it passes, so a
+    season without one would never tell anybody anything. Hours rather
+    than the days this replaced, because a day-based deadline closed at
+    midnight, and that is when the notices would have arrived."""
 
 
 class SeasonMemberRow(Base):

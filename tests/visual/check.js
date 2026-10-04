@@ -9,7 +9,7 @@ const OUT = path.join(__dirname, "shots");
 const SEASON = {
   id: 1, capacity: 18, minimum_roster: 12, share_per_game: "205", ac_surcharge: "540",
   game_start_time: "18:30:00", game_end_time: "22:00:00", location: "晴光館",
-  change_deadline_days: 1,
+  change_deadline_hours: 24,
   members: Array.from({ length: 18 }, (_, i) => ({
     id: i + 1, name: i === 0 ? "周恆" : "成員" + (i + 1),
     gender: i < 12 ? "male" : "female", linked: i % 3 !== 0,

@@ -211,7 +211,9 @@ def test_cancel_game_rejects_an_already_cancelled_game(client: TestClient) -> No
 
 
 def test_cancel_game_rejects_once_season_is_settled(client: TestClient) -> None:
-    season = start_season(client, member_names=["Alice"])
+    season = start_season(
+        client, game_dates=["2026-08-18", "2026-08-25"], member_names=["Alice"]
+    )
     game_id = season["games"][0]["id"]
     client.post(f"/seasons/{season['id']}/settle")
 

@@ -73,7 +73,7 @@ def start_season(
     game_start_time: str | None = None,
     game_end_time: str | None = None,
     location: str | None = None,
-    change_deadline_days: int | None = None,
+    change_deadline_hours: int = 0,
     club_id: int | None = None,
     organizer_token: str | None = None,
 ) -> dict[str, Any]:
@@ -91,14 +91,14 @@ def start_season(
         f"/clubs/{club_id}/seasons",
         json={
             "total_venue_cost": total_venue_cost,
-            "game_dates": game_dates or ["2026-08-18", "2026-08-25"],
+            "game_dates": game_dates or ["2031-08-19", "2031-08-26"],
             "member_names": member_names or ["Alice", "Bob"],
             "capacity": capacity,
             "minimum_roster": minimum_roster,
             "game_start_time": game_start_time,
             "game_end_time": game_end_time,
             "location": location,
-            "change_deadline_days": change_deadline_days,
+            "change_deadline_hours": change_deadline_hours,
         },
         headers=headers,
     )

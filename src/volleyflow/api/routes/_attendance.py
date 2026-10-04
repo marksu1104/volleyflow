@@ -6,7 +6,7 @@ the absorb/restore pairs that make adding and removing a fixed member
 undoable. Calls down into _money to record what those movements cost.
 """
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from fastapi import (
@@ -27,6 +27,7 @@ from volleyflow.api.routes._money import (
 )
 from volleyflow.api.routes._people import (
     _now,
+    _now_in_taiwan,
     _require_organizer,
     _today_in_taiwan,
 )
@@ -278,15 +279,21 @@ def _games_with_no_room(
     ]
 
 
+def _deadline_at(game: GameRow, season: SeasonRow) -> datetime:
+    """When members stop being able to change this game: the season's
+    deadline in hours before the game starts. The game's own start time
+    if it has one, else the season's usual one, else the start of the
+    day — so a game with no time at all closes early rather than late."""
+    starts = game.start_time or season.game_start_time or time(0, 0)
+    return datetime.combine(game.date, starts) - timedelta(
+        hours=season.change_deadline_hours
+    )
+
+
 def _within_change_deadline(game: GameRow, season: SeasonRow) -> bool:
     """Whether absence/signup changes (and cancelling either) are still
-    allowed for this game. None means no deadline — the attendance rules'
-    stated default; otherwise a change must land at least this many
-    days before the game.
-    """
-    if season.change_deadline_days is None:
-        return True
-    return _today_in_taiwan() + timedelta(days=season.change_deadline_days) <= game.date
+    open to members for this game."""
+    return _now_in_taiwan() < _deadline_at(game, season)
 
 
 def _require_season_open(season: SeasonRow) -> None:

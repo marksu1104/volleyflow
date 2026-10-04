@@ -26,7 +26,7 @@ def _season_past_its_deadline(client: TestClient) -> dict[str, Any]:
         member_names=["Alice"],
         capacity=18,
         game_dates=[tomorrow.isoformat(), (tomorrow + timedelta(days=7)).isoformat()],
-        change_deadline_days=2,
+        change_deadline_hours=48,
     )
 
 
@@ -133,23 +133,62 @@ def test_the_organizer_can_still_record_what_happened(client: TestClient) -> Non
     assert response.status_code == 200
 
 
-def test_a_season_with_no_deadline_stays_open(client: TestClient) -> None:
-    # The default. The attendance rules: the deadline is a configurable
-    # parameter, and not setting one means no cut-off at all.
-    tomorrow = date.today() + timedelta(days=1)
-    season = start_season(
+def test_a_new_season_closes_changes_24_hours_before_the_game(
+    client: TestClient,
+) -> None:
+    # Every season has a deadline now (2026-10-05): the roster status and
+    # the promotion notices are sent when it passes.
+    response = client.post(
+        "/clubs/{}/seasons".format(start_season(client)["club_id"]),
+        json={
+            "total_venue_cost": "1000",
+            "game_dates": ["2031-01-07"],
+            "member_names": ["Alice"],
+            "capacity": 18,
+            "minimum_roster": 12,
+        },
+    )
+
+    assert response.json()["change_deadline_hours"] == 24
+
+
+def test_changes_close_the_given_hours_before_the_game_starts(
+    client: TestClient,
+) -> None:
+    # A game an hour and a half away, with a two-hour deadline: closed. The
+    # same game with a one-hour deadline: still open.
+    from datetime import datetime, timezone
+
+    soon = datetime.now(timezone(timedelta(hours=8))) + timedelta(minutes=90)
+    if soon.date() != (soon - timedelta(minutes=90)).date():
+        return  # straddles midnight in Taiwan; the date/time split can't say it
+    closed = start_season(
         client,
         member_names=["Alice"],
-        capacity=18,
-        game_dates=[tomorrow.isoformat()],
-        change_deadline_days=None,
+        game_dates=[soon.date().isoformat()],
+        game_start_time=soon.strftime("%H:%M"),
+        change_deadline_hours=2,
     )
-    headers = _as_alice(client, season)
+    still_open = start_season(
+        client,
+        member_names=["Alice"],
+        game_dates=[soon.date().isoformat()],
+        game_start_time=soon.strftime("%H:%M"),
+        change_deadline_hours=1,
+        club_id=closed["club_id"],
+    )
+    alice = _as_alice(client, closed)
 
-    response = client.post(
+    refused = client.post(
         "/absences",
-        json={"player_name": "Alice", "game_id": season["games"][0]["id"]},
-        headers=headers,
+        json={"player_name": "Alice", "game_id": closed["games"][0]["id"]},
+        headers=alice,
+    )
+    allowed = client.post(
+        "/absences",
+        json={"player_name": "Alice", "game_id": still_open["games"][0]["id"]},
+        headers=alice,
     )
 
-    assert response.status_code == 200
+    assert refused.status_code == 400
+    assert allowed.status_code == 200

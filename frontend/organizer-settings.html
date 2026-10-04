@@ -129,13 +129,14 @@
       </div>
 
       <div class="field">
-        <label for="c-deadline">請假／報名的更動期限</label>
+        <label for="c-deadline">更動截止</label>
         <select id="c-deadline" class="control">
-          <option value="">不限，隨時可以改</option>
-          <option value="1">賽前 1 天截止</option>
-          <option value="2">賽前 2 天截止</option>
-          <option value="3">賽前 3 天截止</option>
+          <option value="12">開賽前 12 小時</option>
+          <option value="24" selected>開賽前 24 小時</option>
+          <option value="48">開賽前 48 小時</option>
+          <option value="72">開賽前 72 小時</option>
         </select>
+        <p class="hint">截止後成員無法請假或報名；名單狀況與遞補通知於截止時發送。</p>
       </div>
 
       <button type="button" class="btn btn-primary" data-go="2">下一步</button>
@@ -307,8 +308,9 @@
     </div>
 
     <div class="field">
-      <label for="f-deadline">更動期限（賽前幾天截止，留空表示沒有期限）</label>
-      <input id="f-deadline" class="control" type="number" step="1" min="0" placeholder="例如：1">
+      <label for="f-deadline">更動截止（開賽前幾小時）</label>
+      <input id="f-deadline" class="control" type="number" step="1" min="0" placeholder="24">
+      <p class="hint">截止後成員無法請假或報名；名單狀況與遞補通知於截止時發送。</p>
     </div>
 
     <div id="cost-warn-note" class="warn-box" hidden>
@@ -644,7 +646,7 @@
     writeTimeValue("c-start", s.game_start_time);
     writeTimeValue("c-end", s.game_end_time);
     set("c-location", s.location || "");
-    set("c-deadline", s.change_deadline_days === null ? "" : String(s.change_deadline_days));
+    set("c-deadline", String(s.change_deadline_hours ?? 24));
     wizardDates = [];
     wizardAcDates.clear();
     extraNames = [];
@@ -1038,7 +1040,7 @@
       game_start_time: readTimeValue("c-start"),
       game_end_time: readTimeValue("c-end"),
       location: document.getElementById("c-location").value.trim() || null,
-      change_deadline_days: deadlineValue === "" ? null : Number(deadlineValue),
+      change_deadline_hours: deadlineValue === "" ? 24 : Number(deadlineValue),
     };
 
     try {
@@ -1108,7 +1110,7 @@
     writeTimeValue("f-start", season.game_start_time);
     writeTimeValue("f-end", season.game_end_time);
     document.getElementById("f-location").value = season.location || "";
-    document.getElementById("f-deadline").value = season.change_deadline_days === null ? "" : season.change_deadline_days;
+    document.getElementById("f-deadline").value = season.change_deadline_hours;
 
     document.getElementById("settle-section").hidden = settled;
   }
@@ -1490,7 +1492,7 @@ ${label} 以及已經記在每個人帳上的季費都會一起消失，無法�
       game_start_time: readTimeValue("f-start"),
       game_end_time: readTimeValue("f-end"),
       location: document.getElementById("f-location").value.trim() || null,
-      change_deadline_days: deadlineValue === "" ? null : Number(deadlineValue),
+      change_deadline_hours: deadlineValue === "" ? 24 : Number(deadlineValue),
     };
     if (!costInput.disabled) {
       payload.total_venue_cost = costInput.value.trim();

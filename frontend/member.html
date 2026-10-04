@@ -1002,8 +1002,8 @@
       return;
     }
     selectedGameId = game.id;
-    const deadlinePill = season.change_deadline_days !== null
-      ? `<span class="meta-pill">請假期限 <strong>賽前 ${season.change_deadline_days} 天</strong></span>`
+    const deadlinePill = season.change_deadline_hours != null
+      ? `<span class="meta-pill">更動截止 <strong>開賽前 ${season.change_deadline_hours} 小時</strong></span>`
       : "";
     const mine = myActions(season, game);
     // Everything about this date lives in this one card — including the
@@ -1050,8 +1050,8 @@
       el.innerHTML = '<div class="empty">這一季尚無場次</div>';
       return;
     }
-    const deadlinePill = currentSeason.change_deadline_days !== null
-      ? `<span class="meta-pill">請假期限 <strong>賽前 ${currentSeason.change_deadline_days} 天</strong></span>`
+    const deadlinePill = currentSeason.change_deadline_hours != null
+      ? `<span class="meta-pill">更動截止 <strong>開賽前 ${currentSeason.change_deadline_hours} 小時</strong></span>`
       : "";
     renderGameDetail(el, currentSeason, game, {
       heroMetaPills: [acPill(currentSeason, game), deadlinePill],

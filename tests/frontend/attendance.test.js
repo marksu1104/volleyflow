@@ -25,7 +25,7 @@ function fixture() {
       game_start_time: "18:30:00",
       game_end_time: "22:00:00",
       location: "晴光館",
-      change_deadline_days: 1,
+      change_deadline_hours: 24,
       members: [
         { id: 1, name: "周安", gender: "male", linked: true },
         { id: 2, name: "林書妤", gender: "female", linked: true },

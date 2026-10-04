@@ -52,7 +52,7 @@ def _queued_behind_a_full_game(
     """A game filled by its two members, with one identified player
     waiting behind them."""
     season = start_season(
-        client, member_names=["Alice", "Bob"], capacity=2, game_dates=["2026-08-18"]
+        client, member_names=["Alice", "Bob"], capacity=2, game_dates=["2031-08-19"]
     )
     game_id = season["games"][0]["id"]
     person = identify(client, name)
@@ -78,7 +78,7 @@ def test_an_absence_promoting_somebody_tells_the_person_it_promoted(
     assert [user_id for user_id, _ in sent_messages] == [carol["token"]], (
         "the queue put Carol on court; nobody else needs telling"
     )
-    assert "場次：8/18（二）" in sent_messages[0][1], "which night it is about"
+    assert "場次：8/19（二）" in sent_messages[0][1], "which night it is about"
 
 
 def test_a_cancelled_drop_in_promoting_somebody_tells_them_too(
@@ -88,7 +88,7 @@ def test_a_cancelled_drop_in_promoting_somebody_tells_them_too(
     # _promote_from_waitlist, but each commits in its own route, and the
     # push has to sit after that commit in both.
     season = start_season(
-        client, member_names=["Alice"], capacity=2, game_dates=["2026-08-18"]
+        client, member_names=["Alice"], capacity=2, game_dates=["2031-08-19"]
     )
     game_id = season["games"][0]["id"]
     leaving = client.post(

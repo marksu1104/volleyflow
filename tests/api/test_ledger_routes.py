@@ -91,7 +91,9 @@ def test_settle_season_charges_fees_and_credits_refunds(client: TestClient) -> N
 
 
 def test_settle_season_marks_the_season_settled(client: TestClient) -> None:
-    season = start_season(client, member_names=["Alice"])
+    season = start_season(
+        client, game_dates=["2026-08-18", "2026-08-25"], member_names=["Alice"]
+    )
 
     client.post(f"/seasons/{season['id']}/settle")
     detail = client.get(f"/seasons/{season['id']}").json()

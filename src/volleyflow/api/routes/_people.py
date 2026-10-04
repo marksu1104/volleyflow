@@ -317,6 +317,12 @@ def _gender(value: str | None) -> Gender | None:
 _TAIWAN = timezone(timedelta(hours=8))
 
 
+def _now_in_taiwan() -> datetime:
+    """Wall-clock time where the club plays, without a zone — the same
+    terms a game's date and start time are stored in."""
+    return datetime.now(UTC).astimezone(_TAIWAN).replace(tzinfo=None)
+
+
 def _today_in_taiwan() -> date:
     """A change deadline is about calendar days from the group's own
     perspective, not the server's UTC clock — using UTC for "today"

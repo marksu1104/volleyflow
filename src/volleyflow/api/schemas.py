@@ -160,7 +160,7 @@ class SeasonCreate(BaseModel):
     game_start_time: time | None = None
     game_end_time: time | None = None
     location: str | None = None
-    change_deadline_days: int | None = None
+    change_deadline_hours: int = Field(default=24, ge=0)
 
 
 class SeasonUpdate(BaseModel):
@@ -177,7 +177,7 @@ class SeasonUpdate(BaseModel):
     game_start_time: time | None = None
     game_end_time: time | None = None
     location: str | None = None
-    change_deadline_days: int | None = None
+    change_deadline_hours: int | None = Field(default=None, ge=0)
 
 
 class MemberAdd(BaseModel):
@@ -220,7 +220,7 @@ class SeasonOut(BaseModel):
     game_start_time: time | None
     game_end_time: time | None
     location: str | None
-    change_deadline_days: int | None
+    change_deadline_hours: int
     games: list[GameOut]
     member_ids: list[int]
 
@@ -647,7 +647,7 @@ class SeasonDetailOut(BaseModel):
     game_start_time: time | None
     game_end_time: time | None
     location: str | None
-    change_deadline_days: int | None
+    change_deadline_hours: int
     share_per_game: Decimal
     """What one game costs one person, for a game with no air
     conditioning. Computed here, not on the frontend: rounding happens

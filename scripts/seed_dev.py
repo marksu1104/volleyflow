@@ -150,7 +150,7 @@ def main() -> int:
             "game_start_time": "18:30",
             "game_end_time": "22:00",
             "location": "晴光館",
-            "change_deadline_days": 1,
+            "change_deadline_hours": 24,
         },
     )
     season_id = season["id"]
