@@ -76,7 +76,15 @@ def _when(game: GameRow, season: SeasonRow) -> str:
 def _message(title: str, club: str, body: list[str], link: tuple[str, str]) -> str:
     """Every notice has one shape (agreed 2026-10-03): 【球隊】 and what
     the notice is, the facts one per line, then where to go. Blank lines
-    between the three, because LINE shows them as one block otherwise."""
+    between the three, because LINE shows them as one block otherwise.
+
+    No line longer than about ten Chinese characters (2026-10-05): a LINE
+    bubble on a small phone is about 65% of a 320-wide screen, and a line
+    that wraps there is the one people misread. Measured, not guessed —
+    on 季費繳費通知 the organizer's own phone wrapped two lines. Facts
+    that would run longer are split across two lines, the second in
+    （）. The link itself cannot be shortened and always wraps, which is
+    why its label sits on a line of its own."""
     label, url = link
     return "\n".join([f"【{club}】{title}", "", *body, "", f"{label}：", url])
 
@@ -162,13 +170,13 @@ def roster_status_text(session: Session, game: GameRow, season: SeasonRow) -> st
     short = season.capacity - playing
     body = [
         f"場次：{_when(game, season)}",
-        f"上場：{playing}／{season.capacity} 人，"
-        + ("已滿" if short <= 0 else f"尚缺 {short} 人"),
-        f"請假：{roster.absent} 人",
-        f"候補：{roster.queued} 人",
+        "",
+        f"名單：{playing}／{season.capacity} 人",
+        "（已滿）" if short <= 0 else f"（尚缺 {short} 人）",
     ]
     if playing < season.minimum_roster:
-        body.append(f"注意：低於最低人數 {season.minimum_roster} 人")
+        body.append(f"（低於最低人數 {season.minimum_roster} 人）")
+    body += ["", f"請假：{roster.absent} 人", f"候補：{roster.queued} 人"]
     return _message(
         "名單確定", _club_name(session, season.club_id), body, ("場次與報名", APP_URL)
     )
@@ -268,9 +276,9 @@ def send_join_request_digests(session: Session) -> int:
         # wrong file. So the link says only where it goes, and the line
         # above it says where to go from there.
         text = _message(
-            "新成員待核准",
+            "加入申請",
             club_name,
-            [f"待核准：{count} 人", "請至「管理 › 名單」核准或拒絕。"],
+            [f"待核准：{count} 人", "", "請至「管理 › 名單」", "核准或拒絕。"],
             ("VolleyFlow", APP_URL),
         )
         for line_user_id in _organizer_line_ids(session, club_id):
@@ -347,9 +355,9 @@ def notify_promoted_from_waitlist(
         if player is None:
             continue
         bringer = session.get(PlayerRow, bringer_id) if bringer_id else None
-        body = [f"場次：{_when(game, season)}", f"遞補上場：{player.name}"]
-        if bringer is not None:
-            body.append(f"報名人：{bringer.name}")
+        # The same words for the person and whoever signed them up; who
+        # signed them up is not the news (2026-10-05).
+        body = [f"場次：{_when(game, season)}", "", f"遞補上場：{player.name}"]
         text = _message(
             "遞補通知",
             _club_name(session, season.club_id),
@@ -391,8 +399,9 @@ def notify_game_cancelled(session: Session, game: GameRow) -> int:
         _club_name(session, season.club_id),
         [
             f"場次：{_when(game, season)}",
-            "本場已取消。",
-            "費用：本場費用已退還" if refunded else "費用：照常計收",
+            "",
+            "本場已取消，",
+            "本場費用已退還。" if refunded else "費用照常計收。",
         ],
         ("場次與報名", APP_URL),
     )
@@ -452,13 +461,16 @@ def fee_notice_text(session: Session, season: SeasonRow, due: FeeDue) -> str:
     body = []
     if games:
         first, last = games[0][0], games[-1][0]
-        span = f"{first.month}/{first.day}–{last.month}/{last.day}"
-        body.append(f"季別：{span}，共 {len(games)} 場")
+        body += [
+            f"季別：{first.month}/{first.day}–{last.month}/{last.day}",
+            f"共 {len(games)} 場",
+            "",
+        ]
     body.append(f"本季季費：${due.fee}")
     body.extend(_earlier_lines(due))
-    body.append(f"應繳金額：${due.due}")
+    body += ["", f"應繳金額：${due.due}"]
     return _message(
-        "季費繳費通知",
+        "繳費通知",
         _club_name(session, season.club_id),
         body,
         ("帳務明細", f"{LEDGER_URL}?club={season.club_id}"),
@@ -477,9 +489,10 @@ def _earlier_lines(due: FeeDue) -> list[str]:
     lines = []
     rest = due.earlier
     if due.previous_refund > 0:
-        lines.append(
-            f"上季請假退費：−${due.previous_refund}（{due.previous_absences} 次）"
-        )
+        lines += [
+            f"上季退費：−${due.previous_refund}",
+            f"（請假 {due.previous_absences} 次）",
+        ]
         rest -= due.previous_refund
     if rest < 0:
         lines.append(f"上季未繳：+${-rest}")

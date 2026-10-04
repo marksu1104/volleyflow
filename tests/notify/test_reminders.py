@@ -241,7 +241,10 @@ def test_the_roster_status_counts_who_is_playing_away_and_queued(
         "【晴光館】名單確定",
         "",
         "場次：8/25（二）",
-        "上場：3／18 人，尚缺 15 人",
+        "",
+        "名單：3／18 人",
+        "（尚缺 15 人）",
+        "",
         "請假：1 人",
         "候補：1 人",
         "",
@@ -265,9 +268,9 @@ def test_a_full_game_says_so_and_a_short_one_is_flagged(
     reminders.send_roster_status(db_session, _short_game(db_session, short))
 
     by_user = dict(sent_messages)
-    assert "上場：1／1 人，已滿" in by_user["Uorganizer"]
-    assert "注意" not in by_user["Uorganizer"]
-    assert "注意：低於最低人數 5 人" in by_user["Ushort"]
+    assert "名單：1／1 人\n（已滿）" in by_user["Uorganizer"]
+    assert "低於最低人數" not in by_user["Uorganizer"]
+    assert "（低於最低人數 5 人）" in by_user["Ushort"]
 
 
 def test_nothing_is_sent_to_a_group_even_if_one_is_configured(
@@ -396,13 +399,15 @@ def test_at_the_deadline_everyone_promoted_hears_and_so_does_who_signed_them_up(
 
     reminders.send_deadline_notices(db_session, _at(date(2026, 8, 24), 20, 5))
 
+    # The same words as the person themselves gets; who signed them up
+    # is not the news (2026-10-05).
     to_bringer = dict(sent_messages)["Ubringer"]
     assert to_bringer.splitlines()[:5] == [
         "【晴光館】遞補通知",
         "",
         "場次：8/25（二）20:00",
+        "",
         "遞補上場：C",
-        "報名人：謝秉均",
     ]
 
 
@@ -671,12 +676,13 @@ def test_a_cancelled_game_tells_everyone_expected_and_their_bringers(
     reminders.notify_game_cancelled(db_session, game)
 
     assert sorted(u for u, _ in sent_messages) == ["Ubringer", "Uplaying"]
-    assert sent_messages[0][1].splitlines()[:5] == [
+    assert sent_messages[0][1].splitlines()[:6] == [
         "【晴光館】場次取消",
         "",
         "場次：8/25（二）",
-        "本場已取消。",
-        "費用：本場費用已退還",
+        "",
+        "本場已取消，",
+        "本場費用已退還。",
     ]
 
 
@@ -702,11 +708,15 @@ def test_the_fee_notice_states_the_season_the_refund_and_what_is_due(
     text = reminders.fee_notice_text(db_session, season, _due("470", "470", 2))
 
     assert text.splitlines() == [
-        "【晴光館】季費繳費通知",
+        "【晴光館】繳費通知",
         "",
-        "季別：10/7–10/14，共 2 場",
+        "季別：10/7–10/14",
+        "共 2 場",
+        "",
         "本季季費：$4700",
-        "上季請假退費：−$470（2 次）",
+        "上季退費：−$470",
+        "（請假 2 次）",
+        "",
         "應繳金額：$4230",
         "",
         "帳務明細：",
@@ -717,7 +727,7 @@ def test_the_fee_notice_states_the_season_the_refund_and_what_is_due(
 def test_last_season_unpaid_beside_the_refund_is_its_own_line() -> None:
     lines = reminders._earlier_lines(_due("-230", "470", 2))
 
-    assert lines == ["上季請假退費：−$470（2 次）", "上季未繳：+$700"]
+    assert lines == ["上季退費：−$470", "（請假 2 次）", "上季未繳：+$700"]
 
 
 def test_a_credit_that_is_not_a_refund_is_called_last_seasons_balance() -> None:
@@ -728,3 +738,58 @@ def test_nothing_from_last_season_is_not_mentioned_at_all() -> None:
     # A refund already paid out in cash at settlement leaves nothing over,
     # so it isn't brought up again; "上季餘額：$0" reads like an error.
     assert reminders._earlier_lines(_due("0", "470", 2)) == []
+
+
+def _width(line: str) -> float:
+    """Roughly how wide a line sets in LINE: a Chinese character or
+    full-width mark is one, a digit, letter or ASCII mark is half."""
+    return sum(0.5 if ord(ch) < 0x2E80 and ch not in "−–›" else 1.0 for ch in line)
+
+
+def test_no_line_in_any_notice_is_long_enough_to_wrap_on_a_small_phone(
+    db_session: Session, sent_messages: SentMessages
+) -> None:
+    """About ten Chinese characters fit across a LINE bubble on a small
+    phone (measured 2026-10-05). Every notice, every line, links aside —
+    those cannot be shortened and always wrap, so they sit alone."""
+    season = _season(db_session, minimum_roster=5, club_name="週二排球")
+    season.game_start_time = time(20, 0)
+    game = _short_game(db_session, season)
+    queued = PlayerRow(name="候補的人", line_user_id="Uqueued")
+    member = PlayerRow(name="成員", line_user_id="Umember")
+    db_session.add_all([queued, member])
+    db_session.flush()
+    _waiting_to_join(db_session, season, "新人一")
+
+    reminders.send_roster_status(db_session, game)
+    reminders.send_join_request_digests(db_session)
+    game.roster_notice_sent_at = datetime.now()
+    reminders.notify_promoted_from_waitlist(db_session, [(game.id, queued.id)])
+    reminders.notify_fee_due(
+        db_session,
+        season,
+        [
+            reminders.FeeDue(
+                member.id,
+                Decimal(4700),
+                Decimal(-230),
+                Decimal(4930),
+                previous_refund=Decimal(470),
+                previous_absences=2,
+            )
+        ],
+    )
+    game.status = GameStatus.CANCELLED_UNREFUNDED
+    game.date = date(2099, 8, 25)
+    db_session.add(SeasonMemberRow(season_id=season.id, player_id=member.id))
+    db_session.flush()
+    reminders.notify_game_cancelled(db_session, game)
+
+    assert len(sent_messages) == 5
+    too_long = [
+        line
+        for _user, text in sent_messages
+        for line in text.splitlines()
+        if not line.startswith("https://") and _width(line) > 11
+    ]
+    assert too_long == []

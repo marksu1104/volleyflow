@@ -134,7 +134,6 @@ def test_a_promoted_guest_is_announced_to_whoever_signed_them_up(
     [(user_id, text)] = sent_messages
     assert user_id == host["token"], "the guest has no LINE; the host answers for them"
     assert "遞補上場：Host的朋友" in text
-    assert "報名人：Host" in text
 
 
 def test_taking_somebody_off_the_roster_promotes_into_each_night_separately(
@@ -302,7 +301,7 @@ def test_the_refund_last_season_kept_is_named_with_how_many_absences(
 
     [recipient] = client.get(f"/seasons/{winter['id']}/fee-notice").json()["recipients"]
 
-    assert f"上季請假退費：−${refund}（1 次）" in recipient["text"]
+    assert f"上季退費：−${refund}\n（請假 1 次）" in recipient["text"]
 
 
 def test_each_member_gets_the_fee_notice_once_a_season(
