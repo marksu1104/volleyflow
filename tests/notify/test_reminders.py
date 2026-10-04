@@ -441,7 +441,22 @@ def test_people_waiting_to_join_are_one_message_to_the_organizer(
     user_id, text = sent_messages[0]
     assert user_id == "Uorganizer"
     assert "晴光館" in text
-    assert "待核准：2 人" in text
+    assert "待核准：2 人\n新人一\n新人二\n" in text, "who, one name a line"
+
+
+def test_a_long_waiting_list_names_the_first_eight_and_counts_the_rest(
+    db_session: Session, sent_messages: SentMessages
+) -> None:
+    season = _season(db_session)
+    for i in range(1, 11):
+        _waiting_to_join(db_session, season, f"新人{i}")
+
+    reminders.send_join_request_digests(db_session)
+
+    lines = sent_messages[0][1].splitlines()
+    assert "待核准：10 人" in lines
+    assert "新人8" in lines and "新人9" not in lines
+    assert "（另 2 人）" in lines
 
 
 def test_nobody_waiting_to_join_sends_nothing(

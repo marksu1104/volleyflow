@@ -15,6 +15,7 @@ organizer sends it.
 
 import logging
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
@@ -258,19 +259,32 @@ def send_deadline_notices(session: Session, now: datetime) -> int:
     return len(due)
 
 
+_JOIN_NAMES_SHOWN = 8
+"""How many waiting names the digest lists before counting the rest."""
+
+
 def send_join_request_digests(session: Session) -> int:
     """One message per club with people waiting to be let in, from the
     daily run — never one per person, which would spend a month's pushes
     in the first week. Returns how many clubs had somebody waiting."""
-    waiting = (
-        session.query(ClubMemberRow.club_id, func.count())
+    names: dict[int, list[str]] = defaultdict(list)
+    for club_id, name in (
+        session.query(ClubMemberRow.club_id, PlayerRow.name)
+        .join(PlayerRow, PlayerRow.id == ClubMemberRow.player_id)
         .filter(ClubMemberRow.status == "pending")
-        .group_by(ClubMemberRow.club_id)
-        .all()
-    )
-    for club_id, count in waiting:
+        .order_by(ClubMemberRow.joined_at)
+    ):
+        names[club_id].append(name)
+    for club_id, waiting in names.items():
         club = session.get(ClubRow, club_id)
         club_name = club.name if club is not None else ""
+        # Who, not just how many (2026-10-05) — one name a line, so a long
+        # list stays readable. Past a handful the rest are counted rather
+        # than listed; the 名單 page has them all.
+        shown = waiting[:_JOIN_NAMES_SHOWN]
+        body = [f"待核准：{len(waiting)} 人", *shown]
+        if len(waiting) > len(shown):
+            body.append(f"（另 {len(waiting) - len(shown)} 人）")
         # Not a link to the 名單 page itself: the app link opens the
         # member page, and a path appended to a LIFF link lands on the
         # wrong file. So the link says only where it goes, and the line
@@ -278,17 +292,11 @@ def send_join_request_digests(session: Session) -> int:
         text = _message(
             "加入申請",
             club_name,
-            [f"待核准：{count} 人", "", "請至「管理 › 名單」", "核准或拒絕。"],
+            [*body, "", "請至「管理 › 名單」", "核准或拒絕。"],
             ("VolleyFlow", APP_URL),
         )
-        for line_user_id in _organizer_line_ids(session, club_id):
-            try:
-                push_to_user(line_user_id, text)
-            except Exception:
-                logger.exception(
-                    "Couldn't tell an organizer of club %s who is waiting", club_id
-                )
-    return len(waiting)
+        _push_each(_organizer_line_ids(session, club_id), text, "a join digest")
+    return len(names)
 
 
 def _line_ids_for(session: Session, player_ids: list[int]) -> dict[int, str]:
