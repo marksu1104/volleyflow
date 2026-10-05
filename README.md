@@ -28,10 +28,13 @@ optionally name who's covering for them), bring a guest, join the
 waitlist when a game is full, and see their own running balance.
 
 **An organizer** manages the roster, marks payments received, corrects a
-game's air conditioning setting after the fact, and settles a season.
-Nothing this system sends goes to the group chat: the only push message
-is a private one to that club's organizers, when a game is short-handed
-and somebody has to go and ask. The club reads the roster in the app.
+game's air conditioning setting after the fact, settles a season, and
+sends each member one fee notice for the next. Nothing this system sends
+goes to the group chat. At each game's change deadline the organizers get
+the final roster — how many on court, how many short — and anybody who
+came off the waiting list is told, along with whoever signed them up. A
+game called off reaches everybody expected at it. The club reads
+everything else in the app.
 
 **Anyone** can create a club and become its organizer. A club is a full
 tenant: its own roster, seasons, games, and books, invisible to every
@@ -147,6 +150,45 @@ there to be pressed and refused — every control on the game sheet is
 reached through one of eight callbacks, so withholding those is the
 whole of it in one place. The reading tabs stay; a settled season is
 still worth looking at.
+
+**A season asks only for what is due by it.** A member's fee is charged
+the moment they join a season, so a club that books January in October
+already has January's fee on everybody's ledger. Summing the whole
+ledger put that fee into October's settlement as money owed, and the
+button that squares it would have booked January's money as October's.
+Every figure anybody is asked to act on — the fee screen, settlement, the
+fee notice, a member's own balance — now counts that season and earlier
+ones, never a later one. It also fixed the opposite case: a refund kept
+for next season used to sit on the books untouched while the fee screen
+collected the plain fee. Found by walking a two-season example through a
+clickable mock-up with a ledger beside it and requiring every balance to
+reach zero; that check is now `tests/api/test_two_season_flow.py`.
+
+**One column, one meaning.** Who signed a guest up was also used to mean
+who pays for them, and naming a queued guest as somebody's substitute
+overwrote it with the absent member — so when the substitute went back
+to the queue, the roster named a person who had never signed them up.
+The first fix added a column to remember the original; the better one
+removed that column again and stopped the overwrite. The guest's fee is
+on the guest's own ledger, the person who signed them up is whom the
+organizer asks, and that never changes. The real cause underneath —
+playing and waiting kept as two tables, with five paths copying a row
+between them — is on the list as its own refactor.
+
+**A message that can't be taken back is claimed before it is sent.** The
+deadline notices run from a job every ten minutes, and the fee notice
+from a button; either can run twice. Each game, and each member's fee
+notice, is marked and committed first and pushed second, so an
+overlapping run or a double tap finds nothing left to send. The cost is
+the other failure — a crash between the two leaves somebody untold —
+which the organizer can see and fix, where a duplicate charge reminder
+can only be apologised for.
+
+**Notices are tested for how they read on a phone.** A LINE bubble on a
+small phone fits about ten Chinese characters a line, measured by
+simulating four phone widths and calibrating to the one where the first
+version wrapped. A test sets every line of every notice against that
+budget; it caught two over-long lines in the redesign that introduced it.
 
 **Two tests earn back more time than they cost.** `tests/api/test_fuzz.py`
 fires a few hundred randomly chosen operations at a season and checks
@@ -470,7 +512,11 @@ quietly change what someone is charged.
 
 ## What's left
 
-What remains are loose ends kept narrow on purpose rather than chased to
-100%: the Chinese error-message table covers what an ordinary tap reaches
-rather than all 41 routes, and the backup script has been rehearsed
-against the dev branch but not production.
+- **One signup table instead of two.** Playing and waiting live in
+  separate tables, and moving somebody between them copies a row along
+  one of five paths; two real bugs have been a field one path forgot. A
+  single table with a status would make a move change one column. It
+  touches signup, the queue, substitutes and refunds together, so it is
+  a stage of its own.
+- **A production restore drill.** The backup script has been rehearsed
+  against the dev branch, not production.

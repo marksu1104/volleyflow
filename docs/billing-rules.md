@@ -4,10 +4,12 @@ Defines every rule the billing engine implements. The code translates this
 document, not the other way around. To change a rule, change this file first,
 then the code and tests.
 
-Status: milestone 1 core, milestone 6 charge-timing update. Last updated 2026-09-17
-(one night can run at a different venue for a different price — see "A
-different venue for one night"). The cost is still split by `capacity`,
-not by the current roster — see "Who the cost is split between".
+Status: milestone 1 core, milestone 6 charge-timing update. Last updated 2026-10-06
+(what a season asks for counts that season and earlier ones only, settling
+has a window and records cash, and a guest's bringer is fixed — see
+"What is due by a season", "Settlement" and "Who answers for a guest's
+fee"). The cost is still split by `capacity`, not by the current roster —
+see "Who the cost is split between".
 
 ## Terms
 
@@ -388,17 +390,92 @@ season fee charged            -2002
 payment received              +2002
 absence refund                 +286
 drop-in fee charged            -286
-carried in from last season       ±
 
 balance > 0   the organizer owes the player
 balance < 0   the player owes the organizer
 ```
 
-At season end a balance is either settled in cash or carried into the next
-season, which writes a carry-out entry here and a carry-in entry there that
-sum to zero.
+A ledger spans every season in one club, so carrying a balance into the
+next season is the absence of an entry, not an entry of its own: whatever
+a member is owed or owes simply stays on their ledger and is part of what
+the next season asks for (see "What is due by a season"). Squaring it in
+cash instead is an ordinary `payment` entry. An earlier version of this
+file described a carry-out/carry-in pair of entries; nothing ever wrote
+them, and the `carried_over` entry type is unused.
 
-Entries are never modified, and each records who, when, and why.
+Entries are never modified, and each records who, when, and why. A
+payment recorded by mistake is undone by a second entry of the opposite
+sign that names the one it reverses (`reverses_entry_id`), never by
+deleting it.
+
+### What is due by a season
+
+Every figure the app asks somebody to pay, or offers to pay back, for a
+season counts **that season and every earlier one** — never a season
+that starts later. Seasons are ordered by their first game; entries tied
+to no season at all (a payment recorded without one) always count.
+
+```
+due_by(S) = sum of the player's entries whose season starts on or
+            before S's first game, plus entries with no season
+```
+
+The reason is the charge timing below: a member's fee is charged the
+moment they join a season, so a club that books January in October
+already has January's fee on everybody's ledger. Summing the whole
+ledger put that fee into October's settlement as money owed, and
+recording it as "已收" would have booked January's money as October's.
+`due_by` is what the 季費 tab collects, what 季末結算 settles, what the
+繳費通知 states, and what a member's own 應繳 shows (for the season in
+play — the one under way, else the next to start, else the last to
+finish). The plain whole-ledger balance is still there for the books;
+it is just never the figure anybody is asked to act on.
+
+On the 季費 tab this is why a row reads, for example:
+
+```
+應收 $4230    本季季費 $4700 · 上季餘額扣除 $470
+```
+
+— last season's kept refund comes off this season's fee, and last
+season's unpaid amount (上季未繳) goes on top of it.
+
+### Who answers for a guest's fee
+
+A guest's fees are charged to **the guest's own ledger**, never to
+whoever signed them up. But a guest usually has no LINE account and
+never opens the app, so the organizer needs to know whom to ask: that is
+`brought_by_player_id`, shown as 「X 報名」.
+
+The rule (2026-10-03): **whoever put the person on the list, and it never
+changes** — not when they move between court and queue, and not when
+they are named somebody's 代打. A 代打 typed in fresh is brought by
+whoever typed them in, the absent member or the organizer. This column
+used to be overwritten with the absent member when a queued guest was
+named a 代打, so that the money screen would name the absent member;
+the original bringer was lost, and once the 代打 went back to the queue
+the roster named somebody who had never signed them up. The member whose
+absence a 代打 covers can still cancel that 代打 — found through the
+absence, not through the bringer.
+
+### Collecting the next season's fee
+
+The 繳費通知 is the only money message, sent from the 季費 tab when the
+organizer chooses, and states for each member who owes something:
+
+```
+本季季費        this season's fee
+上季退費        last season's absence refund, if it is still on the ledger
+上季未繳 / 上季餘額   anything else last season left, either way
+應繳金額        due_by(this season)
+```
+
+It waits until the previous season is settled — until then that
+season's refunds are not on the ledger and the figure is not final — and
+is not offered for a season already over. Each member is sent it at most
+once a season (`season_members.fee_notice_sent_at`): a LINE message cannot
+be taken back, so the recipients are marked before anything is sent, and
+anybody LINE refuses is unmarked again so a later send reaches only them.
 
 ### When the season fee is charged
 
@@ -445,8 +522,71 @@ adjustment               = target_charge - already_charged
 No adjustment entry is written when `adjustment == 0` — an edit that doesn't
 change anyone's math (e.g. changing the venue location) writes nothing.
 
+## Settlement
+
+Settling a season records each member's absence refund, locks the
+season, and — in the same step — records whatever money changes hands on
+the spot.
+
+### When a season can be settled
+
+From **three weeks before its last game**, and only once **no game still
+to come has an absence nobody is filling** (a 缺額). Both are enforced
+by the server and stated on the 季末結算 tab instead of a button. Three
+weeks because the roster is usually certain well before the final
+night (decided 2026-10-02, replacing "after the last game"); no open
+slot because a slot still open could yet be filled, and that would change
+who is refunded after the refunds were written. A slot left open on a
+night already played does not matter — nobody can fill it any more, and
+it simply goes unrefunded.
+
+### What settling writes
+
+```
+for each member:
+  absence_refund  +refund        if any of their absences were covered
+  payment         -due_by(S)     only if the organizer chose 退款 / 已收
+```
+
+Each member whose `due_by(S)` (with the refund about to be credited
+added in) is not zero gets a choice before settling: **保留至下一季**,
+the default, which writes nothing and leaves the balance for the next
+season's fee; or **退款 / 已收**, which writes the payment that squares
+it. The choice is a selection, not a record, until 結算此季 is pressed.
+
+### What settling locks
+
+The roster, the venue cost and the air conditioning, and attendance on
+every game — members can no longer take leave or sign up for the games
+still to come, which is the point of settling early: the roster is
+final. When something does change, the organizer undoes the settlement
+(below), makes the change, and settles again.
+
+### Undoing it
+
+Every absence refund the settlement wrote gets an entry of the opposite
+sign naming it; nothing is deleted. Cash already handed over at or after
+settling is not taken back — it now reads as owed, and the organizer is
+told whose it is.
+
+### Deleting a season
+
+Refused once it is settled, and refused once **anybody has paid into
+it**: the fee charges mean nothing without the season, but a payment is
+cash the organizer actually received, and deleting the season used to
+delete that record with it.
+
+## Change deadline
+
+Members can take leave, sign up, and cancel either until **N hours
+before the game starts** (`change_deadline_hours`, default 24 — every
+season has one since 2026-10-05). After it only the organizer can change
+the game, because they record what actually happened on the night. The
+deadline does not change any amount: a cancellation the organizer
+records after it refunds exactly as one before it would, and an absence
+is refunded only if somebody covers it, whenever it was recorded.
+
 ## Open questions
 
-- Drop-in cancellation deadline, currently unlimited. Does cancelling late
-  still incur the fee?
-- Is there an absence deadline? Does a late absence forfeit the refund?
+- Should a member's drop-in cancelled by the organizer after the
+  deadline still be charged? Today it is refunded like any cancellation.
