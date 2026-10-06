@@ -33,7 +33,6 @@ from volleyflow.db.models import (
     PlayerRow,
     ProblemReportRow,
     SeasonRow,
-    WaitlistEntryRow,
 )
 from volleyflow.schedule import GameStatus
 
@@ -81,8 +80,8 @@ def developer_overview(
         .filter(ClubMemberRow.status == "pending")
         .count(),
         # Cancelled signups are history, not people expecting to play.
-        drop_ins=db.query(DropInRow).filter(DropInRow.cancelled_at.is_(None)).count(),
-        waitlist_entries=db.query(WaitlistEntryRow).count(),
+        drop_ins=db.query(DropInRow).filter(DropInRow.playing()).count(),
+        waitlist_entries=db.query(DropInRow).filter(DropInRow.queued()).count(),
         ledger_entries=db.query(LedgerEntryRow).count(),
         # Rows written before 2026-09-15 are screenshots with no words —
         # there is nothing to read, so they are not reports here either.

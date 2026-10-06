@@ -30,7 +30,6 @@ from volleyflow.db.models import (
     PlayerRow,
     SeasonMemberRow,
     SeasonRow,
-    WaitlistEntryRow,
 )
 from volleyflow.ledger import EntryType
 from volleyflow.notify import reminders
@@ -228,8 +227,12 @@ def test_the_roster_status_counts_who_is_playing_away_and_queued(
             DropInRow(
                 player_id=carol.id, game_id=game.id, signed_up_at=datetime(2026, 8, 1)
             ),
-            WaitlistEntryRow(
-                player_id=eve.id, game_id=game.id, queued_at=datetime(2026, 8, 1)
+            DropInRow(
+                player_id=eve.id,
+                game_id=game.id,
+                signed_up_at=datetime(2026, 8, 1),
+                queued_at=datetime(2026, 8, 1),
+                status="queued",
             ),
         ]
     )
@@ -391,7 +394,7 @@ def test_at_the_deadline_everyone_promoted_hears_and_so_does_who_signed_them_up(
             player_id=guest.id,
             game_id=game.id,
             signed_up_at=datetime(2026, 8, 20),
-            from_waitlist_at=datetime(2026, 8, 20),
+            queued_at=datetime(2026, 8, 20),
             brought_by_player_id=bringer.id,
         )
     )

@@ -11,12 +11,14 @@ from decimal import Decimal
 
 from sqlalchemy import (
     CheckConstraint,
+    ColumnElement,
     Enum,
     ForeignKey,
     Identity,
     Index,
     Numeric,
     UniqueConstraint,
+    and_,
     text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -307,7 +309,22 @@ class AbsenceRow(Base):
     is DropInRow.absorbed_at."""
 
 
+PLAYING = "playing"
+QUEUED = "queued"
+
+
 class DropInRow(Base):
+    """One person's signup for one game, on court or waiting for a place.
+
+    Until 2026-10-07 the queue was a table of its own, and moving somebody
+    between the two meant deleting a row in one and copying its fields
+    into a new row in the other — along at least five different paths.
+    Two real bugs were a field one of those paths forgot: 「候補會不見」
+    (2026-09-11) and a guest's bringer showing the wrong name
+    (2026-10-03). Now a move changes `status` and nothing else, so there
+    is nothing to forget to carry over.
+    """
+
     __tablename__ = "drop_ins"
 
     # Same reasoning as AbsenceRow.uq_absences_active_player_game: one
@@ -325,28 +342,42 @@ class DropInRow(Base):
         ),
         Index("ix_drop_ins_game_id", "game_id"),
         Index("ix_drop_ins_covers_absence_id", "covers_absence_id"),
+        CheckConstraint("status IN ('playing', 'queued')", name="ck_drop_ins_status"),
     )
 
     id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     signed_up_at: Mapped[datetime]
+    """When they took the place on court they hold — what FIFO absence
+    coverage and "the latest signup yields" order by. For somebody
+    promoted off the queue it is when they joined the queue, so the one
+    who waited longest keeps their precedence."""
     cancelled_at: Mapped[datetime | None] = mapped_column(default=None)
-    from_waitlist_at: Mapped[datetime | None] = mapped_column(default=None)
-    """When this person joined the queue, for a signup that came out of
-    it — by automatic promotion, or by being named as somebody's 代打
-    while waiting.
-
-    They gave up a place in the queue to take this slot, so if the slot
-    is taken back off them they are owed that place back, at the time
-    they originally joined. Without it, picking the third person in the
-    queue as your substitute and then changing your mind deleted them
-    from the game entirely.
+    status: Mapped[str] = mapped_column(default=PLAYING, server_default=PLAYING)
+    """`playing` (on court, charged) or `queued` (waiting, not charged).
+    Live only while `cancelled_at` is null — see `playing()` / `queued()`,
+    which every query uses rather than spelling the pair out."""
+    queued_at: Mapped[datetime | None] = mapped_column(default=None)
+    """When this person joined the queue, if they ever did. The queue is
+    ordered by it, and it is the place somebody is owed back when a slot
+    they left the queue for is taken off them by anybody but themselves.
 
     Null for somebody who was never in the queue — typed in by name, or
-    signed up straight into an open slot. Cancelling their signup must
-    not put them in a queue they never joined.
+    signed up straight into an open slot. Taking their slot away cancels
+    the signup rather than putting them in a queue they never joined.
     """
+
+    @classmethod
+    def playing(cls) -> ColumnElement[bool]:
+        """On court: live and not waiting."""
+        return and_(cls.cancelled_at.is_(None), cls.status == PLAYING)
+
+    @classmethod
+    def queued(cls) -> ColumnElement[bool]:
+        """In the queue: live and waiting."""
+        return and_(cls.cancelled_at.is_(None), cls.status == QUEUED)
+
     absorbed_at: Mapped[datetime | None] = mapped_column(default=None)
     """Set when this drop-in was cancelled *by the system* because the
     player became a fixed member of the season, not by the player
@@ -394,29 +425,6 @@ class DropInRow(Base):
     fall back to the old behaviour of recomputing the current share, on
     the same reasoning as `brought_by_player_id` above.
     """
-
-
-class WaitlistEntryRow(Base):
-    __tablename__ = "waitlist_entries"
-
-    # Hard-deleted on promotion (see _promote_from_waitlist) rather than
-    # soft-deleted, so — unlike absences/drop_ins — there's never a
-    # cancelled row to exclude and this can be a plain unique constraint.
-    __table_args__ = (
-        UniqueConstraint("player_id", "game_id", name="uq_waitlist_player_game"),
-        Index("ix_waitlist_entries_game_id", "game_id"),
-    )
-
-    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
-    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
-    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
-    queued_at: Mapped[datetime]
-    brought_by_player_id: Mapped[int | None] = mapped_column(
-        ForeignKey("players.id"), default=None
-    )
-    """Who queued this person, when it wasn't themselves. Carried onto the
-    drop-in when they're promoted, so the member who brought a guest can
-    still take them off either list."""
 
 
 class ProblemReportRow(Base):

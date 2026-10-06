@@ -12,10 +12,11 @@ from sqlalchemy.orm import Session
 
 from volleyflow.api.dependencies import get_db
 from volleyflow.api.routes._attendance import (
+    _back_to_the_queue,
     _get_game_or_404,
-    _give_back_queue_place,
     _has_open_slot,
     _make_room_for_substitute,
+    _off_the_court,
     _promote_entry,
     _promote_from_waitlist,
     _reject_if_already_playing,
@@ -55,6 +56,8 @@ from volleyflow.api.schemas import (
     WaitlistPromoteOut,
 )
 from volleyflow.db.models import (
+    PLAYING,
+    QUEUED,
     AbsenceRow,
     ClubMemberRow,
     DropInRow,
@@ -62,7 +65,6 @@ from volleyflow.db.models import (
     PlayerRow,
     SeasonMemberRow,
     SeasonRow,
-    WaitlistEntryRow,
 )
 from volleyflow.notify.reminders import notify_promoted_from_waitlist
 
@@ -218,26 +220,17 @@ def set_substitute(
 
     existing = (
         db.query(DropInRow)
-        .filter(
-            DropInRow.covers_absence_id == absence_id,
-            DropInRow.cancelled_at.is_(None),
-        )
+        .filter(DropInRow.covers_absence_id == absence_id, DropInRow.playing())
         .first()
     )
     if existing is not None:
-        existing.cancelled_at = _now()
-        _record_drop_in_charge(db, existing, season, reverse=True)
         # They did not withdraw — somebody else was picked instead — so
         # if they had left the queue to take this slot, they get that
-        # place back. See _give_back_queue_place.
-        _give_back_queue_place(db, existing)
-        # Flush now, before the new DropInRow below is added: SQLAlchemy's
-        # unit of work orders all pending INSERTs before UPDATEs regardless
-        # of the order they were issued in, so without this the new row
-        # (e.g. re-assigning the same person) would be inserted while the
-        # old one is still active, tripping the active-substitute unique
-        # index.
-        db.flush()
+        # place back. See _off_the_court. Flushed inside it, before any
+        # new row below is added: SQLAlchemy orders pending INSERTs ahead
+        # of UPDATEs, and the new row would otherwise meet the old one
+        # still live and trip the one-row-per-person-per-game index.
+        _off_the_court(db, existing, season)
 
     player = _get_or_create_player(db, season.club_id, payload.player_name)
     # The same rule the ordinary signup applies, and it was missing here.
@@ -275,7 +268,7 @@ def set_substitute(
         .filter(
             DropInRow.player_id == player.id,
             DropInRow.game_id == game.id,
-            DropInRow.cancelled_at.is_(None),
+            DropInRow.playing(),
         )
         .first()
     )
@@ -285,42 +278,39 @@ def set_substitute(
             "That player is already signed up for this game",
         )
 
-    # A queued person named as the substitute leaves the queue: they are
-    # on the court now. Without this they appeared in both lists at once,
-    # counted once and waiting once — reported from real use. The place
-    # they gave up is remembered on the signup, so cancelling the
-    # arrangement can hand it back rather than deleting them.
+    # A queued person named as the substitute leaves the queue: their own
+    # row moves onto the court, keeping when they queued — so cancelling
+    # the arrangement can hand that place back — and who signed them up.
     queued = (
-        db.query(WaitlistEntryRow)
+        db.query(DropInRow)
         .filter(
-            WaitlistEntryRow.player_id == player.id,
-            WaitlistEntryRow.game_id == game.id,
+            DropInRow.player_id == player.id,
+            DropInRow.game_id == game.id,
+            DropInRow.queued(),
         )
         .first()
     )
-    came_from_queue_at = queued.queued_at if queued is not None else None
-    # Who put them on the list: whoever queued them, if they were waiting
-    # already; otherwise whoever is naming them now. Never the absent
-    # member as such — see DropInRow.brought_by_player_id.
-    if queued is not None:
-        brought_by = queued.brought_by_player_id
-    else:
-        brought_by = None if player.id == current_player.id else current_player.id
-    if queued is not None:
-        db.delete(queued)
-        db.flush()
 
     displaced_player_id = _make_room_for_substitute(db, game, season)
 
-    drop_in = DropInRow(
-        player_id=player.id,
-        game_id=game.id,
-        signed_up_at=_now(),
-        covers_absence_id=absence_id,
-        from_waitlist_at=came_from_queue_at,
-        brought_by_player_id=brought_by,
-    )
-    db.add(drop_in)
+    if queued is not None:
+        drop_in = queued
+        drop_in.status = PLAYING
+        drop_in.signed_up_at = _now()
+        drop_in.covers_absence_id = absence_id
+    else:
+        # Who put them on the list: whoever is naming them now. Never the
+        # absent member as such — see DropInRow.brought_by_player_id.
+        drop_in = DropInRow(
+            player_id=player.id,
+            game_id=game.id,
+            signed_up_at=_now(),
+            covers_absence_id=absence_id,
+            brought_by_player_id=(
+                None if player.id == current_player.id else current_player.id
+            ),
+        )
+        db.add(drop_in)
     _record_drop_in_charge(db, drop_in, season, reverse=False)
     db.commit()
     db.refresh(drop_in)
@@ -381,13 +371,14 @@ def sign_up(
             status="confirmed", id=drop_in.id, player_id=player.id, game_id=game.id
         )
 
-    entry = WaitlistEntryRow(
+    now = _now()
+    entry = DropInRow(
         player_id=player.id,
         game_id=game.id,
-        queued_at=_now(),
-        brought_by_player_id=None
-        if player.id == current_player.id
-        else current_player.id,
+        signed_up_at=now,
+        queued_at=now,
+        status=QUEUED,
+        brought_by_player_id=brought_by,
     )
     db.add(entry)
     db.commit()
@@ -500,10 +491,13 @@ def _sign_up_each(
                 )
             )
         else:
-            wait = WaitlistEntryRow(
+            now = _now()
+            wait = DropInRow(
                 player_id=player.id,
                 game_id=game.id,
-                queued_at=_now(),
+                signed_up_at=now,
+                queued_at=now,
+                status=QUEUED,
                 brought_by_player_id=brought_by,
             )
             db.add(wait)
@@ -534,12 +528,12 @@ def leave_waitlist(
     different person's confirmed signup. Queued people were stuck: they
     could not leave, and signing up again was refused as a duplicate.
 
-    Deleted rather than marked cancelled, unlike a drop-in: a queue
-    place carries no money and no history worth keeping, and the
-    position of everyone behind them is simply their `queued_at` order.
+    Marked cancelled, like any signup — it used to be deleted, when the
+    queue was a table of its own. No money moves: a queued signup was
+    never charged.
     """
-    entry = db.get(WaitlistEntryRow, entry_id)
-    if entry is None:
+    entry = db.get(DropInRow, entry_id)
+    if entry is None or entry.status != QUEUED or entry.cancelled_at is not None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, f"No waitlist entry with id {entry_id}"
         )
@@ -553,7 +547,7 @@ def leave_waitlist(
     _require_within_change_deadline(db, game, season, current_player)
 
     player_id = entry.player_id
-    db.delete(entry)
+    entry.cancelled_at = _now()
     db.commit()
     return WaitlistCancelOut(id=entry_id, player_id=player_id, game_id=game.id)
 
@@ -579,8 +573,8 @@ def promote_from_waitlist(
     in means naming who comes out, and both happen in this one
     transaction.
     """
-    entry = db.get(WaitlistEntryRow, entry_id)
-    if entry is None:
+    entry = db.get(DropInRow, entry_id)
+    if entry is None or entry.status != QUEUED or entry.cancelled_at is not None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, f"No waitlist entry with id {entry_id}"
         )
@@ -595,7 +589,11 @@ def promote_from_waitlist(
     replaced_player_id: int | None = None
     if payload.replacing_drop_in_id is not None:
         replaced = db.get(DropInRow, payload.replacing_drop_in_id)
-        if replaced is None or replaced.game_id != game.id:
+        if (
+            replaced is None
+            or replaced.game_id != game.id
+            or replaced.status != PLAYING
+        ):
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND,
                 f"No drop-in with id {payload.replacing_drop_in_id} in this game",
@@ -603,22 +601,12 @@ def promote_from_waitlist(
         if replaced.cancelled_at is not None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Already cancelled")
         replaced_player_id = replaced.player_id
-        replaced.cancelled_at = _now()
-        _record_drop_in_charge(db, replaced, season, reverse=True)
         # Back into the queue, at the time they originally joined it.
         # They did not withdraw — the organizer picked somebody else —
         # so dropping them entirely would quietly delete a person who is
         # still waiting to play, and would make the screen's "X 回到候補"
         # a lie. Matches _make_room_for_substitute.
-        db.add(
-            WaitlistEntryRow(
-                player_id=replaced.player_id,
-                game_id=game.id,
-                queued_at=replaced.signed_up_at,
-                brought_by_player_id=replaced.brought_by_player_id,
-            )
-        )
-        db.flush()
+        _back_to_the_queue(db, replaced, season)
         # Deliberately not _promote_from_waitlist here: that is the rule
         # for a slot opening on its own, and this slot is already spoken
         # for. Running it would put the queue's first person in the seat
@@ -654,7 +642,9 @@ def cancel_drop_in(
     current_player: PlayerRow = Depends(get_current_player),
 ) -> DropInCancelOut:
     drop_in = db.get(DropInRow, drop_in_id)
-    if drop_in is None:
+    # A queued signup shares this table now, but is left through
+    # /waitlist/{id}/cancel; this route only ever took a place on court.
+    if drop_in is None or drop_in.status != PLAYING:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, f"No drop-in with id {drop_in_id}"
         )
@@ -668,8 +658,7 @@ def cancel_drop_in(
     _require_season_open(season)
     _require_within_change_deadline(db, game, season, current_player)
 
-    drop_in.cancelled_at = _now()
-    _record_drop_in_charge(db, drop_in, season, reverse=True)
+    taken_at = _now()
 
     # Cancelling an ordinary signup is a withdrawal, whoever is allowed
     # to press the button on that person's behalf. In particular, a guest
@@ -687,7 +676,10 @@ def cancel_drop_in(
         drop_in.covers_absence_id is not None and current_player.id != drop_in.player_id
     )
     if returning_arranged_substitute:
-        _give_back_queue_place(db, drop_in)
+        _off_the_court(db, drop_in, season)
+    else:
+        drop_in.cancelled_at = taken_at
+        _record_drop_in_charge(db, drop_in, season, reverse=True)
 
     promoted = _promote_from_waitlist(db, drop_in.game_id)
 
@@ -700,6 +692,8 @@ def cancel_drop_in(
 
     return DropInCancelOut(
         id=drop_in.id,
-        cancelled_at=drop_in.cancelled_at,
+        # When their place on court ended — the row itself may be back in
+        # the queue rather than cancelled, if they came from it.
+        cancelled_at=drop_in.cancelled_at or taken_at,
         promoted_from_waitlist=promoted,
     )

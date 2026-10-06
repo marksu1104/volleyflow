@@ -33,7 +33,6 @@ from volleyflow.db.models import (
     PlayerRow,
     SeasonMemberRow,
     SeasonRow,
-    WaitlistEntryRow,
 )
 from volleyflow.notify.line_client import push_to_user
 from volleyflow.schedule import GameStatus, change_deadline
@@ -122,12 +121,12 @@ def _roster(session: Session, game: GameRow, season: SeasonRow) -> _Roster:
     drop_in_ids = [
         player_id
         for (player_id,) in session.query(DropInRow.player_id).filter(
-            DropInRow.game_id == game.id, DropInRow.cancelled_at.is_(None)
+            DropInRow.game_id == game.id, DropInRow.playing()
         )
     ]
     queued = (
-        session.query(func.count(WaitlistEntryRow.id))
-        .filter(WaitlistEntryRow.game_id == game.id)
+        session.query(func.count(DropInRow.id))
+        .filter(DropInRow.game_id == game.id, DropInRow.queued())
         .scalar()
     )
     return _Roster(
@@ -251,8 +250,8 @@ def send_deadline_notices(session: Session, now: datetime) -> int:
             (game.id, player_id)
             for (player_id,) in session.query(DropInRow.player_id).filter(
                 DropInRow.game_id == game.id,
-                DropInRow.cancelled_at.is_(None),
-                DropInRow.from_waitlist_at.is_not(None),
+                DropInRow.playing(),
+                DropInRow.queued_at.is_not(None),
             )
         ]
         notify_promoted_from_waitlist(session, promoted)
@@ -354,7 +353,7 @@ def notify_promoted_from_waitlist(
             .filter(
                 DropInRow.game_id == game_id,
                 DropInRow.player_id == player_id,
-                DropInRow.cancelled_at.is_(None),
+                DropInRow.playing(),
             )
             .first()
         )
@@ -396,7 +395,7 @@ def notify_game_cancelled(session: Session, game: GameRow) -> int:
         bringer_id
         for (bringer_id,) in session.query(DropInRow.brought_by_player_id).filter(
             DropInRow.game_id == game.id,
-            DropInRow.cancelled_at.is_(None),
+            DropInRow.playing(),
             DropInRow.brought_by_player_id.is_not(None),
         )
     ]

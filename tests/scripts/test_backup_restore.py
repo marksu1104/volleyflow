@@ -37,7 +37,6 @@ from volleyflow.db.models import (
     ProblemReportRow,
     SeasonMemberRow,
     SeasonRow,
-    WaitlistEntryRow,
 )
 from volleyflow.ledger import EntryType
 from volleyflow.schedule import GameStatus
@@ -365,10 +364,12 @@ def test_every_table_survives_a_round_trip_including_binary_data(
     with Session(_use_sqlite) as session:
         _seed(session)
         session.add(
-            DropInRow(player_id=1, game_id=1, signed_up_at=datetime(2026, 8, 1))
-        )
-        session.add(
-            WaitlistEntryRow(player_id=1, game_id=1, queued_at=datetime(2026, 8, 2))
+            DropInRow(
+                player_id=1,
+                game_id=1,
+                signed_up_at=datetime(2026, 8, 1),
+                queued_at=datetime(2026, 7, 30),
+            )
         )
         session.add(
             ProblemReportRow(
@@ -396,3 +397,55 @@ def test_every_table_survives_a_round_trip_including_binary_data(
         report = session.get(ProblemReportRow, "shot")
         assert report is not None
         assert report.image == screenshot, "the picture comes back byte for byte"
+
+
+def test_a_dump_from_before_the_queue_joined_drop_ins_keeps_the_queue(
+    _use_sqlite: Engine, tmp_path: Path
+) -> None:
+    """A backup taken before 2026-10-07 has `waitlist_entries` and a
+    drop-in's `from_waitlist_at`. Restoring follows today's tables, so
+    without translating the old shape every queued person would be
+    skipped — lost by the script whose job is to lose nothing."""
+    with Session(_use_sqlite) as session:
+        _seed(session)
+    dump_path = tmp_path / "old.json"
+    backup_db.dump(dump_path)
+    data = json.loads(dump_path.read_text(encoding="utf-8"))
+    data["drop_ins"] = [
+        {
+            "id": 7,
+            "player_id": 1,
+            "game_id": 1,
+            "signed_up_at": {"__datetime__": "2026-08-10T10:00:00"},
+            "cancelled_at": None,
+            "from_waitlist_at": {"__datetime__": "2026-08-09T10:00:00"},
+            "absorbed_at": None,
+            "covers_absence_id": None,
+            "brought_by_player_id": None,
+            "charged_amount": None,
+        }
+    ]
+    data["waitlist_entries"] = [
+        {
+            "id": 3,
+            "player_id": 2,
+            "game_id": 2,
+            "queued_at": {"__datetime__": "2026-08-11T09:00:00"},
+            "brought_by_player_id": 1,
+        }
+    ]
+    dump_path.write_text(json.dumps(data), encoding="utf-8")
+
+    restore_db.restore(dump_path)
+
+    with Session(_use_sqlite) as session:
+        rows = {r.player_id: r for r in session.query(DropInRow).all()}
+        assert rows[1].status == "playing"
+        assert rows[1].queued_at == datetime(2026, 8, 9, 10)
+        queued = rows[2]
+        assert (queued.status, queued.game_id, queued.brought_by_player_id) == (
+            "queued",
+            2,
+            1,
+        )
+        assert queued.queued_at == datetime(2026, 8, 11, 9)

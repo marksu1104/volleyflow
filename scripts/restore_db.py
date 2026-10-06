@@ -100,10 +100,48 @@ def _defer_self_references(table: Any, rows: list[dict[str, Any]]) -> list[Any]:
     return updates
 
 
+def _from_before_one_signup_table(data: dict[str, list[dict[str, Any]]]) -> None:
+    """Reads a dump taken before 2026-10-07, when the queue was a table of
+    its own, into today's shape: each queued row becomes a queued signup
+    in drop_ins, and a drop-in's `from_waitlist_at` is its `queued_at`.
+
+    Restoring goes table by table from today's models, so without this
+    an older dump would restore every table it still recognises and
+    silently skip `waitlist_entries` — everybody who was waiting, gone,
+    from the one script whose job is to lose nothing. In place.
+    """
+    queue = data.pop("waitlist_entries", None)
+    drop_ins = data.setdefault("drop_ins", [])
+    for row in drop_ins:
+        if "from_waitlist_at" in row:
+            row["queued_at"] = row.pop("from_waitlist_at")
+        row.setdefault("status", "playing")
+    if not queue:
+        return
+    next_id = max((row["id"] for row in drop_ins), default=0) + 1
+    for i, row in enumerate(queue):
+        drop_ins.append(
+            {
+                "id": next_id + i,
+                "player_id": row["player_id"],
+                "game_id": row["game_id"],
+                "signed_up_at": row["queued_at"],
+                "cancelled_at": None,
+                "status": "queued",
+                "queued_at": row["queued_at"],
+                "absorbed_at": None,
+                "covers_absence_id": None,
+                "brought_by_player_id": row.get("brought_by_player_id"),
+                "charged_amount": None,
+            }
+        )
+
+
 def restore(dump_path: Path) -> None:
     data: dict[str, list[dict[str, Any]]] = json.loads(
         dump_path.read_text(encoding="utf-8"), object_hook=_json_object_hook
     )
+    _from_before_one_signup_table(data)
 
     engine = get_engine()
     with engine.begin() as conn:

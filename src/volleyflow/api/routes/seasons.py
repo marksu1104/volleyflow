@@ -85,7 +85,6 @@ from volleyflow.db.models import (
     PlayerRow,
     SeasonMemberRow,
     SeasonRow,
-    WaitlistEntryRow,
 )
 from volleyflow.ledger import EntryType
 from volleyflow.notify.reminders import (
@@ -511,7 +510,7 @@ def add_member(
             for (game_id,) in db.query(DropInRow.game_id).filter(
                 DropInRow.player_id == player.id,
                 DropInRow.game_id.in_(full_game_ids),
-                DropInRow.cancelled_at.is_(None),
+                DropInRow.playing(),
             )
         }
         if full_game_ids
@@ -836,7 +835,7 @@ def get_season(
         db.query(DropInRow, PlayerRow, Bringer.name)
         .join(PlayerRow, DropInRow.player_id == PlayerRow.id)
         .outerjoin(Bringer, Bringer.id == DropInRow.brought_by_player_id)
-        .filter(DropInRow.game_id.in_(game_ids), DropInRow.cancelled_at.is_(None))
+        .filter(DropInRow.game_id.in_(game_ids), DropInRow.playing())
         .order_by(DropInRow.signed_up_at)
         .all()
     ):
@@ -855,11 +854,11 @@ def get_season(
     waitlist_by_game: dict[int, list[DropInSummary]] = defaultdict(list)
     # outerjoin for the same reason as the drop-ins above.
     for entry, player, queuer_name in (
-        db.query(WaitlistEntryRow, PlayerRow, Bringer.name)
-        .join(PlayerRow, WaitlistEntryRow.player_id == PlayerRow.id)
-        .outerjoin(Bringer, Bringer.id == WaitlistEntryRow.brought_by_player_id)
-        .filter(WaitlistEntryRow.game_id.in_(game_ids))
-        .order_by(WaitlistEntryRow.queued_at)
+        db.query(DropInRow, PlayerRow, Bringer.name)
+        .join(PlayerRow, DropInRow.player_id == PlayerRow.id)
+        .outerjoin(Bringer, Bringer.id == DropInRow.brought_by_player_id)
+        .filter(DropInRow.game_id.in_(game_ids), DropInRow.queued())
+        .order_by(DropInRow.queued_at, DropInRow.id)
         .all()
     ):
         waitlist_by_game[entry.game_id].append(

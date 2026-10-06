@@ -7,6 +7,7 @@ the one direction it's allowed to go: db row -> domain object.
 
 from volleyflow.attendance import Absence, DropIn
 from volleyflow.db.models import (
+    PLAYING,
     AbsenceRow,
     DropInRow,
     GameRow,
@@ -63,6 +64,15 @@ def drop_in_from_row(
     games_by_id: dict[int, Game],
     absences_by_id: dict[int, Absence],
 ) -> DropIn:
+    """A signup on court, as the billing engine sees it.
+
+    Refuses a queued one. Somebody waiting is not on court: they cover no
+    absence and owe no share, and the engine has no way to tell them apart
+    once converted — a query that forgot to leave the queue out would
+    quietly refund an absence nobody filled. Better it fails here.
+    """
+    if row.status != PLAYING:
+        raise ValueError(f"Drop-in {row.id} is queued, not on court")
     return DropIn(
         player=players_by_id[row.player_id],
         game=games_by_id[row.game_id],

@@ -50,6 +50,7 @@ from volleyflow.api.schemas import (
     PlayerMerge,
 )
 from volleyflow.db.models import (
+    QUEUED,
     AbsenceRow,
     ClubMemberRow,
     ClubRow,
@@ -59,7 +60,6 @@ from volleyflow.db.models import (
     PlayerRow,
     SeasonMemberRow,
     SeasonRow,
-    WaitlistEntryRow,
 )
 
 router = APIRouter()
@@ -606,9 +606,11 @@ def link_player(
     db.query(DropInRow).filter(DropInRow.brought_by_player_id == source.id).update(
         {DropInRow.brought_by_player_id: target.id}, synchronize_session=False
     )
-    db.query(WaitlistEntryRow).filter(WaitlistEntryRow.player_id == source.id).delete(
-        synchronize_session=False
-    )
+    # Places they held in a queue carry no money, so they go rather than
+    # block the link; anything on court was charged and was refused above.
+    db.query(DropInRow).filter(
+        DropInRow.player_id == source.id, DropInRow.status == QUEUED
+    ).delete(synchronize_session=False)
     db.query(ClubMemberRow).filter(ClubMemberRow.player_id == source.id).delete(
         synchronize_session=False
     )
@@ -641,6 +643,8 @@ def _games_touched(
         game_id
         for (game_id,) in db.query(GameRow.id).filter(GameRow.season_id.in_(rostered))
     }
+    # A live signup in either list: on court or queued, it is a game they
+    # are down for.
     for table in (AbsenceRow, DropInRow):
         touched |= {
             game_id
@@ -650,13 +654,6 @@ def _games_touched(
                 table.game_id.in_(game_ids),
             )
         }
-    touched |= {
-        game_id
-        for (game_id,) in db.query(WaitlistEntryRow.game_id).filter(
-            WaitlistEntryRow.player_id == player_id,
-            WaitlistEntryRow.game_id.in_(game_ids),
-        )
-    }
     return touched
 
 
@@ -715,16 +712,6 @@ def merge_players(
         (AbsenceRow, AbsenceRow.player_id, AbsenceRow.game_id.in_(game_ids)),
         (DropInRow, DropInRow.player_id, DropInRow.game_id.in_(game_ids)),
         (DropInRow, DropInRow.brought_by_player_id, DropInRow.game_id.in_(game_ids)),
-        (
-            WaitlistEntryRow,
-            WaitlistEntryRow.player_id,
-            WaitlistEntryRow.game_id.in_(game_ids),
-        ),
-        (
-            WaitlistEntryRow,
-            WaitlistEntryRow.brought_by_player_id,
-            WaitlistEntryRow.game_id.in_(game_ids),
-        ),
         (LedgerEntryRow, LedgerEntryRow.player_id, LedgerEntryRow.club_id == club_id),
     ]
     for table, column, in_this_club in moves:

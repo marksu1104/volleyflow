@@ -32,6 +32,8 @@ from volleyflow.api.routes._people import (
     _today_in_taiwan,
 )
 from volleyflow.db.models import (
+    PLAYING,
+    QUEUED,
     AbsenceRow,
     ClubMemberRow,
     DropInRow,
@@ -40,7 +42,6 @@ from volleyflow.db.models import (
     PlayerRow,
     SeasonMemberRow,
     SeasonRow,
-    WaitlistEntryRow,
 )
 from volleyflow.ledger import EntryType
 from volleyflow.schedule import GameStatus, change_deadline
@@ -58,7 +59,7 @@ def _reject_if_already_playing(
     apart on what counts as a duplicate — the batch route in particular
     must reject the whole group rather than let one bad entry through.
     """
-    already_signed_up = (
+    live = (
         db.query(DropInRow)
         .filter(
             DropInRow.player_id == player.id,
@@ -67,20 +68,12 @@ def _reject_if_already_playing(
         )
         .first()
     )
-    if already_signed_up is not None:
+    if live is not None and live.status == PLAYING:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             f"{player.name} is already signed up for this game",
         )
-    already_waitlisted = (
-        db.query(WaitlistEntryRow)
-        .filter(
-            WaitlistEntryRow.player_id == player.id,
-            WaitlistEntryRow.game_id == game.id,
-        )
-        .first()
-    )
-    if already_waitlisted is not None:
+    if live is not None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             f"{player.name} is already on the waitlist for this game",
@@ -179,7 +172,7 @@ def _expected_on_court(db: Session, game: GameRow, season: SeasonRow) -> int:
     )
     active_drop_ins = (
         db.query(DropInRow)
-        .filter(DropInRow.game_id == game.id, DropInRow.cancelled_at.is_(None))
+        .filter(DropInRow.game_id == game.id, DropInRow.playing())
         .count()
     )
     return (member_count - absences) + active_drop_ins
@@ -196,7 +189,7 @@ def _is_signed_up(db: Session, game: GameRow, player_id: int) -> bool:
         .filter(
             DropInRow.game_id == game.id,
             DropInRow.player_id == player_id,
-            DropInRow.cancelled_at.is_(None),
+            DropInRow.playing(),
         )
         .first()
     ) is not None
@@ -259,10 +252,7 @@ def _games_with_no_room(
     }
     drop_in_counts = (
         db.query(DropInRow.game_id, func.count(DropInRow.id))
-        .filter(
-            DropInRow.game_id.in_(game_ids),
-            DropInRow.cancelled_at.is_(None),
-        )
+        .filter(DropInRow.game_id.in_(game_ids), DropInRow.playing())
         .group_by(DropInRow.game_id)
         .all()
     )
@@ -356,7 +346,14 @@ def _is_absence_covered(db: Session, absence_row: AbsenceRow) -> bool:
     game = game_from_row(game_row)
 
     absence_rows = db.query(AbsenceRow).filter(AbsenceRow.game_id == game_row.id).all()
-    drop_in_rows = db.query(DropInRow).filter(DropInRow.game_id == game_row.id).all()
+    # Never the queue: somebody waiting covers nobody. drop_in_from_row
+    # refuses a queued row outright, so a query that forgot this fails
+    # loudly instead of refunding an absence nobody filled.
+    drop_in_rows = (
+        db.query(DropInRow)
+        .filter(DropInRow.game_id == game_row.id, DropInRow.status == PLAYING)
+        .all()
+    )
     player_ids = {a.player_id for a in absence_rows} | {
         d.player_id for d in drop_in_rows
     }
@@ -377,15 +374,31 @@ def _is_absence_covered(db: Session, absence_row: AbsenceRow) -> bool:
     return absences_by_id[absence_row.id] in covered
 
 
-def _give_back_queue_place(db: Session, drop_in: DropInRow) -> None:
-    """Returns a signup's queue place, when it had one.
+def _back_to_the_queue(db: Session, drop_in: DropInRow, season: SeasonRow) -> None:
+    """Moves somebody off the court and back into the queue, at the place
+    they hold there — the time they first joined it, or when they signed
+    up if they never queued. Their fee comes off, and any 代打 arrangement
+    goes: in the queue they cover nobody.
+
+    One row changing state, not a row cancelled here and copied there.
+    Every field — who brought them above all — is simply still on it.
+    """
+    _record_drop_in_charge(db, drop_in, season, reverse=True)
+    drop_in.queued_at = drop_in.queued_at or drop_in.signed_up_at
+    drop_in.status = QUEUED
+    drop_in.covers_absence_id = None
+    db.flush()
+
+
+def _off_the_court(db: Session, drop_in: DropInRow, season: SeasonRow) -> None:
+    """Takes a place off somebody, by anybody but themselves.
 
     A place in the queue is given up, not lost: somebody who left it to
-    take a slot is owed it back at the position they held, if the slot is
-    taken off them by anybody but themselves. Somebody who was never
-    waiting — typed in by name, or signed straight into an open slot —
-    has no place to give back, and must not be put into a queue they
-    never joined, or they reappear in the next open slot.
+    take a slot is owed it back at the position they held. Somebody who
+    was never waiting — typed in by name, or signed straight into an open
+    slot — has no place to give back and must not be put into a queue
+    they never joined, or they reappear in the next open slot; their
+    signup is cancelled instead.
 
     One function because the rule has to hold in every path that takes a
     slot away: cancelling a substitute, replacing one with somebody else,
@@ -393,16 +406,11 @@ def _give_back_queue_place(db: Session, drop_in: DropInRow) -> None:
     it and silently deleted the person being replaced — reported from
     real use on 2026-09-11 as "候補會不見".
     """
-    if drop_in.from_waitlist_at is None:
+    if drop_in.queued_at is not None:
+        _back_to_the_queue(db, drop_in, season)
         return
-    db.add(
-        WaitlistEntryRow(
-            player_id=drop_in.player_id,
-            game_id=drop_in.game_id,
-            queued_at=drop_in.from_waitlist_at,
-            brought_by_player_id=drop_in.brought_by_player_id,
-        )
-    )
+    drop_in.cancelled_at = _now()
+    _record_drop_in_charge(db, drop_in, season, reverse=True)
     db.flush()
 
 
@@ -425,10 +433,7 @@ def _displace_latest_drop_in(
     """
     displaced = (
         db.query(DropInRow)
-        .filter(
-            DropInRow.game_id == game.id,
-            DropInRow.cancelled_at.is_(None),
-        )
+        .filter(DropInRow.game_id == game.id, DropInRow.playing())
         .order_by(DropInRow.signed_up_at.desc(), DropInRow.id.desc())
         .with_for_update()
         .first()
@@ -436,17 +441,7 @@ def _displace_latest_drop_in(
     if displaced is None:
         return None
 
-    displaced.cancelled_at = _now()
-    _record_drop_in_charge(db, displaced, season, reverse=True)
-    db.add(
-        WaitlistEntryRow(
-            player_id=displaced.player_id,
-            game_id=game.id,
-            queued_at=displaced.from_waitlist_at or displaced.signed_up_at,
-            brought_by_player_id=displaced.brought_by_player_id,
-        )
-    )
-    db.flush()
+    _back_to_the_queue(db, displaced, season)
     return int(displaced.player_id)
 
 
@@ -468,10 +463,7 @@ def _release_whoever_is_covering(
     """
     arranged = (
         db.query(DropInRow)
-        .filter(
-            DropInRow.covers_absence_id == absence.id,
-            DropInRow.cancelled_at.is_(None),
-        )
+        .filter(DropInRow.covers_absence_id == absence.id, DropInRow.playing())
         .first()
     )
     releasing = arranged
@@ -485,7 +477,7 @@ def _release_whoever_is_covering(
             db.query(DropInRow)
             .filter(
                 DropInRow.game_id == absence.game_id,
-                DropInRow.cancelled_at.is_(None),
+                DropInRow.playing(),
                 DropInRow.covers_absence_id.is_(None),
             )
             .order_by(DropInRow.signed_up_at.desc())
@@ -495,18 +487,8 @@ def _release_whoever_is_covering(
         return None
 
     released_player_id = int(releasing.player_id)
-    releasing.cancelled_at = _now()
-    _record_drop_in_charge(db, releasing, season, reverse=True)
-    db.add(
-        WaitlistEntryRow(
-            player_id=releasing.player_id,
-            game_id=absence.game_id,
-            # The place they held, not the moment they were named a 代打.
-            queued_at=releasing.from_waitlist_at or releasing.signed_up_at,
-            brought_by_player_id=releasing.brought_by_player_id,
-        )
-    )
-    db.flush()
+    # The place they held, not the moment they were named a 代打.
+    _back_to_the_queue(db, releasing, season)
     return released_player_id
 
 
@@ -540,7 +522,7 @@ def _make_room_for_substitute(
         db.query(DropInRow)
         .filter(
             DropInRow.game_id == game.id,
-            DropInRow.cancelled_at.is_(None),
+            DropInRow.playing(),
             DropInRow.covers_absence_id.is_(None),
         )
         .order_by(DropInRow.signed_up_at.desc())
@@ -553,17 +535,7 @@ def _make_room_for_substitute(
             "personally arranged — cancel one of them first.",
         )
 
-    displaced.cancelled_at = _now()
-    _record_drop_in_charge(db, displaced, season, reverse=True)
-    db.add(
-        WaitlistEntryRow(
-            player_id=displaced.player_id,
-            game_id=game.id,
-            queued_at=displaced.from_waitlist_at or displaced.signed_up_at,
-            brought_by_player_id=displaced.brought_by_player_id,
-        )
-    )
-    db.flush()
+    _back_to_the_queue(db, displaced, season)
     return int(displaced.player_id)
 
 
@@ -596,7 +568,7 @@ def _require_may_cancel_drop_in(
     _require_organizer(db, season.club_id, current_player)
 
 
-def _promote_entry(db: Session, entry: WaitlistEntryRow) -> DropInRow:
+def _promote_entry(db: Session, entry: DropInRow) -> DropInRow:
     """Turn one queued person into a confirmed drop-in, charged exactly
     as a direct signup would be.
 
@@ -604,31 +576,22 @@ def _promote_entry(db: Session, entry: WaitlistEntryRow) -> DropInRow:
     one, so "what promoting somebody means" — including the ledger entry
     — is written once and cannot drift between the two.
     """
-    game_id = entry.game_id
-    # signed_up_at is when they joined the queue, not when the slot
-    # happened to open. It is what FIFO absence coverage orders by, and
-    # it is what a later bump reads to put them back in the queue where
-    # they were — stamping "now" instead sent somebody who had waited
-    # longest to the back of the line.
-    drop_in = DropInRow(
-        player_id=entry.player_id,
-        game_id=game_id,
-        signed_up_at=entry.queued_at,
-        # Where they were in the queue, kept so the place can be given
-        # back if this slot is taken off them again.
-        from_waitlist_at=entry.queued_at,
-        brought_by_player_id=entry.brought_by_player_id,
-    )
-    db.add(drop_in)
-    db.delete(entry)
+    # signed_up_at becomes when they joined the queue, not when the slot
+    # happened to open. It is what FIFO absence coverage orders by —
+    # stamping "now" instead sent somebody who had waited longest to the
+    # back of the line. queued_at stays, so the place can be given back
+    # if this slot is taken off them again.
+    assert entry.queued_at is not None
+    entry.signed_up_at = entry.queued_at
+    entry.status = PLAYING
 
-    game = db.get(GameRow, game_id)
+    game = db.get(GameRow, entry.game_id)
     assert game is not None
     season_row = db.get(SeasonRow, game.season_id)
     assert season_row is not None
-    _record_drop_in_charge(db, drop_in, season_row, reverse=False)
+    _record_drop_in_charge(db, entry, season_row, reverse=False)
 
-    return drop_in
+    return entry
 
 
 def _promote_from_waitlist(db: Session, game_id: int) -> int | None:
@@ -640,9 +603,9 @@ def _promote_from_waitlist(db: Session, game_id: int) -> int | None:
     organizer overrides it explicitly through promote_from_waitlist.
     """
     entry = (
-        db.query(WaitlistEntryRow)
-        .filter(WaitlistEntryRow.game_id == game_id)
-        .order_by(WaitlistEntryRow.queued_at)
+        db.query(DropInRow)
+        .filter(DropInRow.game_id == game_id, DropInRow.queued())
+        .order_by(DropInRow.queued_at, DropInRow.id)
         .first()
     )
     if entry is None:
@@ -690,7 +653,7 @@ def _offer_freed_slots_to_the_queue(
     # removals take the games in the same sequence and queue up behind
     # one another rather than deadlocking. SQLite ignores the clause;
     # only the postgres-marked tests exercise it.
-    queued_game_ids = db.query(WaitlistEntryRow.game_id)
+    queued_game_ids = db.query(DropInRow.game_id).filter(DropInRow.queued())
     games = (
         db.query(GameRow)
         .filter(
@@ -747,7 +710,7 @@ def _absorb_drop_ins_into_membership(
         .filter(
             DropInRow.player_id == player_id,
             DropInRow.game_id.in_(game_ids),
-            DropInRow.cancelled_at.is_(None),
+            DropInRow.playing(),
         )
         .all()
     )
@@ -790,16 +753,18 @@ def _absorb_drop_ins_into_membership(
         )
 
     # Waiting for a slot is equally moot once they're on the roster.
-    # Deleted rather than marked, and deliberately not restored if they
+    # Cancelled without the absorbed mark, so it is not restored if they
     # later come off the roster: a queue place carries no money and no
     # attendance, and putting somebody back into a queue that has moved
     # on since would be a guess. A drop-in is the opposite — a night
     # somebody really played and really owes for — which is why that one
     # is marked and does come back.
-    db.query(WaitlistEntryRow).filter(
-        WaitlistEntryRow.player_id == player_id,
-        WaitlistEntryRow.game_id.in_(game_ids),
-    ).delete(synchronize_session=False)
+    for queued in db.query(DropInRow).filter(
+        DropInRow.player_id == player_id,
+        DropInRow.game_id.in_(game_ids),
+        DropInRow.queued(),
+    ):
+        queued.cancelled_at = now
     db.flush()
 
 
@@ -919,7 +884,7 @@ def _restore_retired_absences(db: Session, season: SeasonRow, player_id: int) ->
         for (game_id,) in db.query(DropInRow.game_id).filter(
             DropInRow.player_id == player_id,
             DropInRow.game_id.in_(game_ids),
-            DropInRow.cancelled_at.is_(None),
+            DropInRow.playing(),
         )
     }
     absences = _retired_absences(db, season, player_id)
@@ -985,6 +950,8 @@ def _restore_absorbed_drop_ins(
     # and two marked rows for the same game left over from earlier
     # round trips. tests/visual/smoke.js hit the second on 2026-09-16 —
     # removing a member answered 500.
+    # Any live row, queued included: the database allows one per
+    # person per game, whichever list it is in.
     taken = {
         int(game_id)
         for (game_id,) in db.query(DropInRow.game_id).filter(
@@ -1028,9 +995,6 @@ def _delete_season_rows(db: Session, season: SeasonRow) -> None:
             .filter(AbsenceRow.game_id.in_(game_ids))
             .all()
         ]
-        db.query(WaitlistEntryRow).filter(
-            WaitlistEntryRow.game_id.in_(game_ids)
-        ).delete(synchronize_session=False)
         db.query(DropInRow).filter(DropInRow.game_id.in_(game_ids)).delete(
             synchronize_session=False
         )

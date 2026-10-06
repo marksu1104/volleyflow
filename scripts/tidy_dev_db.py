@@ -59,7 +59,6 @@ REFERENCES = [
     ("absences", "player_id"),
     ("drop_ins", "player_id"),
     ("drop_ins", "brought_by_player_id"),
-    ("waitlist_entries", "player_id"),
 ]
 
 UNREFERENCED = "SELECT id FROM players p WHERE " + " AND ".join(
@@ -99,7 +98,6 @@ def drop_club(conn: Connection, name: str) -> None:
         )
     ] or [0]
     for statement, params in [
-        ("DELETE FROM waitlist_entries WHERE game_id = ANY(:ids)", {"ids": games}),
         ("DELETE FROM drop_ins WHERE game_id = ANY(:ids)", {"ids": games}),
         ("DELETE FROM absences WHERE game_id = ANY(:ids)", {"ids": games}),
         ("DELETE FROM games WHERE season_id = ANY(:ids)", {"ids": seasons or [0]}),

@@ -224,7 +224,7 @@ def _who_brought(db: Session, club_id: int) -> dict[int, str]:
         .join(Bringer, Bringer.id == DropInRow.brought_by_player_id)
         .join(GameRow, GameRow.id == DropInRow.game_id)
         .join(SeasonRow, SeasonRow.id == GameRow.season_id)
-        .filter(SeasonRow.club_id == club_id, DropInRow.cancelled_at.is_(None))
+        .filter(SeasonRow.club_id == club_id, DropInRow.playing())
         .distinct()
         .all()
     )

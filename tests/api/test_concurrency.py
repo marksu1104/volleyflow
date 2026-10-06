@@ -28,8 +28,6 @@ _TEST_PLAYER_PREFIX = "ConcurrencyTest-"
 
 
 _PLAYER_CHILDREN = (
-    "DELETE FROM waitlist_entries"
-    " WHERE player_id = ANY(:ids) OR brought_by_player_id = ANY(:ids)",
     "DELETE FROM drop_ins"
     " WHERE player_id = ANY(:ids) OR brought_by_player_id = ANY(:ids)",
     "DELETE FROM absences WHERE player_id = ANY(:ids)",
@@ -39,10 +37,11 @@ _PLAYER_CHILDREN = (
 )
 """Every table that references players.id, children before parents.
 
-Taken from db/models.py rather than remembered: drop_ins and
-waitlist_entries each reference a player twice, once as the person and
-once as whoever brought them, and missing the second one leaves exactly
-the orphan this cleanup exists to prevent.
+Taken from db/models.py rather than remembered: drop_ins references a
+player twice, once as the person and once as whoever brought them, and
+missing the second one leaves exactly the orphan this cleanup exists to
+prevent. (The queue lived in a table of its own until 2026-10-07 and
+had the same two references; it is part of drop_ins now.)
 """
 
 
@@ -74,7 +73,7 @@ def _cleanup(club_id: int, season_id: int) -> None:
             ).all()
         ]
         if game_ids:
-            for table in ("waitlist_entries", "drop_ins", "absences"):
+            for table in ("drop_ins", "absences"):
                 db.execute(
                     text(f"DELETE FROM {table} WHERE game_id = ANY(:ids)"),
                     {"ids": game_ids},

@@ -32,6 +32,7 @@ from volleyflow.api.schemas import (
 )
 from volleyflow.attendance import Absence, DropIn
 from volleyflow.db.models import (
+    PLAYING,
     AbsenceRow,
     DropInRow,
     GameRow,
@@ -384,7 +385,12 @@ def _load_season_facts(db: Session, season_id: int) -> _SeasonFacts:
         .all()
     )
     absence_rows = db.query(AbsenceRow).filter(AbsenceRow.game_id.in_(game_ids)).all()
-    drop_in_rows = db.query(DropInRow).filter(DropInRow.game_id.in_(game_ids)).all()
+    # Never the queue — see drop_in_from_row, which refuses a queued row.
+    drop_in_rows = (
+        db.query(DropInRow)
+        .filter(DropInRow.game_id.in_(game_ids), DropInRow.status == PLAYING)
+        .all()
+    )
 
     player_ids = {p.id for p in member_rows}
     player_ids.update(a.player_id for a in absence_rows)

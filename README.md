@@ -171,9 +171,23 @@ to the queue, the roster named a person who had never signed them up.
 The first fix added a column to remember the original; the better one
 removed that column again and stopped the overwrite. The guest's fee is
 on the guest's own ledger, the person who signed them up is whom the
-organizer asks, and that never changes. The real cause underneath —
-playing and waiting kept as two tables, with five paths copying a row
-between them — is on the list as its own refactor.
+organizer asks, and that never changes.
+
+**Playing and waiting are one table.** The deeper cause under that bug:
+the court and the queue were two tables, and moving somebody between
+them deleted a row in one and copied its fields into a new row in the
+other — along five separate paths. Two real bugs were a field one path
+forgot: a queued person vanishing outright, and the wrong bringer. Now a
+signup has a `status`, and a move changes that one column; there is
+nothing left to forget to carry over. The risk runs the other way —
+any query that counts who is on court must leave the queue out — so
+every such query goes through one shared condition, and the conversion
+into the billing engine refuses a queued row outright, which turns a
+forgotten filter into a loud failure instead of a refunded absence
+nobody filled. The data migration refuses to guess if anybody is on
+court and queued at once, was rehearsed up and back down on a copy of
+the database with every field compared, and the restore script reads
+backups from before the change into the new shape.
 
 **A message that can't be taken back is claimed before it is sent.** The
 deadline notices run from a job every ten minutes, and the fee notice
@@ -474,7 +488,7 @@ src/volleyflow/
 ├── ledger.py        the append-only money history and its balance
 ├── schedule.py      Season and Game
 ├── players.py       Player and Membership
-├── attendance.py    Absence, DropIn, WaitlistEntry
+├── attendance.py    Absence, DropIn, WaitlistEntry (queued DropIns in the database)
 ├── api/             FastAPI: request/response schemas, LINE auth, the
 │   │                invite-token module, crash reporting
 │   └── routes/      one module per resource, over three helper layers
@@ -512,11 +526,5 @@ quietly change what someone is charged.
 
 ## What's left
 
-- **One signup table instead of two.** Playing and waiting live in
-  separate tables, and moving somebody between them copies a row along
-  one of five paths; two real bugs have been a field one path forgot. A
-  single table with a status would make a move change one column. It
-  touches signup, the queue, substitutes and refunds together, so it is
-  a stage of its own.
 - **A production restore drill.** The backup script has been rehearsed
   against the dev branch, not production.
