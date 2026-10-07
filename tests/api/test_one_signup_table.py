@@ -113,3 +113,35 @@ def test_the_billing_engine_refuses_a_queued_signup() -> None:
 
     with pytest.raises(ValueError, match="queued"):
         drop_in_from_row(row, {}, {}, {})
+
+
+def test_the_roster_carries_each_line_users_picture(client: TestClient) -> None:
+    # Shown in place of their initial (2026-10-07); nobody without LINE
+    # has one.
+    season = start_season(
+        client, member_names=["固定甲"], capacity=2, game_dates=["2031-01-07"]
+    )
+    game_id = season["games"][0]["id"]
+    pic = client.post(
+        "/players/identify",
+        json={
+            "id_token": "token-pic",
+            "display_name": "有頭貼",
+            "picture_url": "https://profile.line-scdn.net/pic",
+        },
+    ).json()
+    join_club(client, season["club_id"], auth_headers("token-pic"))
+    client.post(
+        "/drop-ins",
+        json={"player_name": "有頭貼", "game_id": game_id},
+        headers=auth_headers("token-pic"),
+    )
+    client.post("/drop-ins", json={"player_name": "沒帳號", "game_id": game_id})
+
+    game = client.get(f"/seasons/{season['id']}").json()["games"][0]
+
+    assert pic["avatar_url"] == "https://profile.line-scdn.net/pic"
+    on_court = {d["player_name"]: d["avatar_url"] for d in game["confirmed_drop_ins"]}
+    queued = {w["player_name"]: w["avatar_url"] for w in game["waitlist_entries"]}
+    assert on_court == {"有頭貼": "https://profile.line-scdn.net/pic"}
+    assert queued == {"沒帳號": None}

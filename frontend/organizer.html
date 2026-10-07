@@ -99,7 +99,7 @@
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
     if (identified) {
       myName = identified.name;
-      document.getElementById("avatar-btn").textContent = identified.name.slice(0, 1);
+      paintSelfAvatar(document.getElementById("avatar-btn"), identified);
     }
     return identified;
   })();

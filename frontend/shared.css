@@ -322,6 +322,15 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 }
 .avatar.sm { width: 24px; height: 24px; font-size: .66rem; }
 .avatar.lg { width: 52px; height: 52px; font-size: 1.1rem; }
+/* A LINE profile picture, laid over the initial rather than replacing
+   it: same box, so nothing moves when it arrives, and if it fails to
+   load the <img> removes itself and the initial underneath is already
+   there. See avatarHtml in shared.js. */
+.avatar.has-photo { position: relative; overflow: hidden; }
+.avatar.has-photo img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; border-radius: 50%; background: var(--accent-soft);
+}
 
 /* app-top bar: club chip + avatar, echoed on every page */
 .app-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }

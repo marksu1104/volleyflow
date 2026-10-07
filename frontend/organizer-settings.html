@@ -465,7 +465,7 @@
   const identityReady = (async function initIdentity() {
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
     if (identified) {
-      document.getElementById("avatar-btn").textContent = identified.name.slice(0, 1);
+      paintSelfAvatar(document.getElementById("avatar-btn"), identified);
     }
     return identified;
   })();
@@ -857,7 +857,7 @@
             (m) => `
               <div class="pick-row${pickedIds.has(m.id) ? " on" : ""}" onclick="togglePick(${m.id})">
                 <i class="box">✓</i>
-                <span class="avatar sm">${escapeHtml((m.name || "?").slice(0, 1))}</span>
+                ${avatarHtml(m.name, m.avatar_url)}
                 <span class="pk-name">${escapeHtml(m.name)}</span>
                 ${m.linked === false ? '<span class="guest-tag">訪客</span>' : ""}
                 ${m.role === "organizer" ? '<span class="role-tag">管理員</span>' : ""}

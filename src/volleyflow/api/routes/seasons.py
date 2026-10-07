@@ -796,6 +796,10 @@ def get_season(
     # is no longer found through the bringer, which stays whoever put
     # the 代打 on the list.
     my_absence_ids: set[int] = set()
+    # Profile pictures by row, kept beside the tuples below rather than
+    # widening them: every unpacking of those would have to change too.
+    avatar_of_absence: dict[int, str | None] = {}
+    avatar_of_drop_in: dict[int, str | None] = {}
     for absence, player in (
         db.query(AbsenceRow, PlayerRow)
         .join(PlayerRow, AbsenceRow.player_id == PlayerRow.id)
@@ -816,6 +820,7 @@ def get_season(
         .all()
     ):
         absences_by_game[absence.game_id].append((absence.id, player.name))
+        avatar_of_absence[absence.id] = player.avatar_url
         if absence.player_id == current_player.id:
             my_absence_ids.add(absence.id)
 
@@ -839,6 +844,7 @@ def get_season(
         .order_by(DropInRow.signed_up_at)
         .all()
     ):
+        avatar_of_drop_in[drop_in.id] = player.avatar_url
         drop_ins_by_game[drop_in.game_id].append(
             (
                 drop_in.id,
@@ -871,6 +877,7 @@ def get_season(
                     or entry.brought_by_player_id == current_player.id
                 ),
                 brought_by_name=queuer_name,
+                avatar_url=player.avatar_url,
             )
         )
 
@@ -967,6 +974,7 @@ def get_season(
                         player_name=name,
                         covered_by=arranged_for_absence.get(name),
                         filled_by=filled_by.get(aid),
+                        avatar_url=avatar_of_absence.get(aid),
                     )
                     for aid, name in absences_list
                 ],
@@ -986,6 +994,7 @@ def get_season(
                             or covers in my_absence_ids
                         ),
                         brought_by_name=bringer_name,
+                        avatar_url=avatar_of_drop_in.get(drop_in_id),
                     )
                     for (
                         drop_in_id,

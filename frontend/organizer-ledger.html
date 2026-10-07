@@ -161,7 +161,7 @@
   const identityReady = (async function initIdentity() {
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
     if (identified) {
-      document.getElementById("avatar-btn").textContent = identified.name.slice(0, 1);
+      paintSelfAvatar(document.getElementById("avatar-btn"), identified);
     }
     return identified;
   })();
@@ -483,6 +483,20 @@
     };
   }
 
+  /** A player's LINE picture, from whichever list on this season names
+   * them — the roster, or a game they played as a drop-in. */
+  function avatarUrlOf(playerId) {
+    const season = currentSeason;
+    if (!season) return null;
+    const member = season.members.find((m) => m.id === playerId);
+    if (member) return member.avatar_url || null;
+    for (const game of season.games || []) {
+      const d = (game.confirmed_drop_ins || []).find((x) => x.player_id === playerId);
+      if (d) return d.avatar_url || null;
+    }
+    return null;
+  }
+
   function moneyRowHtml(playerId, name, gender, split, extraBreakLabel, extraBreakValue) {
     // The figure this row is about — see splitLedger. Every number and
     // every button below reads from it, so a season-scoped row can
@@ -545,7 +559,7 @@
     return `
       <div class="m-row">
         <div class="m-top">
-          <span class="avatar sm">${escapeHtml((name || "?").slice(0, 1))}</span>
+          ${avatarHtml(name, avatarUrlOf(playerId))}
           <span class="m-name">${escapeHtml(name)}${genderTag(gender)}${broughtTag}</span>
           <span class="m-net ${netCls}">${netText}</span>
           <button type="button" class="mini-action" onclick="openHistory(${playerId})">明細</button>
@@ -1074,7 +1088,7 @@
     return `
       <div class="m-row">
         <div class="m-top">
-          <span class="avatar sm">${escapeHtml((m.name || "?").slice(0, 1))}</span>
+          ${avatarHtml(m.name, avatarUrlOf(m.id))}
           <span class="m-name">${escapeHtml(m.name)}${genderTag(m.gender)}</span>
           <span class="m-net ${owed ? "owed" : "owe"}">${owed ? "應退" : "應收"} $${amount}</span>
         </div>

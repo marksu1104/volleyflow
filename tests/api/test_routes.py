@@ -365,6 +365,7 @@ def test_get_season_reflects_absences_signups_and_waitlist(
             "id": alice_absence["id"],
             "player_name": "Alice",
             "covered_by": None,
+            "avatar_url": None,
             "filled_by": "Bob",
         }
     ]
@@ -377,6 +378,7 @@ def test_get_season_reflects_absences_signups_and_waitlist(
             # The roster names whoever signed a guest up, since
             # 2026-09-23. Null when they signed themselves up, which is
             # most rows; here the organizer did it, so it is their name.
+            "avatar_url": None,
             "brought_by_name": "Test Organizer",
             # He is a 臨打, not anybody's 代打 — see the absence above.
             "covering": None,
@@ -391,6 +393,7 @@ def test_get_season_reflects_absences_signups_and_waitlist(
             "gender": None,
             # Queued by the organizer, who may take her back out.
             "signed_up_by_me": True,
+            "avatar_url": None,
             "brought_by_name": "Test Organizer",
         }
     ]
@@ -578,6 +581,7 @@ def test_set_substitute_replaces_an_existing_one(client: TestClient) -> None:
             "id": absence["id"],
             "player_name": "Alice",
             "covered_by": "Eve",
+            "avatar_url": None,
             "filled_by": "Eve",
         }
     ]
@@ -717,6 +721,7 @@ def test_cancelling_a_substitute_uncovers_the_absence_and_refunds_it(
             "id": absence["id"],
             "player_name": "Alice",
             "covered_by": None,
+            "avatar_url": None,
             "filled_by": None,
         }
     ]

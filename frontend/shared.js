@@ -18,6 +18,48 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+/** The first character a reader would see — one whole emoji, not half
+ * of one. `"🐱".slice(0, 1)` is a lone surrogate, which every circle
+ * showing a LINE name that starts with an emoji rendered as a broken
+ * box (2026-10-07). Grapheme-aware where the browser can be; otherwise
+ * by code point, which still keeps a single emoji in one piece. */
+function firstGrapheme(text) {
+  const value = String(text || "").trim();
+  if (!value) return "?";
+  try {
+    const segments = new Intl.Segmenter("zh-Hant", { granularity: "grapheme" }).segment(value);
+    const first = segments[Symbol.iterator]().next().value;
+    if (first) return first.segment;
+  } catch (e) {
+    // Intl.Segmenter missing — fall through.
+  }
+  return Array.from(value)[0];
+}
+
+/** Somebody's picture where they have a LINE one, their initial where
+ * they don't. The picture sits over the initial in the same circle, so
+ * the row never shifts when it loads, and a picture that fails removes
+ * itself and leaves the initial showing. Lazy, because a long roster is
+ * mostly off screen. */
+function avatarHtml(name, url, cls = "avatar sm") {
+  const letter = escapeHtml(firstGrapheme(name));
+  if (!url) return `<span class="${cls}">${letter}</span>`;
+  return (
+    `<span class="${cls} has-photo">${letter}` +
+    `<img src="${escapeHtml(url)}" alt="" loading="lazy" decoding="async" ` +
+    `referrerpolicy="no-referrer" onerror="this.remove()"></span>`
+  );
+}
+
+/** The circle in the top bar: the signed-in person's own picture. */
+function paintSelfAvatar(el, person) {
+  if (!el || !person) return;
+  el.classList.toggle("has-photo", !!person.avatar_url);
+  el.innerHTML = person.avatar_url
+    ? `${escapeHtml(firstGrapheme(person.name))}<img src="${escapeHtml(person.avatar_url)}" alt="" decoding="async" referrerpolicy="no-referrer" onerror="this.parentNode.classList.remove('has-photo'); this.remove()">`
+    : escapeHtml(firstGrapheme(person.name));
+}
+
 function dateKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -1288,7 +1330,7 @@ function renderPersonPicker(container, { title, candidates, hint }) {
         data-person-id="${c.id === null || c.id === undefined ? "" : c.id}"
         data-person-name="${escapeHtml(c.name)}"
         data-person-gender="${c.gender || ""}">
-        <i class="radio"></i><span class="avatar sm">${escapeHtml((c.name || "?").trim().slice(0, 1))}</span>
+        <i class="radio"></i>${avatarHtml(c.name, c.avatar_url)}
         <span class="pk-name">${escapeHtml(c.name)}</span>${genderTag(c.gender)}
         <span class="pk-note">${escapeHtml(c.note || "")}</span>
       </div>`
@@ -1429,7 +1471,7 @@ function renderGameDetail(container, season, game, options) {
   }
 
   function initial(name) {
-    return escapeHtml((name || "?").trim().slice(0, 1));
+    return escapeHtml(firstGrapheme(name));
   }
 
   /** Who this member may name as their 代打.
@@ -1473,7 +1515,7 @@ function renderGameDetail(container, season, game, options) {
       .map(
         (m) => `
           <div class="pick-row" data-pick="${absence.id}" data-pick-name="${escapeHtml(m.name)}" data-pick-gender="${m.gender || ""}">
-            <i class="radio"></i><span class="avatar sm">${initial(m.name)}</span>
+            <i class="radio"></i>${avatarHtml(m.name, m.avatar_url)}
             <span class="pk-name">${escapeHtml(m.name)}</span>${genderTag(m.gender)}
             <span class="pk-note">${escapeHtml(m.note)}</span>
           </div>`
@@ -1554,7 +1596,7 @@ function renderGameDetail(container, season, game, options) {
         changed ? ` just-changed roster-change-${changed}${changed === "pending" ? " roster-row-entering" : ""}` : ""
       }">
         <span class="att-num">${num}</span>
-        <span class="avatar sm">${initial(name)}</span>
+        ${avatarHtml(name, person && person.avatar_url)}
         <span class="att-name"><span class="att-who">${escapeHtml(name)}</span>${genderTag(
           person ? person.gender : null
         )}${guest ? guestTag(person) : ""}${note || ""}</span>
@@ -1714,7 +1756,7 @@ function renderGameDetail(container, season, game, options) {
             .map(
               (d) => `
             <div class="pick-row" data-swap-in="${entry.id}" data-swap-out="${d.id}">
-              <i class="radio"></i><span class="avatar sm">${initial(d.player_name)}</span>
+              <i class="radio"></i>${avatarHtml(d.player_name, d.avatar_url)}
               <span class="pk-name">${escapeHtml(d.player_name)}</span>${genderTag(d.gender)}
               ${d.covering ? `<span class="att-note sub">代 ${escapeHtml(d.covering)}</span>` : ""}
             </div>`

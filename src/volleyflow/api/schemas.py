@@ -548,6 +548,10 @@ class DropInSummary(BaseModel):
     gender: Gender | None = None
     signed_up_by_me: bool = False
     """Themselves, or a guest they queued — whether they may take it back."""
+    avatar_url: str | None = None
+    """Their LINE profile picture, refreshed each time they sign in; None
+    for anybody without a LINE account. Shown on the roster in place of
+    their initial — only to people in the same club, like the name."""
     brought_by_name: str | None = None
     """Who queued this person, when it wasn't themselves — the same tag
     the confirmed drop-ins carry (DropInDetailOut.brought_by_name)."""
@@ -563,6 +567,10 @@ class AbsenceDetailOut(BaseModel):
     match: that is a billing fact, not a person's arrangement, and
     presenting it as one told a member that a stranger who happened to
     sign up was "their" substitute. See `refunded`."""
+    avatar_url: str | None = None
+    """Their LINE profile picture, refreshed each time they sign in; None
+    for anybody without a LINE account. Shown on the roster in place of
+    their initial — only to people in the same club, like the name."""
     filled_by: str | None = None
     """Whoever is standing in this slot, by name — the arranged 代打 when
     there is one, otherwise whichever 臨打 the FIFO match landed on.
@@ -578,6 +586,10 @@ class DropInDetailOut(BaseModel):
     player_id: int
     player_name: str
     gender: Gender | None = None
+    avatar_url: str | None = None
+    """Their LINE profile picture, refreshed each time they sign in; None
+    for anybody without a LINE account. Shown on the roster in place of
+    their initial — only to people in the same club, like the name."""
     covering: str | None
     """The absent member this drop-in was personally named to stand in
     for — only for an explicit 代打. Somebody who signed themselves up is

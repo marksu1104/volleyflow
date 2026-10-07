@@ -195,7 +195,7 @@
   const identityReady = (async function initIdentity() {
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
     if (identified) {
-      document.getElementById("avatar-btn").textContent = identified.name.slice(0, 1);
+      paintSelfAvatar(document.getElementById("avatar-btn"), identified);
     }
     return identified;
   })();
@@ -414,7 +414,7 @@
     return `
       <div class="pool-row">
         <span class="pool-who">
-          <span class="avatar sm">${escapeHtml((person.name || "?").slice(0, 1))}</span>
+          ${avatarHtml(person.name, person.avatar_url)}
           <span>${escapeHtml(person.name)}${genderTag(person.gender)}</span>
         </span>
         <button type="button" class="mini-action" onclick="approveRequest(${person.id}, true, this)">固定</button>
@@ -559,7 +559,7 @@
         return `
           <div class="pool-row">
             <span class="pool-who">
-              <span class="avatar sm">${escapeHtml(g[0].name.slice(0, 1))}</span>
+              ${avatarHtml(g[0].name, g[0].avatar_url)}
               <span>${escapeHtml(g[0].name)} ×${g.length}</span>
             </span>
             ${action}
@@ -611,9 +611,7 @@
     return `
       <div class="pool-row${movingPlayerId === p.id ? " roster-row-entering" : ""}" data-player-id="${p.id}">
         <span class="pool-who">
-          ${p.avatar_url
-            ? `<img class="avatar sm" src="${escapeHtml(p.avatar_url)}" alt="">`
-            : `<span class="avatar sm">${escapeHtml((p.name || "?").slice(0, 1))}</span>`}
+          ${avatarHtml(p.name, p.avatar_url)}
           <span>${escapeHtml(p.name)}${genderTag(p.gender)}${guestTag(p)}</span>
         </span>
         ${controls}
@@ -888,7 +886,10 @@
                ${canEditRoster() ? `<button type="button" class="icon-btn remove" title="從本季固定名單移除" aria-label="從本季固定名單移除 ${escapeHtml(member.name)}" onclick="removeMember(${member.id})">−</button>` : ""}`;
           return `
           <div class="member-row${movingPlayerId === member.id ? " roster-row-entering" : ""}" data-player-id="${member.id}">
-            <span>${escapeHtml(member.name)}${genderTag(member.gender)}${guestTag(member)}</span>
+            <span class="pool-who">
+              ${avatarHtml(member.name, member.avatar_url)}
+              <span>${escapeHtml(member.name)}${genderTag(member.gender)}${guestTag(member)}</span>
+            </span>
             <span class="row-actions">
               ${actions}
             </span>

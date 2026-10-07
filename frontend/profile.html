@@ -152,7 +152,7 @@
   }
 
   function renderProfile() {
-    document.getElementById("avatar-lg").textContent = me.name.slice(0, 1);
+    paintSelfAvatar(document.getElementById("avatar-lg"), me);
     document.getElementById("prof-name").textContent = me.name;
     document.getElementById("name-input").value = me.name;
     for (const btn of document.querySelectorAll("#gender-pick [data-gender]")) {
@@ -219,7 +219,7 @@
     const balHtml = balanceBadgeHtml(club.balance);
     return `
       <div class="club-row display">
-        <i class="club-dot">${escapeHtml(club.name.slice(0, 1))}</i>
+        <i class="club-dot">${escapeHtml(firstGrapheme(club.name))}</i>
         <span class="cr-name">${escapeHtml(club.name)}</span>
         ${roleTag}${balHtml}
       </div>
