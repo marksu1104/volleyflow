@@ -32,6 +32,7 @@ from volleyflow.api.routes._people import (
     _require_organizer,
     _today_in_taiwan,
     get_current_player,
+    is_developer,
 )
 from volleyflow.api.schemas import (
     ClubCreate,
@@ -122,7 +123,18 @@ def list_clubs(
         .order_by(ClubRow.id)
         .all()
     )
-    return [ClubOut(id=c.id, name=c.name, role=role) for c, role in rows]
+    mine = [ClubOut(id=c.id, name=c.name, role=role) for c, role in rows]
+    if not is_developer(current_player):
+        return mine
+    # The developer may run any club (see _runs_club), so the management
+    # pages offer them all — the ones they don't belong to marked as such.
+    theirs = {club.id for club in mine}
+    others = [
+        ClubOut(id=c.id, name=c.name, role="organizer", developer_view=True)
+        for c in db.query(ClubRow).order_by(ClubRow.id)
+        if c.id not in theirs
+    ]
+    return mine + others
 
 
 @router.get("/clubs/{club_id}", response_model=ClubOut)

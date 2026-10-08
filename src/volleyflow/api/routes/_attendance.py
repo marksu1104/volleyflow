@@ -29,13 +29,13 @@ from volleyflow.api.routes._people import (
     _now,
     _now_in_taiwan,
     _require_organizer,
+    _runs_club,
     _today_in_taiwan,
 )
 from volleyflow.db.models import (
     PLAYING,
     QUEUED,
     AbsenceRow,
-    ClubMemberRow,
     DropInRow,
     GameRow,
     LedgerEntryRow,
@@ -323,10 +323,7 @@ def _require_within_change_deadline(
     """
     if _within_change_deadline(game, season):
         return
-    membership = db.get(
-        ClubMemberRow, {"club_id": season.club_id, "player_id": current_player.id}
-    )
-    if membership is not None and membership.role == "organizer":
+    if _runs_club(db, season.club_id, current_player):
         return
     raise HTTPException(
         status.HTTP_400_BAD_REQUEST,

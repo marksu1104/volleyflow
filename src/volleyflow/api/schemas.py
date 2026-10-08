@@ -66,6 +66,10 @@ class ClubGuestAdd(BaseModel):
 class ClubOut(BaseModel):
     id: int
     name: str
+    developer_view: bool = False
+    """True when the caller sees this club only because they are the
+    developer — the management pages say so, so nobody mistakes another
+    club's books for their own."""
     role: str | None = None
     """The caller's role in this club — "organizer" or "member".
 
@@ -803,6 +807,17 @@ class ProblemReportOut(BaseModel):
     """Fetched separately, with the developer's credentials — see
     routes/reports.problem_report_image."""
     read: bool
+
+
+class DeveloperClubOut(BaseModel):
+    id: int
+    name: str
+    organizers: list[str]
+    members: int
+    seasons: int
+    last_activity: datetime | None
+    """The latest ledger entry in the club — the closest thing to "when
+    was this club last used" that every club has."""
 
 
 class DeveloperOverviewOut(BaseModel):

@@ -218,14 +218,41 @@ def test_nobody_signed_in_can_touch_it_at_all(client: TestClient) -> None:
     assert _snapshot(client, a) == before
 
 
-def test_the_developer_gets_no_way_into_a_club(
+def test_the_developer_may_run_any_club(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Reading every club's problem reports is the developer's one extra
-    # power, and it must not quietly extend to the clubs themselves.
+    """Reversed on 2026-10-09. The developer used to get no way into a
+    club beyond its problem reports; the organizer then asked for a
+    back office that can see everything and step in when needed. So the
+    developer passes every organizer check (_runs_club) — and only the
+    developer: the one LINE id in DEVELOPER_LINE_USER_ID, never a role
+    anybody can be given through the app."""
     a = _club_a(client)
     dev = identify(client, "Developer")
     monkeypatch.setenv("DEVELOPER_LINE_USER_ID", dev["token"])
+    h = auth_headers(dev["token"])
+
+    seen = client.get(f"/seasons/{a['season']}", headers=h)
+    listed = client.get("/clubs", headers=h).json()
+    renamed = client.patch(f"/clubs/{a['club']}", json={"name": "甲隊改名"}, headers=h)
+
+    assert seen.status_code == 200
+    assert {
+        "id": a["club"],
+        "name": "甲隊祕密",
+        "developer_view": True,
+        "role": "organizer",
+    } in listed
+    assert renamed.status_code == 200, renamed.text
+
+
+def test_without_the_setting_nobody_is_the_developer(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Fails closed: unset means no developer, not everybody.
+    a = _club_a(client)
+    dev = identify(client, "Developer")
+    monkeypatch.delenv("DEVELOPER_LINE_USER_ID", raising=False)
     before = _snapshot(client, a)
 
     problems = _let_through(client, a, auth_headers(dev["token"]), dev["id"])

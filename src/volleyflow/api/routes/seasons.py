@@ -46,6 +46,7 @@ from volleyflow.api.routes._people import (
     _now,
     _require_club_access,
     _require_organizer,
+    _runs_club,
     _today_in_taiwan,
     get_current_player,
 )
@@ -752,13 +753,7 @@ def get_season(
 
     # "locked" is about this caller, not about the date alone — the
     # organizer is never locked out (see _require_within_change_deadline).
-    viewer_membership = db.get(
-        ClubMemberRow,
-        {"club_id": season_row.club_id, "player_id": current_player.id},
-    )
-    viewer_is_organizer = (
-        viewer_membership is not None and viewer_membership.role == "organizer"
-    )
+    viewer_is_organizer = _runs_club(db, season_row.club_id, current_player)
 
     game_rows = (
         db.query(GameRow)

@@ -13,8 +13,11 @@ imported from it: nothing imports a route module (see routes/__init__).
 """
 
 import os
+from collections import defaultdict
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from volleyflow.api.dependencies import get_db
@@ -23,7 +26,7 @@ from volleyflow.api.routes._people import (
     get_current_player,
     is_developer,
 )
-from volleyflow.api.schemas import DeveloperOverviewOut
+from volleyflow.api.schemas import DeveloperClubOut, DeveloperOverviewOut
 from volleyflow.db.models import (
     ClubMemberRow,
     ClubRow,
@@ -51,6 +54,54 @@ def _require_developer(player: PlayerRow) -> None:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "Only the developer can read this"
         )
+
+
+@router.get("/developer/clubs", response_model=list[DeveloperClubOut])
+def developer_clubs(
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> list[DeveloperClubOut]:
+    """Every club, with enough to tell them apart and see which are in
+    use. Each row opens that club's management pages, where the developer
+    may act as its organizer."""
+    _require_developer(current_player)
+    organizers: dict[int, list[str]] = defaultdict(list)
+    for club_id, name in (
+        db.query(ClubMemberRow.club_id, PlayerRow.name)
+        .join(PlayerRow, PlayerRow.id == ClubMemberRow.player_id)
+        .filter(ClubMemberRow.role == "organizer")
+        .order_by(PlayerRow.name)
+    ):
+        organizers[club_id].append(name)
+    members: dict[int, int] = {
+        club_id: count
+        for club_id, count in db.query(ClubMemberRow.club_id, func.count()).group_by(
+            ClubMemberRow.club_id
+        )
+    }
+    seasons: dict[int, int] = {
+        club_id: count
+        for club_id, count in db.query(SeasonRow.club_id, func.count()).group_by(
+            SeasonRow.club_id
+        )
+    }
+    activity: dict[int, datetime] = {
+        club_id: latest
+        for club_id, latest in db.query(
+            LedgerEntryRow.club_id, func.max(LedgerEntryRow.recorded_at)
+        ).group_by(LedgerEntryRow.club_id)
+    }
+    return [
+        DeveloperClubOut(
+            id=club.id,
+            name=club.name,
+            organizers=organizers.get(club.id, []),
+            members=int(members.get(club.id, 0)),
+            seasons=int(seasons.get(club.id, 0)),
+            last_activity=activity.get(club.id),
+        )
+        for club in db.query(ClubRow).order_by(ClubRow.id)
+    ]
 
 
 @router.get("/developer/overview", response_model=DeveloperOverviewOut)

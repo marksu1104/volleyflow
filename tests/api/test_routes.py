@@ -1138,6 +1138,7 @@ def test_list_clubs_returns_all_clubs(client: TestClient) -> None:
     assert {
         "id": club["id"],
         "name": "Tuesday Volleyball",
+        "developer_view": False,
         "role": "organizer",
     } in response.json()
 

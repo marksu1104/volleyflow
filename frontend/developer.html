@@ -17,6 +17,11 @@
   .fig-label { font-size: .84rem; color: var(--ink-soft); }
   .fig-value { font-family: var(--font-num); font-size: 1.05rem; font-weight: 800; font-variant-numeric: tabular-nums; }
   .fig-value.attention { color: var(--warn); }
+  .club-line { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; margin-bottom: 5px; }
+  .club-line .cl-main { flex: 1; min-width: 0; }
+  .club-line .cl-name { font-weight: 700; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .club-line .cl-meta { font-size: .74rem; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+  .club-line .mini-action { flex: none; }
 </style>
 </head>
 <body>
@@ -48,7 +53,7 @@
       title: "球隊與人",
       figures: [
         ["clubs", "球隊"],
-        ["players", "所有人"],
+        ["players", "所有球員"],
         ["club_members", "球隊成員"],
         ["pending_members", "等待核准", true],
       ],
@@ -59,7 +64,7 @@
         ["seasons", "季別"],
         ["settled_seasons", "已結算"],
         ["games", "場次"],
-        ["upcoming_games", "還沒打"],
+        ["upcoming_games", "未進行"],
       ],
     },
     {
@@ -74,7 +79,7 @@
       title: "問題回報",
       figures: [
         ["reports", "累計回報"],
-        ["unread_reports", "還沒看", true],
+        ["unread_reports", "未讀", true],
       ],
     },
   ];
@@ -102,6 +107,33 @@
       <a class="btn btn-quiet" href="reports.html">查看問題回報</a>`;
   }
 
+  /** Every club, each opening its management pages. The developer runs
+   * any club there as its organizer (routes/_people._runs_club); the
+   * pages mark a club that isn't the developer's own. */
+  function clubsHtml(clubs) {
+    if (!clubs.length) return "";
+    const rows = clubs
+      .map((c) => {
+        const when = c.last_activity ? stampTime(c.last_activity) : "無紀錄";
+        const who = c.organizers.length ? c.organizers.join("、") : "無管理員";
+        return `
+          <div class="club-line">
+            <span class="cl-main">
+              <div class="cl-name">${escapeHtml(c.name)}</div>
+              <div class="cl-meta">${escapeHtml(who)}・成員 ${c.members}・季別 ${c.seasons}・最近 ${escapeHtml(when)}</div>
+            </span>
+            <button type="button" class="mini-action" onclick="openClub(${c.id})">管理</button>
+          </div>`;
+      })
+      .join("");
+    return `<div class="section-label">所有球隊</div>${rows}`;
+  }
+
+  function openClub(clubId) {
+    rememberId(CLUB_STORAGE_KEY, String(clubId));
+    location.href = "organizer.html";
+  }
+
   (async function init() {
     const box = document.getElementById("overview");
     const sub = document.getElementById("overview-sub");
@@ -112,7 +144,10 @@
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/developer/overview`, { headers: authHeader() });
+      const [res, clubsRes] = await Promise.all([
+        fetch(`${API_BASE}/developer/overview`, { headers: authHeader() }),
+        fetch(`${API_BASE}/developer/clubs`, { headers: authHeader() }),
+      ]);
       if (res.status === 403) {
         sub.textContent = "";
         box.innerHTML = emptyStateHtml("沒有查看權限", "這個頁面僅供開發者查看。");
@@ -126,7 +161,8 @@
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
       sub.textContent = `於 ${new Date().toLocaleString("zh-TW", { hour12: false })} 讀取`;
-      box.innerHTML = overviewHtml(data);
+      const clubs = clubsRes.ok ? await clubsRes.json() : [];
+      box.innerHTML = clubsHtml(clubs) + overviewHtml(data);
     } catch (e) {
       sub.textContent = "";
       showPageError(box, e.message);

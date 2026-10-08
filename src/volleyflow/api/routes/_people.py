@@ -178,6 +178,18 @@ def get_current_player(
     return player
 
 
+def _runs_club(db: Session, club_id: int, player: PlayerRow) -> bool:
+    """Whether `player` may act as this club's organizer: they organize
+    it, or they are the developer, who may step into any club to look or
+    to put something right (decided 2026-10-09 — "必要時可以介入任何資料
+    的操作"). Every organizer check goes through here, so the developer's
+    reach is one line to read and one line to take away."""
+    if is_developer(player):
+        return True
+    membership = db.get(ClubMemberRow, {"club_id": club_id, "player_id": player.id})
+    return membership is not None and membership.role == "organizer"
+
+
 def _require_club_access(db: Session, club_id: int, current_player: PlayerRow) -> None:
     """You may read a club's roster, seasons and games only if you belong
     to it. The design rules: "clubs never see each other's members, seasons,
@@ -186,6 +198,8 @@ def _require_club_access(db: Session, club_id: int, current_player: PlayerRow) -
     and who dropped in — were readable by anyone who knew a club or
     season id, and GET /clubs handed out the ids.
     """
+    if is_developer(current_player):
+        return
     membership = db.get(
         ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}
     )
@@ -209,6 +223,8 @@ def _organizes_a_club_of(
     renaming stayed narrow. Both used to call the same helper, so
     loosening one would have loosened the other by accident.
     """
+    if is_developer(current_player):
+        return True
     shared = (
         db.query(ClubMemberRow)
         .join(
@@ -242,10 +258,7 @@ def _may_edit_accountless_player(
 
 
 def _require_organizer(db: Session, club_id: int, current_player: PlayerRow) -> None:
-    membership = db.get(
-        ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}
-    )
-    if membership is None or membership.role != "organizer":
+    if not _runs_club(db, club_id, current_player):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "Only this club's organizer can do that"
         )
@@ -261,10 +274,7 @@ def _require_self_or_organizer(
     """
     if current_player.id == target_player_id:
         return
-    membership = db.get(
-        ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}
-    )
-    if membership is None or membership.role != "organizer":
+    if not _runs_club(db, club_id, current_player):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "You can only do that for yourself, unless you're the organizer",
@@ -288,6 +298,8 @@ def _require_may_sign_up(
     a drop-in costs money, and nobody may commit a real user to it.
     """
     if current_player.id == target.id:
+        return
+    if _runs_club(db, club_id, current_player):
         return
     membership = db.get(
         ClubMemberRow, {"club_id": club_id, "player_id": current_player.id}

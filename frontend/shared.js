@@ -51,6 +51,27 @@ function avatarHtml(name, url, cls = "avatar sm") {
   );
 }
 
+/** Says so when the club on screen is one the developer sees only as the
+ * developer — never their own — so another club's books are not mistaken
+ * for theirs. Sits just above the club and season pickers. */
+function markDeveloperView(clubs, clubEl) {
+  const club = (clubs || []).find((c) => String(c.id) === String(clubEl.value));
+  let bar = document.getElementById("dev-view");
+  if (!club || !club.developer_view) {
+    if (bar) bar.hidden = true;
+    return;
+  }
+  if (!bar) {
+    bar = document.createElement("p");
+    bar.id = "dev-view";
+    bar.className = "dev-view";
+    const row = clubEl.closest(".picker-row") || clubEl.parentNode;
+    row.parentNode.insertBefore(bar, row);
+  }
+  bar.textContent = `開發者檢視：${club.name}`;
+  bar.hidden = false;
+}
+
 /** The circle in the top bar: the signed-in person's own picture. */
 function paintSelfAvatar(el, person) {
   if (!el || !person) return;
@@ -539,6 +560,7 @@ async function initClubAndSeasonPickers(
   knownClubs
 ) {
   let seasonLoad = 0;
+  let shownClubs = [];
   // Without this, a failed fetch (offline, CORS, a backend that never
   // woke up) rejected an un-awaited promise and the page just sat there
   // blank forever with nothing said. Now the caller gets to show the
@@ -607,6 +629,8 @@ async function initClubAndSeasonPickers(
     clubEl.value = rememberedClub;
   }
   rememberId(CLUB_STORAGE_KEY, clubEl.value);
+  shownClubs = clubs;
+  markDeveloperView(clubs, clubEl);
 
   async function loadSeasons(showLoading) {
     const clubId = String(clubEl.value);
@@ -679,6 +703,7 @@ async function initClubAndSeasonPickers(
 
   clubEl.onchange = () => {
     rememberId(CLUB_STORAGE_KEY, clubEl.value);
+    markDeveloperView(shownClubs, clubEl);
     loadSeasons(true).catch((e) => {
       console.error("Could not load seasons:", e);
       if (onError) onError(e);
