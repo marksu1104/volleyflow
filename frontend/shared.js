@@ -628,7 +628,13 @@ async function initClubAndSeasonPickers(
   if (rememberedClub && clubs.some((c) => String(c.id) === rememberedClub)) {
     clubEl.value = rememberedClub;
   }
-  rememberId(CLUB_STORAGE_KEY, clubEl.value);
+  // Only the network's list may replace the remembered club. A cached
+  // list can predate the club just chosen elsewhere — the developer
+  // page's 管理, a freshly accepted invite — and overwriting on its word
+  // sent the page to the first club before the full list arrived.
+  if (!meta || meta.fresh || clubEl.value === rememberedClub) {
+    rememberId(CLUB_STORAGE_KEY, clubEl.value);
+  }
   shownClubs = clubs;
   markDeveloperView(clubs, clubEl);
 

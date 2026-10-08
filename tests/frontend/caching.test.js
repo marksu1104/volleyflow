@@ -124,6 +124,31 @@ test("a stale empty club list doesn't forget a club that still exists", async ()
   assert.equal(localStorage.getItem("vf_org_season"), "9");
 });
 
+test("a cached club list without the chosen club does not replace it", async () => {
+  // The developer page's 管理 remembers a club the cached list predates.
+  // Painting from the cache picked the first club and remembered that,
+  // so by the time the full list arrived the choice was already gone.
+  const { initClubAndSeasonPickers, writeCache, currentClubId } = load();
+  writeCache("http://x/clubs", [{ id: 1, name: "自己的" }]);
+  localStorage.setItem("vf_club", "5");
+  globalThis.fetch = async (url) => ({
+    ok: true,
+    json: async () =>
+      url.endsWith("/clubs")
+        ? [
+            { id: 1, name: "自己的" },
+            { id: 5, name: "別隊" },
+          ]
+        : [],
+  });
+  const clubEl = makeSelect();
+
+  await initClubAndSeasonPickers("http://x", clubEl, makeSelect(), "k", () => {}, () => {});
+
+  assert.equal(currentClubId(), "5");
+  assert.equal(clubEl.value, "5");
+});
+
 test("the server saying there are no clubs does forget them", async () => {
   const { initClubAndSeasonPickers, currentClubId } = load();
   localStorage.setItem("vf_club", "3");
