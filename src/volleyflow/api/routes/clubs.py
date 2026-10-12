@@ -123,18 +123,27 @@ def list_clubs(
         .order_by(ClubRow.id)
         .all()
     )
-    mine = [ClubOut(id=c.id, name=c.name, role=role) for c, role in rows]
     if not is_developer(current_player):
-        return mine
+        return [ClubOut(id=c.id, name=c.name, role=role) for c, role in rows]
     # The developer may run any club (see _runs_club), so the management
-    # pages offer them all — the ones they don't belong to marked as such.
-    theirs = {club.id for club in mine}
-    others = [
-        ClubOut(id=c.id, name=c.name, role="organizer", developer_view=True)
+    # pages offer them all. Every club they don't organize themselves is
+    # marked developer_view — one they merely belong to included. Marking
+    # only the clubs they had no membership in at all left a club they
+    # had joined as a member listed as role "member", which the
+    # management pages filter out, so its 管理 opened their own club
+    # instead (reported 2026-10-12). `role` stays what they really are.
+    role_in = {c.id: role for c, role in rows}
+    listed = [
+        ClubOut(
+            id=c.id,
+            name=c.name,
+            role=role_in.get(c.id),
+            developer_view=role_in.get(c.id) != "organizer",
+        )
         for c in db.query(ClubRow).order_by(ClubRow.id)
-        if c.id not in theirs
     ]
-    return mine + others
+    # Their own clubs first, so a page with nothing remembered opens on one.
+    return sorted(listed, key=lambda club: club.developer_view)
 
 
 @router.get("/clubs/{club_id}", response_model=ClubOut)

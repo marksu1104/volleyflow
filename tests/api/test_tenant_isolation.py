@@ -241,9 +241,40 @@ def test_the_developer_may_run_any_club(
         "id": a["club"],
         "name": "甲隊祕密",
         "developer_view": True,
-        "role": "organizer",
+        "role": None,
     } in listed
     assert renamed.status_code == 200, renamed.text
+
+
+def test_a_club_the_developer_merely_belongs_to_is_marked_for_them(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reported 2026-10-12: the developer had joined another club as a
+    plain member, so GET /clubs listed it as role "member" with no mark,
+    the management pages filtered it out, and its 管理 opened the
+    developer's own club instead."""
+    a = _club_a(client)
+    dev = identify(client, "Developer")
+    monkeypatch.setenv("DEVELOPER_LINE_USER_ID", dev["token"])
+    h = auth_headers(dev["token"])
+    client.post("/clubs", json={"name": "自己的隊"}, headers=h)
+    client.post(
+        f"/clubs/{a['club']}/join", json={"invite": invite_token(a["club"])}, headers=h
+    )
+    client.post(
+        f"/clubs/{a['club']}/members/{dev['id']}/approve",
+        json={"as_fixed": False},
+        headers=auth_headers(a["organizer"]),
+    )
+
+    listed = client.get("/clubs", headers=h).json()
+
+    joined = next(c for c in listed if c["id"] == a["club"])
+    own = next(c for c in listed if c["name"] == "自己的隊")
+    assert joined["role"] == "member"
+    assert joined["developer_view"] is True
+    assert own == {**own, "role": "organizer", "developer_view": False}
+    assert listed[0] == own, "their own club comes first"
 
 
 def test_without_the_setting_nobody_is_the_developer(

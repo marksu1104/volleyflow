@@ -529,6 +529,14 @@ function setSeasonPickerLoading(seasonEl, loading) {
   if (root) root.classList.toggle("is-picker-loading", loading);
 }
 
+/** Which clubs the management pages offer: the ones this person
+ * organizes, and — for the developer only — every other club, which
+ * GET /clubs marks `developer_view`. One rule for all four pages, so a
+ * club the developer merely belongs to can't drop out of one of them. */
+function managesClub(club) {
+  return club.role === "organizer" || club.developer_view === true;
+}
+
 /**
  * Wires the club <select> and season <select> together: picking a club
  * reloads that club's seasons, picking a season calls onSeasonChange

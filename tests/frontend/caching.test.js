@@ -359,3 +359,15 @@ test("the picker really applies the filter it is handed", async () => {
   assert.doesNotMatch(clubEl.innerHTML, /測試二/);
   assert.equal(currentClubId(), "1", "a member-only club must not stay selected here");
 });
+
+test("the management pages offer a club the developer merely belongs to", () => {
+  // Reported 2026-10-12: GET /clubs listed such a club as role "member",
+  // the management pages kept organizer clubs only, and its 管理 opened
+  // the developer's own club instead. The mark is what lets it through.
+  const { managesClub } = load();
+
+  assert.equal(managesClub({ role: "organizer", developer_view: false }), true);
+  assert.equal(managesClub({ role: "member", developer_view: true }), true);
+  assert.equal(managesClub({ role: null, developer_view: true }), true);
+  assert.equal(managesClub({ role: "member", developer_view: false }), false);
+});

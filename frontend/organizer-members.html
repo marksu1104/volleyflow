@@ -280,7 +280,7 @@
         loadPage(seasonId);
       },
       (error) => showMembersError(error.message),
-      (club) => club.role === "organizer"
+      managesClub
     );
   });
 
