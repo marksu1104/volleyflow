@@ -91,7 +91,6 @@ from volleyflow.ledger import EntryType
 from volleyflow.notify.reminders import (
     fee_notice_text,
     notify_fee_due,
-    notify_promoted_from_waitlist,
 )
 from volleyflow.pricing import share_per_game
 from volleyflow.settlement import (
@@ -353,12 +352,21 @@ def update_season(
                 "are already on the roster or on a game's court",
             )
 
+    raised = "capacity" in updates and updates["capacity"] > season.capacity
     for field, value in updates.items():
         setattr(season, field, value)
 
     if priced:
         db.flush()
         _sync_season_fee_ledger(db, season)
+
+    # More room on court is a slot opening as surely as somebody taking
+    # leave, so the queue is offered it the same way: in order, at games
+    # still to come (asked for 2026-10-14 — raising it left people queued
+    # behind empty places). After the fee sync, so each promotion is
+    # charged at the share the new capacity sets.
+    if raised:
+        _offer_freed_slots_to_the_queue(db, season)
 
     db.commit()
     db.refresh(season)
@@ -673,16 +681,12 @@ def remove_member(
     # that never opened. Before the fee sync, for the same reason the
     # restore is: the promoted drop-ins' charges belong in the ledger the
     # sync then reads.
-    promoted = _offer_freed_slots_to_the_queue(db, season)
+    # One place freed at every game they were expected at, so this can
+    # promote several people into several nights; each is told their own
+    # by the deadline job (reminders.send_promotion_notices).
+    _offer_freed_slots_to_the_queue(db, season)
     _sync_member_season_fee_ledger(db, season, player_id, is_member=False)
     db.commit()
-
-    # After the commit, never before — see the note in
-    # attendance.record_absence. Taking one person off the roster frees a
-    # place at every game they were expected at, so this single action
-    # can promote several people into several different nights, and each
-    # of them is told which night is theirs.
-    notify_promoted_from_waitlist(db, promoted)
 
 
 @router.get("/seasons/{season_id}/join-pool", response_model=list[ClubMemberOut])

@@ -517,7 +517,7 @@ def test_every_message_carries_a_way_back_into_the_app(
     game.roster_notice_sent_at = datetime.now()
     reminders.send_roster_status(db_session, game)
     reminders.send_join_request_digests(db_session)
-    reminders.notify_promoted_from_waitlist(db_session, [(game.id, queued.id)])
+    reminders.tell_promoted(db_session, [(game.id, queued.id)])
     reminders.notify_fee_due(
         db_session,
         season,
@@ -546,7 +546,7 @@ def test_a_promoted_player_is_told_which_night_is_theirs(
     db_session.add(queued)
     db_session.flush()
 
-    told = reminders.notify_promoted_from_waitlist(db_session, [(game.id, queued.id)])
+    told = reminders.tell_promoted(db_session, [(game.id, queued.id)])
 
     assert told == 1
     user_id, text = sent_messages[0]
@@ -566,7 +566,7 @@ def test_a_promoted_guest_without_line_is_skipped_rather_than_crashing(
     db_session.add(guest)
     db_session.flush()
 
-    told = reminders.notify_promoted_from_waitlist(db_session, [(game.id, guest.id)])
+    told = reminders.tell_promoted(db_session, [(game.id, guest.id)])
 
     assert told == 0
     assert sent_messages == []
@@ -596,7 +596,7 @@ def test_one_removal_can_promote_people_into_different_nights(
     db_session.add_all([tuesday, friday, first, second])
     db_session.flush()
 
-    told = reminders.notify_promoted_from_waitlist(
+    told = reminders.tell_promoted(
         db_session, [(tuesday.id, first.id), (friday.id, second.id)]
     )
 
@@ -628,7 +628,7 @@ def test_one_unreachable_promoted_player_does_not_stop_the_others(
     db_session.add_all([blocked, fine])
     db_session.flush()
 
-    told = reminders.notify_promoted_from_waitlist(
+    told = reminders.tell_promoted(
         db_session, [(game.id, blocked.id), (game.id, fine.id)]
     )
 
@@ -646,8 +646,17 @@ def test_a_promotion_before_the_deadline_waits_for_it(
     queued = PlayerRow(name="候補的人", line_user_id="Uqueued")
     db_session.add(queued)
     db_session.flush()
+    db_session.add(
+        DropInRow(
+            player_id=queued.id,
+            game_id=game.id,
+            signed_up_at=datetime(2026, 8, 20),
+            queued_at=datetime(2026, 8, 20),
+        )
+    )
+    db_session.flush()
 
-    told = reminders.notify_promoted_from_waitlist(db_session, [(game.id, queued.id)])
+    told = reminders.send_promotion_notices(db_session, datetime(2026, 8, 24, 12, 0))
 
     assert told == 0
     assert sent_messages == []
@@ -782,7 +791,7 @@ def test_no_line_in_any_notice_is_long_enough_to_wrap_on_a_small_phone(
     reminders.send_roster_status(db_session, game)
     reminders.send_join_request_digests(db_session)
     game.roster_notice_sent_at = datetime.now()
-    reminders.notify_promoted_from_waitlist(db_session, [(game.id, queued.id)])
+    reminders.tell_promoted(db_session, [(game.id, queued.id)])
     reminders.notify_fee_due(
         db_session,
         season,

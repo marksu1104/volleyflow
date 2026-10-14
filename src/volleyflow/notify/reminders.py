@@ -5,8 +5,15 @@ status to that club's organizers, and a promotion notice to everybody
 who came off the waiting list, and to whoever signed them up. Held until
 then because a roster keeps moving until the deadline — somebody takes
 leave, then names a 代打 — and a notice sent at the first move could be
-wrong by the second. After the deadline only the organizer can change
-anything, and a promotion they make is told straight away.
+wrong by the second.
+
+After the deadline the same job, every ten minutes, tells whoever has
+come off the queue since — if they are still on court by then, and only
+once per signup (2026-10-14). It used to be the route, the moment they
+were promoted, which an organizer's next tap could already undo:
+taking leave back and retaking it told the same person twice, and naming
+a 代打 bumped somebody back to the queue right after they had been told
+they were playing. A queued person named a 代打 counts as promoted too.
 
 Also: a game called off, to everybody expected at it; people waiting to
 join, to the organizer, once a day; and the season's 繳費通知, when the
@@ -246,16 +253,46 @@ def send_deadline_notices(session: Session, now: datetime) -> int:
 
     for game in due:
         send_roster_status(session, game)
-        promoted = [
-            (game.id, player_id)
-            for (player_id,) in session.query(DropInRow.player_id).filter(
-                DropInRow.game_id == game.id,
-                DropInRow.playing(),
-                DropInRow.queued_at.is_not(None),
-            )
-        ]
-        notify_promoted_from_waitlist(session, promoted)
+    # After the roster status, and covering the games just claimed as well
+    # as every earlier one: whoever has come off the queue since is told.
+    send_promotion_notices(session, now)
     return len(due)
+
+
+def send_promotion_notices(session: Session, now: datetime) -> int:
+    """Tell everybody who is on court off the queue, in a game whose
+    deadline notices have gone out, and hasn't been told yet. Returns how
+    many messages went out.
+
+    Who is owed a notice is read at send time, not when they were
+    promoted: somebody promoted and bumped back between two runs is never
+    told anything, and taking leave back and forth promotes the same row
+    each time but tells it once. A queued person named a 代打 is on court
+    off the queue like anybody promoted, and hears the same way.
+
+    Marked and committed before sending, like the roster status — a run
+    that overlaps another must find them already claimed.
+    """
+    owed = (
+        session.query(DropInRow)
+        .join(GameRow, GameRow.id == DropInRow.game_id)
+        .filter(
+            GameRow.status == GameStatus.SCHEDULED,
+            GameRow.roster_notice_sent_at.is_not(None),
+            GameRow.date >= now.date(),
+            DropInRow.playing(),
+            DropInRow.queued_at.is_not(None),
+            DropInRow.promotion_notice_sent_at.is_(None),
+        )
+        .order_by(GameRow.date, DropInRow.id)
+        .with_for_update(of=DropInRow, skip_locked=True)
+        .all()
+    )
+    promoted = [(drop_in.game_id, drop_in.player_id) for drop_in in owed]
+    for drop_in in owed:
+        drop_in.promotion_notice_sent_at = now
+    session.commit()
+    return tell_promoted(session, promoted)
 
 
 _JOIN_NAMES_SHOWN = 8
@@ -320,22 +357,14 @@ def _club_name(session: Session, club_id: int) -> str:
     return club.name if club is not None else ""
 
 
-def notify_promoted_from_waitlist(
-    session: Session, promoted: list[tuple[int, int]]
-) -> int:
-    """Tell each person who came off the waiting list, and whoever signed
-    them up, which night is theirs. Returns how many messages went out.
+def tell_promoted(session: Session, promoted: list[tuple[int, int]]) -> int:
+    """Send the 遞補通知 to each person, and whoever signed them up, naming
+    which night is theirs. Returns how many messages went out.
 
-    Only once that game's deadline notices have gone out
-    (`roster_notice_sent_at`). Before then this sends nothing: the batch
-    at the deadline tells everyone who is promoted by then, which spares
-    somebody a "you're in" that a 代打 named an hour later would undo.
-    After it, only the organizer can still change the game, and whoever
-    they promote is told straight away.
-
-    Takes `(game_id, player_id)` pairs: removing somebody from a season's
-    roster frees their place at every game, so one action can promote
-    several people into several nights.
+    Who is owed one is send_promotion_notices' decision; this only words
+    and sends it. Takes `(game_id, player_id)` pairs because one run can
+    cover several nights — removing somebody from a season's roster frees
+    their place at every game.
 
     **Call this after the commit, never before** — a push sent from
     inside a transaction that then rolls back cannot be taken back.
@@ -343,7 +372,7 @@ def notify_promoted_from_waitlist(
     told = 0
     for game_id, player_id in promoted:
         game = session.get(GameRow, game_id)
-        if game is None or game.roster_notice_sent_at is None:
+        if game is None:
             continue
         season = session.get(SeasonRow, game.season_id)
         if season is None:
@@ -515,6 +544,8 @@ if __name__ == "__main__":
     job = sys.argv[1] if len(sys.argv) > 1 else "daily"
     with get_session() as db_session:
         if job == "deadline":
+            # Deadline notices for games just past it, and promotion
+            # notices for everybody who has come off a queue since.
             games = send_deadline_notices(db_session, _taiwan_now())
             print(f"Sent deadline notices for {games} game(s)")
         else:

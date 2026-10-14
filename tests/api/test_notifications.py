@@ -19,14 +19,17 @@ identity; the fake verify_id_token makes their token *be* their
 line_user_id, which is why the assertions below compare against tokens.
 """
 
+import importlib.util
+import pathlib
 from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tests.api.factories import auth_headers, identify, join_club, start_season
-from volleyflow.db.models import GameRow
+from volleyflow.db.models import DropInRow, GameRow
 from volleyflow.notify import reminders
 
 SentMessages = list[tuple[str, str]]
@@ -79,6 +82,15 @@ def _past_the_deadline(db_session: Session, game_id: int) -> None:
     db_session.commit()
 
 
+def _next_run(db_session: Session) -> None:
+    """The deadline job's next ten-minute run, as far as promotions go."""
+    reminders.send_promotion_notices(db_session, datetime.now())
+
+
+def _told(sent: SentMessages, person: dict[str, Any]) -> list[str]:
+    return [t for user_id, t in sent if user_id == person["token"]]
+
+
 def test_a_promotion_before_the_deadline_is_held_until_it(
     client: TestClient, sent_messages: SentMessages, db_session: Session
 ) -> None:
@@ -100,17 +112,161 @@ def test_a_promotion_before_the_deadline_is_held_until_it(
     assert "場次：8/19（二）" in promoted[0]
 
 
-def test_after_the_deadline_a_promotion_is_told_at_once(
+def test_after_the_deadline_a_promotion_is_told_by_the_next_run_once(
     client: TestClient, sent_messages: SentMessages, db_session: Session
 ) -> None:
-    # The batch has gone and only the organizer can still change the
-    # game, so whoever comes off the queue now hears straight away.
+    """Not by the route any more (2026-10-14): the organizer's next tap
+    can undo a promotion, so the job tells whoever is still on court when
+    it runs, ten minutes at most later — and only once."""
     _season, game_id, carol = _queued_behind_a_full_game(client)
     _past_the_deadline(db_session, game_id)
 
     client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
+    assert sent_messages == [], "the route itself tells nobody"
+    _next_run(db_session)
+    _next_run(db_session)
 
     assert [user_id for user_id, _ in sent_messages] == [carol["token"]]
+
+
+def test_a_promotion_undone_before_the_next_run_is_never_announced(
+    client: TestClient, sent_messages: SentMessages, db_session: Session
+) -> None:
+    """Reported 2026-10-14: after the deadline the organizer took leave
+    for somebody, Jay came off the queue and was told at once, then the
+    organizer named a 代打 and Jay went straight back to the queue —
+    holding a message saying he was playing."""
+    _season, game_id, jay = _queued_behind_a_full_game(client, "Jay")
+    _past_the_deadline(db_session, game_id)
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+
+    named = client.put(
+        f"/absences/{absence['id']}/substitute",
+        json={"player_name": "代打的人", "gender": "male"},
+    ).json()
+    _next_run(db_session)
+
+    assert named["displaced_player_id"] == jay["id"], "the setup must bump Jay"
+    assert _told(sent_messages, jay) == []
+
+
+def test_taking_leave_back_and_forth_announces_the_promotion_once(
+    client: TestClient, sent_messages: SentMessages, db_session: Session
+) -> None:
+    # The same report: leave taken, taken back, taken again promoted the
+    # same person twice, and each promotion used to send its own message.
+    _season, game_id, jay = _queued_behind_a_full_game(client, "Jay")
+    _past_the_deadline(db_session, game_id)
+    first = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    client.post(f"/absences/{first['id']}/cancel", json={})
+    client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
+
+    _next_run(db_session)
+
+    assert len(_told(sent_messages, jay)) == 1
+
+
+def test_somebody_told_then_bumped_and_promoted_again_hears_once(
+    client: TestClient, sent_messages: SentMessages, db_session: Session
+) -> None:
+    # Told they are playing, bumped by a 代打, back in when the 代打 is
+    # cancelled: playing, as they were told, so nothing more is said.
+    _season, game_id, jay = _queued_behind_a_full_game(client, "Jay")
+    _past_the_deadline(db_session, game_id)
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    _next_run(db_session)
+    named = client.put(
+        f"/absences/{absence['id']}/substitute",
+        json={"player_name": "代打的人", "gender": "male"},
+    ).json()
+    client.post(f"/drop-ins/{named['id']}/cancel", json={})
+
+    _next_run(db_session)
+
+    assert len(_told(sent_messages, jay)) == 1
+    on_court = db_session.query(DropInRow).filter(
+        DropInRow.game_id == game_id, DropInRow.player_id == jay["id"]
+    )
+    assert [row.status for row in on_court] == ["playing"]
+
+
+def test_a_queued_person_named_a_substitute_is_told_like_any_promotion(
+    client: TestClient, sent_messages: SentMessages, db_session: Session
+) -> None:
+    """Before the deadline the batch already told them; after it the
+    route never did. One rule now: off the queue onto the court, told."""
+    season, game_id, jay = _queued_behind_a_full_game(client, "Jay")
+    dave = identify(client, "Dave")
+    join_club(client, season["club_id"], auth_headers(dave["token"]))
+    client.post(
+        "/drop-ins",
+        json={"player_name": "Dave", "game_id": game_id},
+        headers=auth_headers(dave["token"]),
+    )
+    _past_the_deadline(db_session, game_id)
+    absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+
+    client.put(
+        f"/absences/{absence['id']}/substitute",
+        json={"player_name": "Dave", "gender": "male"},
+    )
+    _next_run(db_session)
+
+    assert len(_told(sent_messages, dave)) == 1
+    assert _told(sent_messages, jay) == [], "Jay was bumped back to the queue"
+
+
+def test_people_told_before_the_change_are_not_told_again_by_it(
+    client: TestClient, sent_messages: SentMessages, db_session: Session
+) -> None:
+    """The migration marks everybody the old rule already told. Run here
+    against a real roster: if it marked too little, the job's first run
+    after deploy would tell every one of them again."""
+    path = pathlib.Path(__file__).parents[2] / (
+        "alembic/versions/e4b91c7d2a50_tell_each_promotion_once.py"
+    )
+    spec = importlib.util.spec_from_file_location("tell_each_promotion_once", path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    # Past its deadline: Jay came off the queue and was told; Dave still waits.
+    season, told_game, jay = _queued_behind_a_full_game(client, "Jay")
+    dave = identify(client, "Dave")
+    join_club(client, season["club_id"], auth_headers(dave["token"]))
+    client.post(
+        "/drop-ins",
+        json={"player_name": "Dave", "game_id": told_game},
+        headers=auth_headers(dave["token"]),
+    )
+    _past_the_deadline(db_session, told_game)
+    client.post("/absences", json={"player_name": "Alice", "game_id": told_game})
+    # Before its deadline: Erin came off the queue and hasn't been told yet.
+    _other, held_game, erin = _queued_behind_a_full_game(client, "Erin")
+    client.post("/absences", json={"player_name": "Alice", "game_id": held_game})
+    db_session.query(DropInRow).update({DropInRow.promotion_notice_sent_at: None})
+    db_session.commit()
+
+    db_session.execute(text(migration.MARK_ALREADY_TOLD))
+    db_session.commit()
+    _next_run(db_session)
+
+    assert sent_messages == []
+    marked = {
+        row.player_id: row.promotion_notice_sent_at is not None
+        for row in db_session.query(DropInRow)
+    }
+    assert marked[jay["id"]] is True
+    assert marked[dave["id"]] is False, "still queued, never told"
+    assert marked[erin["id"]] is False, "her game's deadline hasn't come"
 
 
 def test_a_promoted_guest_is_announced_to_whoever_signed_them_up(
@@ -130,6 +286,7 @@ def test_a_promoted_guest_is_announced_to_whoever_signed_them_up(
     _past_the_deadline(db_session, game_id)
 
     client.post("/absences", json={"player_name": "Alice", "game_id": game_id})
+    _next_run(db_session)
 
     [(user_id, text)] = sent_messages
     assert user_id == host["token"], "the guest has no LINE; the host answers for them"
@@ -160,6 +317,7 @@ def test_taking_somebody_off_the_roster_promotes_into_each_night_separately(
     alice = next(m for m in members if m["name"] == "Alice")
 
     removed = client.delete(f"/seasons/{season['id']}/members/{alice['id']}")
+    _next_run(db_session)
 
     assert removed.status_code == 204, removed.text
     dates = sorted(text for _user_id, text in sent_messages)

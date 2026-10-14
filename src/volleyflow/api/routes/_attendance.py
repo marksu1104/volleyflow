@@ -639,7 +639,7 @@ def _offer_freed_slots_to_the_queue(
     # (game_id, player_id), not just the player: one removal can free a
     # place at several games at once, and whoever is promoted has to be
     # told *which night* is theirs — see
-    # reminders.notify_promoted_from_waitlist.
+    # reminders.send_promotion_notices.
     promoted: list[tuple[int, int]] = []
     today = _today_in_taiwan()
     # Locked, in date order, exactly as _get_game_or_404 locks the one

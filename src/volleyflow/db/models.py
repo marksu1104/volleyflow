@@ -426,6 +426,19 @@ class DropInRow(Base):
     the same reasoning as `brought_by_player_id` above.
     """
 
+    promotion_notice_sent_at: Mapped[datetime | None] = mapped_column(default=None)
+    """When this signup's 遞補通知 went out, if it has.
+
+    Set by the deadline job, which alone sends promotion notices: every
+    ten minutes it tells whoever has come off the queue onto the court of
+    a game past its deadline, and stamps them so they are told once.
+    Until 2026-10-14 a route told them the moment they were promoted, so
+    taking leave back and retaking it promoted — and told — the same
+    person twice, and naming a 代打 a minute later bumped somebody back to
+    the queue after they had been told they were playing. Never cleared:
+    somebody told, bumped and promoted again is playing as they were told.
+    """
+
 
 class ProblemReportRow(Base):
     """A problem report somebody sent, kept for the developer to read.

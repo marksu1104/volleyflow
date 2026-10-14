@@ -339,3 +339,34 @@ def test_capacity_can_always_be_raised(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json()["capacity"] == 10
+
+
+def test_raising_the_capacity_lets_the_queue_in_order(client: TestClient) -> None:
+    """Asked for on 2026-10-14: raising the capacity left people queued
+    behind empty places. More room is a slot opening like any other, so
+    the queue gets it the way an absence would give it — first queued,
+    first in, charged at the share the new capacity sets."""
+    today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+    tomorrow = (today + timedelta(days=1)).isoformat()
+    season = start_season(
+        client, game_dates=[tomorrow], member_names=["Alice", "Bob"], capacity=2
+    )
+    game_id = season["games"][0]["id"]
+    first = client.post(
+        "/drop-ins", json={"player_name": "First", "game_id": game_id}
+    ).json()
+    client.post("/drop-ins", json={"player_name": "Second", "game_id": game_id})
+    assert first["status"] == "waitlisted"
+
+    raised = client.patch(f"/seasons/{season['id']}", json={"capacity": 3})
+
+    assert raised.status_code == 200, raised.text
+    game = client.get(f"/seasons/{season['id']}").json()["games"][0]
+    assert [d["player_name"] for d in game["confirmed_drop_ins"]] == ["First"]
+    assert [w["player_name"] for w in game["waitlist_entries"]] == ["Second"]
+    ledger = client.get(
+        f"/clubs/{season['club_id']}/players/{first['player_id']}/ledger"
+    ).json()
+    assert ledger["balance"] == f"-{game['share']}", (
+        "charged one night at the new share"
+    )

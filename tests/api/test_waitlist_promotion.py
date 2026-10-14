@@ -10,8 +10,10 @@ the right one.
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from tests.api.factories import auth_headers, identify, join_club, start_season
+from volleyflow.db.models import SeasonRow
 
 
 def _full_game_with_queue(
@@ -95,17 +97,22 @@ def test_a_swap_moves_money_for_the_two_people_swapping_and_nobody_else(
 
 
 def test_promoting_into_a_slot_that_is_genuinely_open_needs_no_swap(
-    client: TestClient,
+    client: TestClient, db_session: Session
 ) -> None:
-    # Capacity was raised, or the queue formed before somebody dropped
-    # out. Nobody has to come off.
+    # Nobody has to come off. Raising the capacity through the API offers
+    # the new room to the queue since 2026-10-14, so an open slot with
+    # somebody still queued is now left only by data from before that —
+    # made here directly, the way such a game exists.
     season = start_season(client, member_names=["Alice"], capacity=1)
     game_id = season["games"][0]["id"]
     carol = client.post(
         "/drop-ins", json={"player_name": "Carol", "game_id": game_id}
     ).json()
     assert carol["status"] == "waitlisted"
-    client.patch(f"/seasons/{season['id']}", json={"capacity": 2})
+    season_row = db_session.get(SeasonRow, season["id"])
+    assert season_row is not None
+    season_row.capacity = 2
+    db_session.commit()
 
     response = client.post(f"/waitlist/{carol['id']}/promote", json={})
 
