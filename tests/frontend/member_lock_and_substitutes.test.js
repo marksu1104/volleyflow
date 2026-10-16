@@ -41,10 +41,13 @@ function sheet(gameOverrides = {}) {
   return { season, game };
 }
 
+// linked: has their own LINE account (a 球隊成員); not linked: a name
+// somebody typed in (a 訪客).
 const club = [
-  { id: 1, name: "Alice", gender: "female" },
-  { id: 2, name: "Bob", gender: "male" },
-  { id: 7, name: "Kevin", gender: "male" },
+  { id: 1, name: "Alice", gender: "female", linked: true },
+  { id: 2, name: "Bob", gender: "male", linked: true },
+  { id: 7, name: "Kevin", gender: "male", linked: true },
+  { id: 8, name: "訪客乙", gender: "female", linked: false },
 ];
 
 function render(game, season, options) {
@@ -71,19 +74,49 @@ test("the member screen locks a night past its deadline, for the organizer too",
 test("on the management screen a 代打 can be any club member who isn't on the roster", () => {
   const { season, game } = sheet();
 
-  const html = render(game, season, { clubMembers: club, substituteFromClub: true });
+  const html = render(game, season, { clubMembers: club, pickFromWholeClub: true });
 
   assert.match(html, /data-pick-name="Kevin"/);
-  assert.match(html, /球隊成員/);
+  assert.match(html, /<div class="pick-group">球隊成員<\/div>/);
+  assert.match(html, /<div class="pick-group">訪客<\/div>[\s\S]*訪客乙/, "guests kept apart");
   assert.doesNotMatch(html, /data-pick-name="Bob"/, "a fixed member is expected already");
+  assert.match(html, /Bob<\/span>[\s\S]{0,120}本季固定成員/, "shown greyed, saying why");
   assert.doesNotMatch(html, /data-pick-name="Alice"/, "nobody covers their own absence");
 });
 
+test("a night past its deadline offers no 代打, 銷假 or 新增臨打 on the member screen", () => {
+  const { season, game } = sheet({ locked: true, past_deadline: true });
+
+  const html = render(game, season, {
+    asMember: true,
+    onCancelAbsence: () => {},
+    onAddDropIn: () => {},
+  });
+
+  assert.doesNotMatch(html, /data-toggle-sub=/);
+  assert.doesNotMatch(html, /data-undo-absence=/);
+  assert.doesNotMatch(html, /data-open-add-dropin/);
+});
+
 test("the member screen still doesn't offer the whole club as a 代打", () => {
-  // A member may not name somebody with their own account.
+  // A member may not name somebody with their own account; a guest
+  // somebody typed in is fine.
   const { season, game } = sheet();
 
   const html = render(game, season, { clubMembers: club });
 
   assert.doesNotMatch(html, /data-pick-name="Kevin"/);
+  assert.match(html, /data-pick-name="訪客乙"/);
+});
+
+test("a guest of mine who has since joined with LINE can't be signed up by me", () => {
+  // Brought before as a typed name, linked to their own account since:
+  // they sign themselves up now, and the picker says so.
+  const { season, game } = sheet();
+  const myGuests = [{ id: 9, name: "已有帳號的朋友", gender: "male", linked: true, times: 2 }];
+
+  const html = render(game, season, { clubMembers: club, myGuests });
+
+  assert.doesNotMatch(html, /data-pick-name="已有帳號的朋友"/);
+  assert.match(html, /已有帳號的朋友<\/span>[\s\S]{0,120}需本人報名/);
 });

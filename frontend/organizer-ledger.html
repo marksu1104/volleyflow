@@ -248,16 +248,11 @@
             { label: "建立第一季", href: "organizer-settings.html" }
           )
         : noClubYetHtml();
-    // On a day there is a game, this page's job is collecting cash
-    // courtside, so it opens on 當天臨打. Every other day it opens on
-    // 季費, which is what you read before a season starts. A #settle
-    // link still wins outright — that is somebody arriving from a
-    // link that names the tab it wants.
+    // It opens on 當天臨打 (see below). A #settle link still wins
+    // outright — that is somebody arriving from a link that names the
+    // tab it wants.
     if (hasSeason) {
       const today = dateKey(new Date());
-      const gameToday = currentSeason.games.some(
-        (g) => g.date === today && g.status === "scheduled"
-      );
       // 季末結算 is worth an equal third of this control on exactly one
       // night a season. Until the last game has been played it steps
       // aside instead — still there, still tappable, just not competing
@@ -270,9 +265,9 @@
         currentSeason.settled_at === null && !!last && last.date >= today;
       const closingTab = document.querySelector('#ledger-tabs [data-tab="closing"]');
       if (closingTab) closingTab.classList.toggle("quiet", stillRunning);
-      showTab(
-        location.hash === "#settle" ? "closing" : gameToday ? "dropin" : "fee"
-      );
+      // 當天臨打 first, always (asked 2026-10-16): it is what this page is
+      // opened for on most days, not only on a game day.
+      showTab(location.hash === "#settle" ? "closing" : "dropin");
     }
   }
 
@@ -960,8 +955,14 @@
 
   function renderDropInGamePicker() {
     const picker = document.getElementById("dropin-game-picker");
-    const today = new Date().toISOString().slice(0, 10);
-    const nearest = currentSeason.games.find((g) => g.date >= today) || currentSeason.games[currentSeason.games.length - 1];
+    // Tonight's game; else the latest one played, whose fees are what is
+    // being collected; else the first to come. Taiwan's date, not UTC's,
+    // which before 08:00 is still yesterday.
+    const today = todayString();
+    const games = currentSeason.games;
+    const played = games.filter((g) => g.date <= today);
+    const nearest =
+      games.find((g) => g.date === today) || played[played.length - 1] || games[0];
     picker.innerHTML = currentSeason.games
       .map((g) => `<option value="${g.id}">${describeDate(g.date).label}（臨打 ${g.confirmed_drop_ins.length} 人）</option>`)
       .join("");

@@ -1361,20 +1361,52 @@ function applyAutomaticPromotionLocally(season, gameId, playerId, fallback) {
  * always means somebody new, deliberately, because two people really can
  * be called 小明.
  */
-function renderPersonPicker(container, { title, candidates, hint }) {
-  const rows = (candidates || [])
+/** The people in a picker, under a heading per group (候補 / 球隊成員 /
+ * 訪客), with anybody who can't be chosen still shown — greyed, saying
+ * why — rather than left out. Leaving them out read as the app having
+ * lost them: 「選球隊成員的列表中沒有……」, 2026-10-16, about people who
+ * were simply on the season's roster already.
+ *
+ * `attrs(c)` is the markup that makes a row choosable; a row with a
+ * `disabled` reason gets none, so no click handler can pick it. */
+function pickGroupsHtml(candidates, attrs) {
+  const groups = [];
+  for (const c of candidates) {
+    const name = c.group || "";
+    let group = groups.find((g) => g.name === name);
+    if (!group) groups.push((group = { name, rows: [] }));
+    group.rows.push(c);
+  }
+  return groups
     .map(
-      (c) => `
-      <div class="pick-row" data-person-pick
-        data-person-id="${c.id === null || c.id === undefined ? "" : c.id}"
-        data-person-name="${escapeHtml(c.name)}"
-        data-person-gender="${c.gender || ""}">
+      (g) =>
+        (g.name ? `<div class="pick-group">${escapeHtml(g.name)}</div>` : "") +
+        `<div class="sub-pick">${g.rows
+          .map(
+            (c) => `
+      <div class="pick-row${c.disabled ? " is-disabled" : ""}" ${c.disabled ? 'aria-disabled="true"' : attrs(c)}>
         <i class="radio"></i>${avatarHtml(c.name, c.avatar_url)}
         <span class="pk-name">${escapeHtml(c.name)}</span>${genderTag(c.gender)}
-        <span class="pk-note">${escapeHtml(c.note || "")}</span>
+        <span class="pk-note">${escapeHtml(c.disabled || c.note || "")}</span>
       </div>`
+          )
+          .join("")}</div>`
     )
     .join("");
+}
+
+function renderPersonPicker(container, { title, candidates, hint }) {
+  const list = candidates || [];
+  const grouped = list.some((c) => c.group);
+  const rows = list.length
+    ? pickGroupsHtml(
+        list,
+        (c) => `data-person-pick
+        data-person-id="${c.id === null || c.id === undefined ? "" : c.id}"
+        data-person-name="${escapeHtml(c.name)}"
+        data-person-gender="${c.gender || ""}"`
+      )
+    : "";
 
   container.innerHTML = `
     <div class="picker-backdrop" data-person-picker hidden>
@@ -1386,8 +1418,8 @@ function renderPersonPicker(container, { title, candidates, hint }) {
         ${hint ? `<p class="hint" style="margin-top:0">${escapeHtml(hint)}</p>` : ""}
         ${
           rows
-            ? `<div class="or-line"><span>曾報名過的對象</span></div>
-               <div class="sub-pick">${rows}</div>
+            ? `${grouped ? "" : '<div class="or-line"><span>曾報名過的對象</span></div>'}
+               ${rows}
                <div class="or-line"><span>以上皆非，請直接輸入姓名</span></div>`
             : `<div class="or-line"><span>請輸入姓名</span></div>`
         }
@@ -1501,6 +1533,11 @@ function renderGameDetail(container, season, game, options) {
   // from a screen meant for their own attendance. The management screen
   // leaves asMember off and keeps correcting a night after the fact.
   const locked = game.locked || (opts.asMember === true && game.past_deadline === true);
+  // Nothing that changes who is playing is offered once the night is
+  // locked or the season settled. 代打 and 銷假 were offered on a night
+  // already played while the matching 取消 was not, so a 代打 could be
+  // named on the member screen and never taken back (2026-10-16).
+  const frozen = locked || !!season.settled_at;
   const viewerName = opts.viewerName || "";
   const onAssignSubstitute = opts.onAssignSubstitute;
   const onCancelSubstitute = opts.onCancelSubstitute;
@@ -1530,56 +1567,75 @@ function renderGameDetail(container, season, game, options) {
    * how the same person ends up in the database three times). Typing a
    * new name still works underneath.
    */
-  function substituteCandidates(absence) {
-    const playing = new Set(
-      season.members
-        .filter((m) => !game.absences.some((a) => a.player_name === m.name))
-        .map((m) => m.name)
-        .concat(game.confirmed_drop_ins.map((d) => d.player_name))
-    );
-    // A fixed member is expected at this game already and can't stand in
-    // for anybody — the server refuses it — so they are never offered.
-    const fixed = new Set(season.members.map((m) => m.name));
-    // The whole club only on the management screen (asked 2026-10-16):
-    // the organizer may name anybody there, while a member may not name
-    // somebody with their own account, which most club members have.
-    const pools = [
-      [game.waitlist_entries, "候補中"],
-      [opts.myGuests || [], "候補中"],
-      [opts.substituteFromClub ? clubMembers : [], "球隊成員"],
-    ];
-    const seen = new Set();
+  // Who can be put on this game, grouped, with a reason for anybody who
+  // can't — shared by the 代打 and 新增臨打 pickers (2026-10-16).
+  //
+  // 球隊成員 are people with their own LINE account; 訪客 are names typed
+  // in by somebody, who never joined themselves — asked to be kept apart,
+  // since a guest somebody brought isn't a member of the club. The whole
+  // club is offered only on the management screen (pickFromWholeClub):
+  // the organizer may put anybody on, a member only somebody without an
+  // account of their own.
+  const fixedNames = new Set(season.members.map((m) => m.name));
+  const onCourtNames = new Set(
+    season.members
+      .filter((m) => !game.absences.some((a) => a.player_name === m.name))
+      .map((m) => m.name)
+      .concat(game.confirmed_drop_ins.map((d) => d.player_name))
+  );
+  const queuedNames = new Set(game.waitlist_entries.map((w) => w.player_name));
+  const wholeClub = opts.pickFromWholeClub === true;
+
+  function peopleToPick(skipName, queuedAreChoosable) {
     const out = [];
-    for (const [people, fallbackNote] of pools) {
-      for (const person of people) {
-        const name = person.player_name || person.name;
-        if (playing.has(name) || fixed.has(name)) continue;
-        if (name === absence.player_name || seen.has(name)) continue;
-        seen.add(name);
-        out.push({
-          name,
-          gender: person.gender,
-          avatar_url: person.avatar_url || null,
-          note: person.times ? `報名過 ${person.times} 次` : fallbackNote,
-        });
-      }
+    const seen = new Set(skipName ? [skipName] : []);
+    const add = (person, group, note) => {
+      const name = person.player_name || person.name;
+      if (seen.has(name)) return;
+      seen.add(name);
+      let disabled = null;
+      if (fixedNames.has(name)) disabled = "本季固定成員";
+      else if (onCourtNames.has(name)) disabled = "已在場上";
+      else if (!queuedAreChoosable && queuedNames.has(name)) disabled = "候補中";
+      else if (person.linked && !wholeClub) disabled = "需本人報名";
+      out.push({
+        id: person.id != null ? person.id : null,
+        name,
+        gender: person.gender,
+        avatar_url: person.avatar_url || null,
+        note,
+        group,
+        disabled,
+      });
+    };
+    if (queuedAreChoosable) for (const w of game.waitlist_entries) add(w, "候補", "候補中");
+    if (wholeClub) for (const m of clubMembers) if (m.linked) add(m, "球隊成員", "");
+    for (const g of opts.myGuests || []) {
+      add(g, g.linked ? "球隊成員" : "訪客", g.times ? `報名過 ${g.times} 次` : "");
     }
-    return out;
+    for (const m of clubMembers) if (!m.linked) add(m, "訪客", "");
+    // Whoever can be chosen first within each group, the greyed after.
+    const order = ["候補", "球隊成員", "訪客"];
+    return out.sort(
+      (a, b) =>
+        order.indexOf(a.group) - order.indexOf(b.group) ||
+        Number(!!a.disabled) - Number(!!b.disabled)
+    );
+  }
+
+  function substituteCandidates(absence) {
+    // Somebody queued can be named: their own signup moves onto the court.
+    return peopleToPick(absence.player_name, true);
   }
 
   function substituteForm(absence) {
     const candidates = substituteCandidates(absence);
     const covering = game.confirmed_drop_ins.find((d) => d.covering === absence.player_name);
-    const pickRows = candidates
-      .map(
-        (m) => `
-          <div class="pick-row" data-pick="${absence.id}" data-pick-name="${escapeHtml(m.name)}" data-pick-gender="${m.gender || ""}">
-            <i class="radio"></i>${avatarHtml(m.name, m.avatar_url)}
-            <span class="pk-name">${escapeHtml(m.name)}</span>${genderTag(m.gender)}
-            <span class="pk-note">${escapeHtml(m.note)}</span>
-          </div>`
-      )
-      .join("");
+    const pickRows = pickGroupsHtml(
+      candidates,
+      (m) =>
+        `data-pick="${absence.id}" data-pick-name="${escapeHtml(m.name)}" data-pick-gender="${m.gender || ""}"`
+    );
     const maleSelected = covering && covering.gender === "male" ? " selected" : "";
     const femaleSelected = covering && covering.gender === "female" ? " selected" : "";
     // Its own layer over the sheet, not a panel wedged between two roster
@@ -1594,8 +1650,7 @@ function renderGameDetail(container, season, game, options) {
           </div>
           ${
             candidates.length
-              ? `<div class="or-line"><span>候補名單，或你曾報名過的對象</span></div>
-                 <div class="sub-pick">${pickRows}</div>
+              ? `${pickRows}
                  <div class="or-line"><span>以上皆非，請直接輸入姓名</span></div>`
               : `<div class="or-line"><span>目前無可選對象，請直接輸入姓名</span></div>`
           }
@@ -1722,7 +1777,7 @@ function renderGameDetail(container, season, game, options) {
       // screen, which manages everybody's. `canRemoveDropIn` is how the
       // two pages differ; the server checks the same thing again.
       controls:
-        opts.onRemoveDropIn && (opts.canRemoveDropIn || (() => true))(d)
+        opts.onRemoveDropIn && !frozen && (opts.canRemoveDropIn || (() => true))(d)
           ? `<button type="button" class="mini-action danger" data-remove-drop-in="${d.id}">移除</button>`
           : "",
     });
@@ -1735,9 +1790,9 @@ function renderGameDetail(container, season, game, options) {
   for (const absence of game.absences) {
     const allowed = canAssignSubstitute(absence);
     const covering = game.confirmed_drop_ins.find((d) => d.covering === absence.player_name);
-    const offerAssign = !!onAssignSubstitute && allowed;
+    const offerAssign = !!onAssignSubstitute && allowed && !frozen;
     const offerCancel =
-      !!absence.covered_by && !locked && !!onCancelSubstitute && allowed && covering;
+      !!absence.covered_by && !frozen && !!onCancelSubstitute && allowed && covering;
 
     // Nouns, two characters, like every other mini-action in the app
     // (儲存, 刪除, 編輯, 退款, 明細, 復原, 請假, 移除, 遞補, 固定, 臨打).
@@ -1762,7 +1817,7 @@ function renderGameDetail(container, season, game, options) {
       (offerCancel
         ? `<button type="button" class="mini-action danger" data-cancel-sub="${covering.id}">取消</button>`
         : "") +
-      (opts.onCancelAbsence && !absence.covered_by
+      (opts.onCancelAbsence && !absence.covered_by && !frozen
         ? `<button type="button" class="mini-action" data-undo-absence="${absence.id}">銷假</button>`
         : "");
 
@@ -1850,10 +1905,10 @@ function renderGameDetail(container, season, game, options) {
         // queue's own order is exactly what they are overriding — the
         // person at the front is often the one who can't make it.
         controls:
-          (opts.onPromoteFromWaitlist
+          (opts.onPromoteFromWaitlist && !frozen
             ? `<button type="button" class="mini-action" data-promote-waitlist="${w.id}">遞補</button>`
             : "") +
-          (opts.onLeaveWaitlist && (!opts.canLeaveWaitlist || opts.canLeaveWaitlist(w))
+          (opts.onLeaveWaitlist && !frozen && (!opts.canLeaveWaitlist || opts.canLeaveWaitlist(w))
             ? `<button type="button" class="mini-action danger" data-remove-waitlist="${w.id}">移除</button>`
             : ""),
       }) + (opts.onPromoteFromWaitlist ? swapOutPicker(w) : "")
@@ -1912,7 +1967,7 @@ function renderGameDetail(container, season, game, options) {
     }
     ${extraHtml}
     ${
-      opts.onAddDropIn
+      opts.onAddDropIn && !frozen
         ? // The trigger comes before its own popup in the markup, not
           // after — the popup is an overlay the trigger produces, and
           // putting it first pushed every button after it one or two
@@ -2099,26 +2154,8 @@ function renderGameDetail(container, season, game, options) {
    * this game's own list.
    */
   function dropInCandidates() {
-    const alreadyThere = new Set(
-      season.members
-        .map((m) => m.name)
-        .concat(game.confirmed_drop_ins.map((d) => d.player_name))
-        .concat(game.waitlist_entries.map((w) => w.player_name))
-    );
-    const seen = new Set();
-    const out = [];
-    for (const person of [...clubMembers, ...(opts.myGuests || [])]) {
-      const name = person.name;
-      if (alreadyThere.has(name) || seen.has(name)) continue;
-      seen.add(name);
-      out.push({
-        id: person.id != null ? person.id : null,
-        name,
-        gender: person.gender,
-        note: person.times ? `報名過 ${person.times} 次` : "",
-      });
-    }
-    return out;
+    // Somebody already queued for this game is signed up already.
+    return peopleToPick(null, false);
   }
 
   /** Opens the shared picker in place of the old bare name field and

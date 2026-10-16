@@ -327,6 +327,11 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
    load the <img> removes itself and the initial underneath is already
    there. See avatarHtml in shared.js. */
 .avatar.has-photo { position: relative; overflow: hidden; }
+/* A picker's groups (候補 / 球隊成員 / 訪客) and the people in them who
+   can't be chosen — shown, greyed, with the reason in the note. */
+.pick-group { font-size: .74rem; font-weight: 700; color: var(--ink-faint); letter-spacing: .04em; margin: 12px 2px 4px; }
+.pick-row.is-disabled { opacity: .45; cursor: default; }
+.pick-row.is-disabled .radio { visibility: hidden; }
 /* The management pages, opened by the developer on a club that isn't
    theirs. Plain and unmissable rather than alarming. */
 .dev-view {
