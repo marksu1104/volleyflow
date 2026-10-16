@@ -479,6 +479,7 @@ class LedgerEntryRow(Base):
         Index("ix_ledger_entries_player_id", "player_id"),
         Index("ix_ledger_entries_season_id", "season_id"),
         Index("ix_ledger_entries_club_id", "club_id"),
+        Index("ix_ledger_entries_game_id", "game_id"),
         # One undo per payment: a repeated 復原 must not reverse it twice.
         Index(
             "uq_ledger_entries_reverses_entry_id",
@@ -531,3 +532,12 @@ class LedgerEntryRow(Base):
     """A token the caller generates once per intended action, so a
     retried or double-tapped request lands as one entry. See the partial
     unique index above."""
+    game_id: Mapped[int | None] = mapped_column(ForeignKey("games.id"), default=None)
+    """The night a drop-in payment was taken for, on 當天臨打.
+
+    Null for every other entry. Before 2026-10-16 that tab showed and
+    collected a drop-in's whole season of fees, so 已收 on one night
+    marked every other night paid too. A night counts as paid when
+    payments for it cover its fee, or when the player owes nothing for
+    the season at all — a lump sum at 季末結算 settles every night.
+    An undo carries the same night as the payment it reverses."""

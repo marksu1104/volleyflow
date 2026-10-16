@@ -967,6 +967,7 @@ def get_season(
                 locked=not (
                     viewer_is_organizer or _within_change_deadline(game, season_row)
                 ),
+                past_deadline=not _within_change_deadline(game, season_row),
                 absences=[
                     AbsenceDetailOut(
                         id=aid,

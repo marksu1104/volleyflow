@@ -133,10 +133,10 @@ def test_a_promotion_undone_before_the_next_run_is_never_announced(
     client: TestClient, sent_messages: SentMessages, db_session: Session
 ) -> None:
     """Reported 2026-10-14: after the deadline the organizer took leave
-    for somebody, Jay came off the queue and was told at once, then the
-    organizer named a 代打 and Jay went straight back to the queue —
+    for somebody, a queued guest came off the queue and was told at once,
+    then the organizer named a 代打 and they went straight back to the queue —
     holding a message saying he was playing."""
-    _season, game_id, jay = _queued_behind_a_full_game(client, "Jay")
+    _season, game_id, frank = _queued_behind_a_full_game(client, "Frank")
     _past_the_deadline(db_session, game_id)
     absence = client.post(
         "/absences", json={"player_name": "Alice", "game_id": game_id}
@@ -148,8 +148,8 @@ def test_a_promotion_undone_before_the_next_run_is_never_announced(
     ).json()
     _next_run(db_session)
 
-    assert named["displaced_player_id"] == jay["id"], "the setup must bump Jay"
-    assert _told(sent_messages, jay) == []
+    assert named["displaced_player_id"] == frank["id"], "the setup must bump Frank"
+    assert _told(sent_messages, frank) == []
 
 
 def test_taking_leave_back_and_forth_announces_the_promotion_once(
@@ -157,7 +157,7 @@ def test_taking_leave_back_and_forth_announces_the_promotion_once(
 ) -> None:
     # The same report: leave taken, taken back, taken again promoted the
     # same person twice, and each promotion used to send its own message.
-    _season, game_id, jay = _queued_behind_a_full_game(client, "Jay")
+    _season, game_id, frank = _queued_behind_a_full_game(client, "Frank")
     _past_the_deadline(db_session, game_id)
     first = client.post(
         "/absences", json={"player_name": "Alice", "game_id": game_id}
@@ -167,7 +167,7 @@ def test_taking_leave_back_and_forth_announces_the_promotion_once(
 
     _next_run(db_session)
 
-    assert len(_told(sent_messages, jay)) == 1
+    assert len(_told(sent_messages, frank)) == 1
 
 
 def test_somebody_told_then_bumped_and_promoted_again_hears_once(
@@ -175,7 +175,7 @@ def test_somebody_told_then_bumped_and_promoted_again_hears_once(
 ) -> None:
     # Told they are playing, bumped by a 代打, back in when the 代打 is
     # cancelled: playing, as they were told, so nothing more is said.
-    _season, game_id, jay = _queued_behind_a_full_game(client, "Jay")
+    _season, game_id, frank = _queued_behind_a_full_game(client, "Frank")
     _past_the_deadline(db_session, game_id)
     absence = client.post(
         "/absences", json={"player_name": "Alice", "game_id": game_id}
@@ -189,9 +189,9 @@ def test_somebody_told_then_bumped_and_promoted_again_hears_once(
 
     _next_run(db_session)
 
-    assert len(_told(sent_messages, jay)) == 1
+    assert len(_told(sent_messages, frank)) == 1
     on_court = db_session.query(DropInRow).filter(
-        DropInRow.game_id == game_id, DropInRow.player_id == jay["id"]
+        DropInRow.game_id == game_id, DropInRow.player_id == frank["id"]
     )
     assert [row.status for row in on_court] == ["playing"]
 
@@ -201,7 +201,7 @@ def test_a_queued_person_named_a_substitute_is_told_like_any_promotion(
 ) -> None:
     """Before the deadline the batch already told them; after it the
     route never did. One rule now: off the queue onto the court, told."""
-    season, game_id, jay = _queued_behind_a_full_game(client, "Jay")
+    season, game_id, frank = _queued_behind_a_full_game(client, "Frank")
     dave = identify(client, "Dave")
     join_club(client, season["club_id"], auth_headers(dave["token"]))
     client.post(
@@ -221,7 +221,7 @@ def test_a_queued_person_named_a_substitute_is_told_like_any_promotion(
     _next_run(db_session)
 
     assert len(_told(sent_messages, dave)) == 1
-    assert _told(sent_messages, jay) == [], "Jay was bumped back to the queue"
+    assert _told(sent_messages, frank) == [], "Frank was bumped back to the queue"
 
 
 def test_people_told_before_the_change_are_not_told_again_by_it(
@@ -238,8 +238,8 @@ def test_people_told_before_the_change_are_not_told_again_by_it(
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
 
-    # Past its deadline: Jay came off the queue and was told; Dave still waits.
-    season, told_game, jay = _queued_behind_a_full_game(client, "Jay")
+    # Past its deadline: Frank came off the queue and was told; Dave still waits.
+    season, told_game, frank = _queued_behind_a_full_game(client, "Frank")
     dave = identify(client, "Dave")
     join_club(client, season["club_id"], auth_headers(dave["token"]))
     client.post(
@@ -264,7 +264,7 @@ def test_people_told_before_the_change_are_not_told_again_by_it(
         row.player_id: row.promotion_notice_sent_at is not None
         for row in db_session.query(DropInRow)
     }
-    assert marked[jay["id"]] is True
+    assert marked[frank["id"]] is True
     assert marked[dave["id"]] is False, "still queued, never told"
     assert marked[erin["id"]] is False, "her game's deadline hasn't come"
 

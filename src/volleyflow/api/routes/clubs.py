@@ -62,6 +62,7 @@ from volleyflow.db.models import (
     SeasonMemberRow,
     SeasonRow,
 )
+from volleyflow.schedule import GameStatus
 
 router = APIRouter()
 
@@ -835,6 +836,41 @@ def remove_club_member(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Still a fixed member of a season — remove them from that season first",
+        )
+
+    # Taking somebody out while money or a signup is still open stranded
+    # both: their fee could no longer be marked received, and their place
+    # stayed on a roster under a name the club no longer had (2026-10-16).
+    # Settled and finished with, they can go.
+    balance = (
+        db.query(func.coalesce(func.sum(LedgerEntryRow.amount), 0))
+        .filter(
+            LedgerEntryRow.club_id == club_id, LedgerEntryRow.player_id == player_id
+        )
+        .scalar()
+    )
+    if balance != 0:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Still has money to settle with this club — settle it before removing them",
+        )
+    signed_up = (
+        db.query(DropInRow.id)
+        .join(GameRow, GameRow.id == DropInRow.game_id)
+        .join(SeasonRow, SeasonRow.id == GameRow.season_id)
+        .filter(
+            SeasonRow.club_id == club_id,
+            DropInRow.player_id == player_id,
+            DropInRow.cancelled_at.is_(None),
+            GameRow.status == GameStatus.SCHEDULED,
+            GameRow.date >= _today_in_taiwan(),
+        )
+        .first()
+    )
+    if signed_up is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Still signed up for a game to come — cancel that signup first",
         )
 
     if membership.role == "organizer":

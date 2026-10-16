@@ -629,6 +629,12 @@ class GameDetailOut(BaseModel):
     deadline exists to stop the roster shifting under them and they're
     the one who has to record what actually happened — so this is
     answered per caller, not per game."""
+    past_deadline: bool = False
+    """Whether the game is past its change deadline, whoever is asking.
+    The member screen locks on this, so the organizer using it as a
+    member is held to the same deadline as everybody else (2026-10-16);
+    the management screen, which reads `locked`, is where they correct
+    a night after the fact."""
     air_conditioned: bool
     """Whether the air conditioning ran (or is forecast to). Set when the
     season is created and corrected on the day — see
@@ -756,6 +762,9 @@ class PaymentCreate(BaseModel):
     paid the organizer, negative means the organizer paid the player."""
     season_id: int | None = None
     note: str | None = None
+    game_id: int | None = None
+    """The night this pays for, when taken on 當天臨打 — so paying for one
+    night doesn't read as paying for the rest. Sets the season too."""
     client_token: str | None = None
     """Generated once per intended payment by the caller. Sending the
     same token again returns the entry already recorded instead of
@@ -772,6 +781,17 @@ class LedgerEntryOut(BaseModel):
     season_id: int | None
     note: str | None
     reverses_entry_id: int | None = None
+    game_id: int | None = None
+
+
+class DropInNightOut(BaseModel):
+    """One night a player is on court as a drop-in, for 當天臨打."""
+
+    game_id: int
+    charged: Decimal
+    """What that night's signup was charged."""
+    paid: Decimal
+    """Payments taken for that night, net of any undone."""
 
 
 class PlayerMerge(BaseModel):
@@ -874,6 +894,10 @@ class PlayerBalanceOut(BaseModel):
     """What is due by the season asked about: its own entries and every
     earlier season's, never a season that starts later. What 季費 and
     季末結算 act on. Equal to `balance` when no season is asked about."""
+    nights: list[DropInNightOut] = []
+    """Each night of the season asked about that they're on court as a
+    drop-in — what it cost and what was taken for it. Empty when no
+    season is asked about."""
     brought_by: str | None = None
     """Who signed this player up, when they're a guest somebody brought.
 

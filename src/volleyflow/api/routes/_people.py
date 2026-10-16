@@ -25,6 +25,7 @@ from volleyflow.api.schemas import (
 from volleyflow.db.models import (
     ClubMemberRow,
     ClubRow,
+    LedgerEntryRow,
     PlayerRow,
 )
 
@@ -138,6 +139,29 @@ def _get_club_or_404(db: Session, club_id: int) -> ClubRow:
     if club is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No club with id {club_id}")
     return club
+
+
+def _require_dealings_with_club(db: Session, club_id: int, player_id: int) -> None:
+    """A member, or somebody whose money is on this club's books.
+
+    Payments used to require current membership, and somebody who had
+    played as a drop-in and was later taken out of the club could no
+    longer have their fee marked received — reported 2026-10-16 as 「○○
+    不是隊伍裡的人」 on a night they had played. What they owe is still
+    owed, so the books decide, not the member list."""
+    if db.get(ClubMemberRow, {"club_id": club_id, "player_id": player_id}):
+        return
+    on_the_books = (
+        db.query(LedgerEntryRow.id)
+        .filter(
+            LedgerEntryRow.club_id == club_id, LedgerEntryRow.player_id == player_id
+        )
+        .first()
+    )
+    if on_the_books is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Player is not a member of this club"
+        )
 
 
 def _require_club_member(db: Session, club_id: int, player_id: int) -> None:

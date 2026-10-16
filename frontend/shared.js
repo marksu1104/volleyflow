@@ -1495,6 +1495,12 @@ function renderGameDetail(container, season, game, options) {
     : given;
   const extraHtml = opts.extraHtml || "";
   const clubMembers = opts.clubMembers || [];
+  // The member screen holds everybody to the deadline, the organizer
+  // included (2026-10-16): `locked` is answered per caller and is never
+  // true for them, which let them take leave on a night already played
+  // from a screen meant for their own attendance. The management screen
+  // leaves asMember off and keeps correcting a night after the fact.
+  const locked = game.locked || (opts.asMember === true && game.past_deadline === true);
   const viewerName = opts.viewerName || "";
   const onAssignSubstitute = opts.onAssignSubstitute;
   const onCancelSubstitute = opts.onCancelSubstitute;
@@ -1531,18 +1537,32 @@ function renderGameDetail(container, season, game, options) {
         .map((m) => m.name)
         .concat(game.confirmed_drop_ins.map((d) => d.player_name))
     );
+    // A fixed member is expected at this game already and can't stand in
+    // for anybody — the server refuses it — so they are never offered.
+    const fixed = new Set(season.members.map((m) => m.name));
+    // The whole club only on the management screen (asked 2026-10-16):
+    // the organizer may name anybody there, while a member may not name
+    // somebody with their own account, which most club members have.
+    const pools = [
+      [game.waitlist_entries, "候補中"],
+      [opts.myGuests || [], "候補中"],
+      [opts.substituteFromClub ? clubMembers : [], "球隊成員"],
+    ];
     const seen = new Set();
     const out = [];
-    for (const person of [...game.waitlist_entries, ...(opts.myGuests || [])]) {
-      if (playing.has(person.player_name || person.name)) continue;
-      const name = person.player_name || person.name;
-      if (name === absence.player_name || seen.has(name)) continue;
-      seen.add(name);
-      out.push({
-        name,
-        gender: person.gender,
-        note: person.times ? `報名過 ${person.times} 次` : "候補中",
-      });
+    for (const [people, fallbackNote] of pools) {
+      for (const person of people) {
+        const name = person.player_name || person.name;
+        if (playing.has(name) || fixed.has(name)) continue;
+        if (name === absence.player_name || seen.has(name)) continue;
+        seen.add(name);
+        out.push({
+          name,
+          gender: person.gender,
+          avatar_url: person.avatar_url || null,
+          note: person.times ? `報名過 ${person.times} 次` : fallbackNote,
+        });
+      }
     }
     return out;
   }
@@ -1717,7 +1737,7 @@ function renderGameDetail(container, season, game, options) {
     const covering = game.confirmed_drop_ins.find((d) => d.covering === absence.player_name);
     const offerAssign = !!onAssignSubstitute && allowed;
     const offerCancel =
-      !!absence.covered_by && !game.locked && !!onCancelSubstitute && allowed && covering;
+      !!absence.covered_by && !locked && !!onCancelSubstitute && allowed && covering;
 
     // Nouns, two characters, like every other mini-action in the app
     // (儲存, 刪除, 編輯, 退款, 明細, 復原, 請假, 移除, 遞補, 固定, 臨打).
@@ -1886,7 +1906,7 @@ function renderGameDetail(container, season, game, options) {
     ${
       closed
         ? '<div class="gdetail-locked">本季已結算，名單已確定</div>'
-        : game.locked
+        : locked
           ? '<div class="gdetail-locked">已過更動期限，這一場無法再變更</div>'
           : ""
     }
@@ -2630,6 +2650,15 @@ const _API_ERROR_PATTERNS = [
     /^Still a fixed member of a season/,
     () => "還是某一季的固定成員，請先在那一季把他移除",
   ],
+  [
+    /^Still has money to settle with this club/,
+    () => "還有未結清的款項，請先收款或退款再移除",
+  ],
+  [
+    /^Still signed up for a game to come/,
+    () => "還有尚未進行的報名，請先取消報名再移除",
+  ],
+  [/^That player isn't on court for that game$/, () => "這個人在那一場不在場上，不能收臨打費"],
   [
     /^You can only do that for yourself, unless you're the organizer$/,
     () => "只能對自己這麼做，除非你是管理員",

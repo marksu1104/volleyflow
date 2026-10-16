@@ -9,8 +9,9 @@ deadline exists to stop the roster shifting under them on the night, and
 they are the one who has to record what actually happened.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
@@ -192,3 +193,27 @@ def test_changes_close_the_given_hours_before_the_game_starts(
 
     assert refused.status_code == 400
     assert allowed.status_code == 200
+
+
+def test_the_member_screen_lock_does_not_depend_on_who_is_looking(
+    client: TestClient,
+) -> None:
+    """Reported 2026-10-16: the organizer, on the member screen, could
+    still take leave on a night already played — `locked` is answered per
+    caller and is never true for the organizer. `past_deadline` is the
+    same for everyone, and the member screen locks on it; the management
+    screen keeps `locked`, where the organizer corrects a night."""
+    today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+    played = (today - timedelta(days=1)).isoformat()
+    ahead = (today + timedelta(days=30)).isoformat()
+    season = start_season(
+        client, member_names=["Alice"], capacity=2, game_dates=[played, ahead]
+    )
+
+    games = {
+        g["date"]: g for g in client.get(f"/seasons/{season['id']}").json()["games"]
+    }
+
+    assert games[played]["locked"] is False, "the organizer can still correct it"
+    assert games[played]["past_deadline"] is True
+    assert games[ahead]["past_deadline"] is False

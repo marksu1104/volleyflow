@@ -458,6 +458,29 @@ the roster named somebody who had never signed them up. The member whose
 absence a 代打 covers can still cancel that 代打 — found through the
 absence, not through the bringer.
 
+### Taking a drop-in's fee one night at a time
+
+A drop-in owes a night's share only for a night they actually got a place
+— on court, never queued — and it is collected on that night. So a
+payment taken on 當天臨打 is recorded **against that night**
+(`ledger_entries.game_id`), and a night counts as paid when:
+
+- the payments recorded against it cover what that night's signup was
+  charged, or
+- the player owes nothing for the season at all — a guest who settles
+  every night in one go at 季末結算 has every night paid.
+
+Decided 2026-10-16. Before, the row showed and collected the guest's whole
+season of drop-in fees, so 已收 on one night recorded all of them and
+marked every other night paid. A payment against a night is refused for
+somebody not on court that night. An undo carries the same night. The
+balance is unchanged by any of this: a night's payment is an ordinary
+`payment` entry, summed like every other.
+
+Somebody whose money is on a club's books can always be paid or refunded
+there, member or not; and nobody can be taken out of a club while they
+still owe or are owed, or hold a signup for a game still to come.
+
 ### Collecting the next season's fee
 
 The 繳費通知 is the only money message, sent from the 季費 tab when the

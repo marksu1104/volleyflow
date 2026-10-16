@@ -494,6 +494,7 @@
         ? ""
         : `<div class="hero-status absent">${statusLabel(game.status)}</div>`,
       clubMembers,
+      substituteFromClub: true,
       myGuests,
       viewerName: myName,
       onAssignSubstitute: (absenceId, name, gender, target) =>

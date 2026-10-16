@@ -1054,6 +1054,7 @@
       ? `<span class="meta-pill">更動截止 <strong>開賽前 ${currentSeason.change_deadline_hours} 小時</strong></span>`
       : "";
     renderGameDetail(el, currentSeason, game, {
+      asMember: true,
       heroMetaPills: [acPill(currentSeason, game), deadlinePill],
       clubMembers,
       myGuests,
@@ -1247,7 +1248,9 @@
         actions: "",
       };
     }
-    if (game.locked) {
+    // past_deadline, not just locked: locked is never true for the
+    // organizer, and this is their own attendance screen like anybody's.
+    if (game.locked || game.past_deadline) {
       return {
         status: '<div class="hero-status">已過更動期限，這一場無法再變更</div>',
         actions: "",

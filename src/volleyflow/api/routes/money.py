@@ -1,6 +1,7 @@
 """Payments in, refunds out, and what each person's books say."""
 
 from datetime import date
+from decimal import Decimal
 
 from fastapi import (
     APIRouter,
@@ -17,17 +18,18 @@ from volleyflow.api.conversion import (
     player_from_row,
 )
 from volleyflow.api.dependencies import get_db
-from volleyflow.api.routes._money import _counts_up_to, _seasons_up_to
+from volleyflow.api.routes._money import _counts_up_to, _drop_in_share, _seasons_up_to
 from volleyflow.api.routes._people import (
     _get_club_or_404,
     _get_player_or_404,
     _now,
-    _require_club_member,
+    _require_dealings_with_club,
     _require_organizer,
     _require_self_or_organizer,
     get_current_player,
 )
 from volleyflow.api.schemas import (
+    DropInNightOut,
     LedgerEntryOut,
     PaymentCreate,
     PlayerBalanceOut,
@@ -63,7 +65,33 @@ def record_payment(
     _get_club_or_404(db, club_id)
     _require_organizer(db, club_id, current_player)
     _get_player_or_404(db, player_id)
-    _require_club_member(db, club_id, player_id)
+    _require_dealings_with_club(db, club_id, player_id)
+    season_id = payload.season_id
+    if payload.game_id is not None:
+        game = db.get(GameRow, payload.game_id)
+        night_season = db.get(SeasonRow, game.season_id) if game is not None else None
+        if night_season is None or night_season.club_id != club_id:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, f"No game with id {payload.game_id}"
+            )
+        season_id = night_season.id
+        # A drop-in fee is owed only by somebody who actually got a place
+        # that night, so it is only taken from somebody on court then —
+        # never a queued signup (asked 2026-10-16).
+        on_court = (
+            db.query(DropInRow.id)
+            .filter(
+                DropInRow.game_id == payload.game_id,
+                DropInRow.player_id == player_id,
+                DropInRow.playing(),
+            )
+            .first()
+        )
+        if on_court is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "That player isn't on court for that game",
+            )
 
     # Recording money is the one thing that must not happen twice because
     # a phone lost signal mid-request and the tap was repeated. If this
@@ -83,6 +111,7 @@ def record_payment(
                 recorded_at=already.recorded_at,
                 season_id=already.season_id,
                 note=already.note,
+                game_id=already.game_id,
             )
 
     entry = LedgerEntryRow(
@@ -91,7 +120,8 @@ def record_payment(
         entry_type=EntryType.PAYMENT,
         amount=payload.amount,
         recorded_at=_now(),
-        season_id=payload.season_id,
+        season_id=season_id,
+        game_id=payload.game_id,
         note=payload.note,
         client_token=payload.client_token,
     )
@@ -117,6 +147,7 @@ def record_payment(
             recorded_at=existing.recorded_at,
             season_id=existing.season_id,
             note=existing.note,
+            game_id=existing.game_id,
         )
     db.refresh(entry)
 
@@ -127,6 +158,7 @@ def record_payment(
         recorded_at=entry.recorded_at,
         season_id=entry.season_id,
         note=entry.note,
+        game_id=entry.game_id,
     )
 
 
@@ -176,6 +208,7 @@ def list_club_balances(
         .all()
     )
     brought_by = _who_brought(db, club_id)
+    nights = _drop_in_nights(db, club_id, season_id)
     return [
         PlayerBalanceOut(
             player_id=player_id,
@@ -183,10 +216,54 @@ def list_club_balances(
             season_total=season_total,
             season_fee_charged=season_fee,
             through_season=through,
+            nights=nights.get(player_id, []),
             brought_by=brought_by.get(player_id),
         )
         for player_id, balance_total, season_total, through, season_fee in rows
     ]
+
+
+def _drop_in_nights(
+    db: Session, club_id: int, season_id: int | None
+) -> dict[int, list[DropInNightOut]]:
+    """Player id -> each night of the season they're on court as a drop-in,
+    with that night's fee and what has been taken for it. One pass over
+    the season's signups and one over its night-tagged payments."""
+    season = db.get(SeasonRow, season_id) if season_id is not None else None
+    if season is None or season.club_id != club_id:
+        return {}
+    paid: dict[tuple[int, int], Decimal] = {
+        (player_id, game_id): amount
+        for player_id, game_id, amount in db.query(
+            LedgerEntryRow.player_id,
+            LedgerEntryRow.game_id,
+            func.sum(LedgerEntryRow.amount),
+        )
+        .filter(
+            LedgerEntryRow.club_id == club_id,
+            LedgerEntryRow.entry_type == EntryType.PAYMENT,
+            LedgerEntryRow.game_id.is_not(None),
+        )
+        .group_by(LedgerEntryRow.player_id, LedgerEntryRow.game_id)
+    }
+    nights: dict[int, list[DropInNightOut]] = {}
+    for drop_in in (
+        db.query(DropInRow)
+        .join(GameRow, GameRow.id == DropInRow.game_id)
+        .filter(GameRow.season_id == season.id, DropInRow.playing())
+        .order_by(GameRow.date)
+    ):
+        charged = drop_in.charged_amount
+        if charged is None:
+            charged = _drop_in_share(db, season, drop_in.game_id)
+        nights.setdefault(drop_in.player_id, []).append(
+            DropInNightOut(
+                game_id=drop_in.game_id,
+                charged=charged,
+                paid=paid.get((drop_in.player_id, drop_in.game_id), Decimal(0)),
+            )
+        )
+    return nights
 
 
 def _season_ids_up_to(
@@ -333,6 +410,7 @@ def reverse_payment(
         amount=-entry.amount,
         recorded_at=_now(),
         season_id=entry.season_id,
+        game_id=entry.game_id,
         reverses_entry_id=entry.id,
     )
     db.add(undo)
@@ -353,4 +431,5 @@ def reverse_payment(
         season_id=undo.season_id,
         note=undo.note,
         reverses_entry_id=undo.reverses_entry_id,
+        game_id=undo.game_id,
     )

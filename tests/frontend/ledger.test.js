@@ -8,7 +8,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { load } = require("./harness.js");
 
-const { splitLedger, moneyRowHtml, balanceOf } = load("organizer-ledger.html");
+const { splitLedger, nightSplit, moneyRowHtml, balanceOf } = load("organizer-ledger.html");
 
 // `through` is the server's through_season: this season plus earlier
 // ones. It equals the balance unless a later season is already booked.
@@ -88,7 +88,8 @@ test("已收 collects what is due up to this season, never a later season's fee"
     null
   );
 
-  assert.match(html, /recordFullPayment\(this, 1, 3055\)/);
+  // `null`: a season row books against no particular night.
+  assert.match(html, /recordFullPayment\(this, 1, 3055, null\)/);
 });
 
 test("what last season left unpaid is collected with this season's fee", () => {
@@ -110,11 +111,54 @@ test("季末結算 squares this season and earlier ones, not a season booked lat
   assert.match(moneyRowHtml(1, "林書妤", "female", split, null, null), /應收 \$2585/);
 });
 
-test("當天臨打 still collects only this season's money", () => {
-  const split = splitLedger(row(-2000, 0, -3055), "season");
+// 當天臨打, one night at a time (2026-10-16). It used to show and collect
+// a guest's whole season of drop-in fees, so 已收 on one night marked
+// every night paid.
+const guest = (seasonTotal, nights) => ({ ...row(seasonTotal, seasonTotal, 0), nights });
 
-  assert.equal(split.due, 0);
-  assert.match(moneyRowHtml(1, "林書妤", "female", split, null, null), /已結清/);
+test("當天臨打 asks only for the night on screen, and books it to that night", () => {
+  const books = guest(-470, [
+    { game_id: 41, charged: "235", paid: "0" },
+    { game_id: 42, charged: "235", paid: "0" },
+  ]);
+
+  const html = moneyRowHtml(1, "訪客甲", "female", nightSplit(books, 42), null, null);
+
+  assert.match(html, /應收 \$235/);
+  assert.match(html, /recordFullPayment\(this, 1, 235, 42\)/);
+  assert.match(html, /本季共應收 <b>\$470/, "the other night is mentioned, not taken");
+});
+
+test("a night paid for is settled while the other night is still owed", () => {
+  const books = guest(-235, [
+    { game_id: 41, charged: "235", paid: "235" },
+    { game_id: 42, charged: "235", paid: "0" },
+  ]);
+
+  assert.equal(nightSplit(books, 41).due, 0);
+  assert.equal(nightSplit(books, 42).due, -235);
+});
+
+test("owing nothing for the season settles every night, however it was paid", () => {
+  // Paid in one go at 季末結算: no night has a payment of its own.
+  const books = guest(0, [
+    { game_id: 41, charged: "235", paid: "0" },
+    { game_id: 42, charged: "235", paid: "0" },
+  ]);
+
+  const html = moneyRowHtml(1, "訪客甲", "female", nightSplit(books, 41), null, null);
+
+  assert.match(html, /已結清/);
+  assert.doesNotMatch(html, /已收<\/button>/);
+});
+
+test("a night the books don't show yet offers nothing to press", () => {
+  // An answer from before the server sent nights: no figure is better
+  // than the whole season's.
+  const html = moneyRowHtml(1, "訪客甲", "female", nightSplit(row(-470, -470, 0), 41), null, null);
+
+  assert.match(html, /載入中/);
+  assert.doesNotMatch(html, /recordFullPayment/);
 });
 
 test("being owed money offers a refund but doesn't insist", () => {
