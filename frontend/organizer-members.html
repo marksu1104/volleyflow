@@ -56,7 +56,10 @@
 <div class="wrap wide" id="members-page" data-picker-loading-root>
   <div class="app-bar">
     <span class="app-bar-left">
-      <button type="button" class="back-btn" onclick="location.href='member.html'">‹ 會員頁</button>
+      <button type="button" id="club-chip" class="club-chip">
+        <i class="club-dot" id="club-dot">-</i><span id="club-chip-name" class="club-chip-name">選擇球隊</span><span class="caret">▾</span>
+      </button>
+      <select id="club-picker" class="club-picker" hidden aria-hidden="true" tabindex="-1"></select>
     </span>
     <button type="button" class="brand" onclick="location.href='member.html'">VolleyFlow</button>
     <span class="app-bar-right">
@@ -77,10 +80,6 @@
   </nav>
 
   <div class="picker-row picker-row-labeled">
-    <div id="club-picker-field" class="picker-field" hidden>
-      <label for="club-picker">球隊</label>
-      <select id="club-picker" class="season-picker club-picker" hidden></select>
-    </div>
     <div id="season-picker-field" class="picker-field" hidden>
       <label for="season-picker">季別</label>
       <span class="picker-control">
@@ -105,12 +104,12 @@
        好比較順眼」. Using a thing beats looking at a picture of it. -->
   <div id="join-link-section" hidden>
     <div class="section-label">加入連結</div>
-    <p class="hint">複製連結以分享給你的隊友加入隊伍。</p>
+    <p class="hint">分享此連結，邀請隊友加入球隊。</p>
     <div id="join-link-body"></div>
   </div>
 
   <div id="settled-note" class="settled-note" hidden>
-    這一季已經結算，成員名單不能再變動。
+    本季已結算，成員名單無法再變更。
   </div>
 
   <div id="no-season"></div>
@@ -189,6 +188,8 @@
 <script>
   // localhost -> the local API, anywhere else -> production. See apiBase.
   const API_BASE = apiBase();
+  // The club is chosen from the top bar, as on the member page.
+  mountClubChip(document.getElementById("club-chip"), document.getElementById("club-picker"));
   const LIFF_ID = "2011156233-6CouG6VI";
   let currentSeason = null;
 
@@ -273,8 +274,6 @@
         selectedContext = context;
         rosterEditing = false;
         const hasClub = !!clubId;
-        document.getElementById("club-picker-field").hidden = !hasClub;
-        document.getElementById("club-picker").hidden = !hasClub;
         document.getElementById("season-picker-field").hidden = !seasonId;
         document.getElementById("season-picker").hidden = !seasonId;
         loadPage(seasonId);
@@ -483,7 +482,7 @@
     if (
       toRoster &&
       seasonHasStarted(currentSeason) &&
-      !confirm(`把「${person.name}」加入本季固定名單後，會為他記入完整本季季費。確定要繼續嗎？`)
+      !confirm(`將「${person.name}」加入本季固定名單後，將記入完整本季季費。確定要繼續嗎？`)
     ) {
       return;
     }
@@ -699,7 +698,7 @@
     if (
       seasonHasStarted(currentSeason) &&
       !confirm(
-        `把「${player.name}」加入本季固定名單後，會為他記入完整本季季費。確定要更正嗎？`
+        `將「${player.name}」加入本季固定名單後，將記入完整本季季費。確定要更正嗎？`
       )
     ) {
       return;
@@ -958,7 +957,7 @@
     if (
       seasonHasStarted(currentSeason) &&
       !confirm(
-        `把「${member.name}」從本季固定名單移除後，會沖銷他的本季季費。確定要更正嗎？`
+        `將「${member.name}」自本季固定名單移除後，將沖銷其本季季費。確定要更正嗎？`
       )
     ) {
       return;

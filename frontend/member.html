@@ -450,7 +450,7 @@
     document.getElementById("month-cal").hidden = true;
     const wrap = document.getElementById("hero-wrap");
     wrap.innerHTML =
-      '<p class="section-label" style="margin-top:0">要看哪一隊</p>' +
+      '<p class="section-label" style="margin-top:0">選擇球隊</p>' +
       clubs
         .map(
           (c) => `
@@ -594,7 +594,7 @@
     if (!club) {
       html = emptyStateHtml(
         "尚未加入任何球隊",
-        "點左上角的球隊按鈕，可以建立一個新的球隊，或用管理員給你的連結加入。"
+        "可由左上角的球隊按鈕建立球隊，或使用管理員提供的連結加入。"
       );
     } else if (mine && mine.role === "organizer") {
       html = emptyStateHtml(
@@ -839,7 +839,7 @@
   }
 
   async function createClub() {
-    const name = prompt("球隊名稱？");
+    const name = prompt("請輸入球隊名稱");
     if (!name || !name.trim()) return;
     if (name.trim().length > CLUB_NAME_MAX) {
       toast(`球隊名稱最多 ${CLUB_NAME_MAX} 個字`);
@@ -998,7 +998,7 @@
       season.games.find((g) => !describeDate(g.date).isPast) ||
       season.games[season.games.length - 1];
     if (!game) {
-      wrap.innerHTML = '<div class="empty">這一季尚無場次</div>';
+      wrap.innerHTML = '<div class="empty">本季尚無場次</div>';
       return;
     }
     selectedGameId = game.id;
@@ -1047,7 +1047,7 @@
     const el = document.getElementById("game-detail");
     const game = currentSeason && currentSeason.games.find((g) => g.id === selectedGameId);
     if (!currentSeason || !game) {
-      el.innerHTML = '<div class="empty">這一季尚無場次</div>';
+      el.innerHTML = '<div class="empty">本季尚無場次</div>';
       return;
     }
     const deadlinePill = currentSeason.change_deadline_hours != null
@@ -1063,6 +1063,13 @@
       actionsHtml: myActions(currentSeason, game).actions,
       onAssignSubstitute: (absenceId, name, gender, target) =>
         assignSubstitute(absenceId, name, gender, target),
+      // The viewer's own row only: this screen is for their own
+      // attendance, and the hero card's 請假 does the same thing.
+      onRecordAbsence: (name, btn) => recordAbsence(selectedGameId, btn),
+      canRecordAbsence: (m) => m.name === playerName(),
+      onRecordAbsenceWithSubstitute: (name, subName, gender, target) =>
+        recordAbsenceWithSubstitute(selectedGameId, subName, gender, target),
+      onCancelAbsence: (absenceId, btn) => cancelAbsence(absenceId, btn),
       onLeaveWaitlist: (entryId, btn) => leaveWaitlist(entryId, btn),
       onCancelSubstitute: (dropInId, btn) => cancelDropIn(dropInId, btn),
       onRemoveDropIn: (dropInId, btn) => cancelDropIn(dropInId, btn),
@@ -1134,13 +1141,76 @@
       // Somebody stepping back out is not a detail to hide: the queue had
       // already filled this slot, and they are owed an explanation.
       toast(
-        bumped ? `${name} 上場，${bumped.player_name} 回到候補` : `已指定 ${name} 代打`,
+        bumped ? `已指定 ${name} 代打，${bumped.player_name} 回到候補` : `已指定 ${name} 代打`,
         "good"
       );
       refreshSeasonQuietly();
     } catch (e) {
       settleRosterChange(changeToken, false);
       toast("指定代打失敗：" + e.message);
+    }
+    });
+  }
+
+  /** The hero card's 請假: leave alone, or leave with a substitute named
+   * in the same step. The same two choices as the viewer's own row in
+   * 名單 (see renderGameDetail). */
+  function chooseAbsence(gameId, btn) {
+    const game = currentSeason && currentSeason.games.find((g) => g.id === gameId);
+    if (!game) return;
+    const head = game.waitlist_entries[0];
+    const info = describeDate(game.date);
+    openActionSheet({
+      title: "請假",
+      subtitle: `${info.month}/${info.day}（${info.weekday.slice(1)}）`,
+      actions: [
+        {
+          label: "登記請假",
+          hint: head ? `空出的位置由候補 ${head.player_name} 遞補` : "空出的位置列為缺額",
+          run: () => recordAbsence(gameId, btn),
+        },
+        {
+          label: "請假並指定代打",
+          hint: "登記請假，並由指定人選補上此位置",
+          run: () => {
+            if (selectedGameId !== gameId) selectGame(gameId);
+            openGameSheet();
+            openAbsenceWithSubstitute(document.getElementById("game-detail"), playerName());
+          },
+        },
+      ],
+    });
+  }
+
+  /** 請假並指定代打 in one request — see POST /absences's `substitute`.
+   * Waits on the server, like assignSubstitute: whether the name is
+   * accepted is not something to guess at. */
+  async function recordAbsenceWithSubstitute(gameId, subName, gender, target) {
+    const name = playerName();
+    return whileBusy(target, async () => {
+    let changeToken = null;
+    try {
+      changeToken = markGameDetailChange(
+        document.getElementById("game-detail"),
+        "absent",
+        [name]
+      );
+      repaintGame();
+      const result = await postJson(API_BASE, "/absences", {
+        player_name: name,
+        game_id: gameId,
+        substitute: { player_name: subName, gender },
+      });
+      applyAbsenceWithSubstituteLocally(currentSeason, gameId, name, result, {
+        name: subName,
+        gender,
+      });
+      settleRosterChange(changeToken, true);
+      toast(`已完成請假，由 ${subName} 代打`, "good");
+      refreshSeasonQuietly();
+    } catch (e) {
+      settleRosterChange(changeToken, false);
+      toast("請假並指定代打失敗：" + e.message);
     }
     });
   }
@@ -1252,7 +1322,7 @@
     // organizer, and this is their own attendance screen like anybody's.
     if (game.locked || game.past_deadline) {
       return {
-        status: '<div class="hero-status">已過更動期限，這一場無法再變更</div>',
+        status: '<div class="hero-status">已過更動期限，本場無法再變更</div>',
         actions: "",
       };
     }
@@ -1293,7 +1363,7 @@
       // different act from signing someone up: a 代打 takes *your*
       // slot, a 報名 queues for whatever slot is free.
       return {
-        status: '<div class="hero-status absent">已請假這一場</div>',
+        status: '<div class="hero-status absent">本場已請假</div>',
         actions:
           `<button type="button" class="hact" onclick="openSubstitutePicker(${myAbsence.id})">指定代打</button>` +
           `<button type="button" class="hact danger" onclick="cancelAbsence(${myAbsence.id}, this)">取消請假</button>` +
@@ -1304,13 +1374,13 @@
       return {
         status: "",
         actions:
-          `<button type="button" class="hact danger" onclick="recordAbsence(${game.id}, this)">請假</button>` +
+          `<button type="button" class="hact danger" onclick="chooseAbsence(${game.id}, this)">請假</button>` +
           bring,
       };
     }
     if (myDropIn) {
       return {
-        status: '<div class="hero-status confirmed">已報名這一場</div>',
+        status: '<div class="hero-status confirmed">本場已報名</div>',
         actions:
           `<button type="button" class="hact danger" onclick="cancelDropIn(${myDropIn.id}, this)">取消報名</button>` +
           bring,
@@ -1397,7 +1467,7 @@
     const picked = await choosePerson(document.getElementById("su-picker"));
     if (!picked) return;
     if (taken.has(picked.name)) {
-      toast(`${picked.name} 已經在這一場的名單上`);
+      toast(`${picked.name} 已在本場名單上`);
       return;
     }
     suPeople.push({ name: picked.name, gender: picked.gender, playerId: picked.id });

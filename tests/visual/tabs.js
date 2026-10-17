@@ -59,7 +59,9 @@ function report(name, problems) {
     other.on("pageerror", (e) => errors.push(`JS: ${String(e).slice(0, 140)}`));
     await other.goto(`${BASE}/organizer-settings.html?as=${encodeURIComponent(WHO)}`);
     await other.waitForTimeout(1500);
-    await other.selectOption("#club-picker", String(second.id));
+    // Through the top bar's club chip, as a person would.
+    await other.click("#club-chip");
+    await other.click(`[data-club="${second.id}"]`);
     await other.waitForTimeout(1500);
     const otherClub = await other.evaluate(() => currentClubId());
 

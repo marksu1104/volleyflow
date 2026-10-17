@@ -14,7 +14,10 @@
 <div class="wrap wide">
   <div class="app-bar">
     <span class="app-bar-left">
-      <button type="button" class="back-btn" onclick="location.href='member.html'">‹ 會員頁</button>
+      <button type="button" id="club-chip" class="club-chip">
+        <i class="club-dot" id="club-dot">-</i><span id="club-chip-name" class="club-chip-name">選擇球隊</span><span class="caret">▾</span>
+      </button>
+      <select id="club-picker" class="club-picker" hidden aria-hidden="true" tabindex="-1"></select>
     </span>
     <button type="button" class="brand" onclick="location.href='member.html'">VolleyFlow</button>
     <span class="app-bar-right">
@@ -35,10 +38,6 @@
   </nav>
 
   <div class="picker-row picker-row-labeled">
-    <div id="club-picker-field" class="picker-field" hidden>
-      <label for="club-picker">球隊</label>
-      <select id="club-picker" class="season-picker club-picker" hidden></select>
-    </div>
     <div id="season-picker-field" class="picker-field" hidden>
       <label for="season-picker">季別</label>
       <span class="picker-control">
@@ -82,6 +81,8 @@
 <script>
   // localhost -> the local API, anywhere else -> production. See apiBase.
   const API_BASE = apiBase();
+  // The club is chosen from the top bar, as on the member page.
+  mountClubChip(document.getElementById("club-chip"), document.getElementById("club-picker"));
   const LIFF_ID = "2011156233-6CouG6VI";
   let currentSeason = null;
   let selectedGameId = null;
@@ -126,8 +127,6 @@
       (id) => {
         stopLoadingEscalation();
         const hasClub = !!currentClubId();
-        document.getElementById("club-picker-field").hidden = !hasClub;
-        document.getElementById("club-picker").hidden = !hasClub;
         document.getElementById("season-picker-field").hidden = !id;
         document.getElementById("season-picker").hidden = !id;
         if (id) loadDashboard(id);
@@ -370,7 +369,7 @@
       season.games.find((g) => g.id === selectedGameId) ||
       season.games.find((g) => !describeDate(g.date).isPast) ||
       season.games[season.games.length - 1];
-    if (!game) { wrap.innerHTML = '<div class="empty">這一季尚無場次</div>'; return; }
+    if (!game) { wrap.innerHTML = '<div class="empty">本季尚無場次</div>'; return; }
     selectedGameId = game.id;
     const expected = expectedAttendance(season, game);
     const shortPill = expected < season.minimum_roster
@@ -480,10 +479,12 @@
     const el = document.getElementById("game-detail");
     const game = currentSeason && currentSeason.games.find((g) => g.id === selectedGameId);
     if (!currentSeason || !game) {
-      el.innerHTML = '<div class="empty">這一季尚無場次</div>';
+      el.innerHTML = '<div class="empty">本季尚無場次</div>';
       return;
     }
     renderGameDetail(el, currentSeason, game, {
+      // The card behind this sheet already shows the game in full.
+      compactHead: true,
       // The same pills the member sees on the same game. They were
       // missing here, so opening one game from the two pages showed two
       // different sets of facts about it — the price and whether the air
@@ -511,6 +512,8 @@
       // club tells them in person or in the group chat, and members with
       // no LINE account can't do any of it themselves.
       onRecordAbsence: (playerName, btn) => recordAbsenceFor(playerName, btn),
+      onRecordAbsenceWithSubstitute: (playerName, name, gender, target) =>
+        recordAbsenceWithSubstituteFor(playerName, name, gender, target),
       onCancelAbsence: (absenceId, btn) => cancelAbsenceFor(absenceId, btn),
       onRemoveDropIn: (dropInId, btn) => cancelSubstitute(dropInId, btn),
       // The management screen manages everybody's — that is what it is
@@ -579,13 +582,46 @@
       applySubstituteLocally(currentSeason, selectedGameId, absenceId, result, { name, gender });
       settleRosterChange(changeToken, true);
       toast(
-        bumped ? `${name} 上場，${bumped.player_name} 回到候補` : `已指定 ${name} 代打`,
+        bumped ? `已指定 ${name} 代打，${bumped.player_name} 回到候補` : `已指定 ${name} 代打`,
         "good"
       );
       refreshQuietly();
     } catch (e) {
       settleRosterChange(changeToken, false);
       toast("設定代打失敗：" + e.message);
+    }
+    });
+  }
+
+  /** 請假並指定代打 for somebody else, in one request — see
+   * POST /absences's `substitute`. Not optimistic, like assignSubstitute:
+   * whether the name is accepted is the server's to say. */
+  async function recordAbsenceWithSubstituteFor(playerName, name, gender, target) {
+    const gameId = selectedGameId;
+    return whileBusy(target, async () => {
+    let changeToken = null;
+    try {
+      changeToken = markGameDetailChange(
+        document.getElementById("game-detail"),
+        "absent",
+        [playerName]
+      );
+      repaintRosterChange();
+      const result = await postJson(API_BASE, "/absences", {
+        player_name: playerName,
+        game_id: gameId,
+        substitute: { player_name: name, gender },
+      });
+      applyAbsenceWithSubstituteLocally(currentSeason, gameId, playerName, result, {
+        name,
+        gender,
+      });
+      settleRosterChange(changeToken, true);
+      toast(`已替 ${playerName} 請假，由 ${name} 代打`, "good");
+      refreshQuietly();
+    } catch (e) {
+      settleRosterChange(changeToken, false);
+      toast("請假並指定代打失敗：" + e.message);
     }
     });
   }
@@ -877,7 +913,7 @@
       : null;
 
     if (isGameFull(currentSeason, game) && !replacing) {
-      toast(`這一場已滿 ${currentSeason.capacity} 人，且沒有臨打可以換下來 —— 請先讓某位請假，或到設定調高上限。`);
+      toast(`本場已滿 ${currentSeason.capacity} 人，且沒有可換下的臨打。請先登記一位請假，或於設定調高人數上限。`);
       return;
     }
 
@@ -918,7 +954,7 @@
     if (result) {
       toast(
         replacing
-          ? `${entry.player_name} 上場，${replacing.player_name} 回到候補`
+          ? `${entry.player_name} 已遞補上場，${replacing.player_name} 回到候補`
           : `${entry.player_name} 已遞補上場`,
         "good"
       );

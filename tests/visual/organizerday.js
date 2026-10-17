@@ -108,7 +108,7 @@ function inDays(days) {
       ...(todo.main.includes("等待核准") || sheet.text.includes("等待核准")
         ? []
         : [`待辦寫的是: ${todo.main} / ${sheet.text}`]),
-      ...(sheet.text.includes("沒人代打") ? [] : ["沒有提到沒人代打的那一場"]),
+      ...(sheet.text.includes("尚無代打") ? [] : ["沒有提到沒人代打的那一場"]),
       ...(sheet.rows >= 2 ? [] : [`清單只有 ${sheet.rows} 列`]),
     ]);
 

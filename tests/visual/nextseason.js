@@ -149,7 +149,7 @@ function report(name, problems) {
   console.log("       " + step4.rows.join("\n       "));
 
   // Build it, and land where the money is.
-  await page.click("text=建立這一季");
+  await page.click("text=建立本季");
   await page.waitForURL(/organizer-ledger/, { timeout: 20000 }).catch(() => {});
   await page.waitForTimeout(2500);
   const landed = await page.evaluate(() => ({

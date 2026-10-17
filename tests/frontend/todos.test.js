@@ -47,7 +47,7 @@ test("an absence nobody is covering names who is away, and opens that game", () 
   );
 
   assert.equal(todos.length, 1);
-  assert.match(todos[0].label, /林書妤請假，沒人代打/);
+  assert.match(todos[0].label, /林書妤請假，尚無代打/);
   assert.equal(todos[0].gameId, 10);
 });
 

@@ -206,7 +206,7 @@ test("deleteJson exposes both the translated and the raw message", async () => {
   await assert.rejects(
     deleteJson("http://api", "/seasons/1/members/1"),
     (err) => {
-      assert.match(err.message, /已經結算/);
+      assert.match(err.message, /已結算/);
       assert.equal(err.rawMessage, "Season is already settled");
       return true;
     }

@@ -56,7 +56,7 @@ test("a member who took leave can undo it", () => {
 
   const html = buildMyActionHtml(season, game);
 
-  assert.match(html, /已請假這一場/);
+  assert.match(html, /本場已請假/);
   assert.match(html, /cancelAbsence\(100, this\)/);
 });
 

@@ -65,11 +65,82 @@ function markDeveloperView(clubs, clubEl) {
     bar = document.createElement("p");
     bar.id = "dev-view";
     bar.className = "dev-view";
-    const row = clubEl.closest(".picker-row") || clubEl.parentNode;
+    // Above the season picker. The management pages' club <select> sits
+    // in the top bar now (mountClubChip), so its own parent is the wrong
+    // place to put a banner.
+    const row = document.querySelector(".picker-row") || clubEl.parentNode;
     row.parentNode.insertBefore(bar, row);
   }
   bar.textContent = `開發者檢視：${club.name}`;
   bar.hidden = false;
+}
+
+/** The management pages' club button: the chip the member page has in
+ * the same corner, so moving between 會員 and 管理 leaves the top of the
+ * screen where it was. It replaced a 「‹ 會員頁」 that did what the
+ * 會員／管理 row under it already does, and a 球隊 select that took half
+ * a row of its own (proposal 5, 2026-10-17).
+ *
+ * The page's hidden club <select> stays the source of truth —
+ * initClubAndSeasonPickers fills and drives it — and the chip follows
+ * it: options arriving or renamed, or a change. */
+function mountClubChip(chip, select) {
+  if (!chip || !select || typeof MutationObserver === "undefined") return;
+  const nameEl = chip.querySelector(".club-chip-name");
+  const dotEl = chip.querySelector(".club-dot");
+  if (!nameEl || !dotEl) return;
+  function sync() {
+    const option = select.options[select.selectedIndex];
+    const name = option ? option.textContent : "";
+    nameEl.textContent = name || "選擇球隊";
+    dotEl.textContent = option && option.value ? firstGrapheme(name) : "-";
+  }
+  new MutationObserver(sync).observe(select, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+  select.addEventListener("change", sync);
+  chip.addEventListener("click", () => openClubChooser(select));
+  sync();
+}
+
+/** The list behind the club chip: one row per club this page manages. */
+function openClubChooser(select) {
+  const clubs = Array.from(select.options).filter((o) => o.value);
+  const backdrop = document.createElement("div");
+  backdrop.className = "gsheet-backdrop";
+  backdrop.innerHTML = `
+    <div class="gsheet">
+      <button type="button" class="gsheet-close" aria-label="關閉">✕</button>
+      <h3>球隊</h3>
+      ${
+        clubs.length
+          ? clubs
+              .map(
+                (o) => `
+        <button type="button" class="club-row${o.value === select.value ? " on" : ""}" data-club="${escapeHtml(o.value)}">
+          <i class="club-dot">${escapeHtml(firstGrapheme(o.textContent))}</i>
+          <span class="cr-name"><span class="cr-title">${escapeHtml(o.textContent)}</span></span>
+        </button>`
+              )
+              .join("")
+          : '<div class="empty">尚未管理任何球隊</div>'
+      }
+    </div>`;
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop || e.target.closest(".gsheet-close")) {
+      backdrop.remove();
+      return;
+    }
+    const row = e.target.closest("[data-club]");
+    if (!row) return;
+    backdrop.remove();
+    if (row.dataset.club === select.value) return;
+    select.value = row.dataset.club;
+    select.dispatchEvent(new Event("change"));
+  });
+  document.body.appendChild(backdrop);
 }
 
 /** The circle in the top bar: the signed-in person's own picture. */
@@ -202,8 +273,8 @@ function buildTodos(season, requests, balances, lineReachable) {
     if (!uncovered.length) continue;
     list.push({
       kind: "urgent",
-      label: `${describeDate(game.date).label} ${uncovered.map((a) => a.player_name).join("、")}請假，沒人代打`,
-      sub: "這一場會少人",
+      label: `${describeDate(game.date).label} ${uncovered.map((a) => a.player_name).join("、")}請假，尚無代打`,
+      sub: "本場人數將不足",
       gameId: game.id,
       action: "指定代打",
     });
@@ -387,6 +458,29 @@ function renderGameHero(season, game, opts) {
       ${o.actionsHtml ? `<div class="hero-actions">${o.actionsHtml}</div>` : ""}
       ${o.moreHtml || ""}
     </div>
+  `;
+}
+
+/** The game named in one line, for a sheet opened from a card that
+ * already shows the rest. The organizer's 名單 drew the whole hero card a
+ * second time above the tabs, pushing the first name half a screen down
+ * (proposal 7, 2026-10-17). */
+function renderGameHeadLine(season, game, opts) {
+  const o = opts || {};
+  const info = describeDate(game.date);
+  const expected = expectedAttendance(season, game);
+  const full = expected >= season.capacity;
+  const share =
+    game.share === null || game.share === undefined
+      ? ""
+      : `<span class="meta-pill">每人 <strong>$${game.share}</strong></span>`;
+  return `
+    <div class="gd-head">
+      <span class="gd-head-date">${info.month}/${info.day}<span class="hero-weekday">${info.weekday}</span></span>
+      <span class="gd-head-count"><b${full ? ' class="full"' : ""}>${expected}</b> / ${season.capacity} 人</span>
+      <span class="gd-head-pills">${share}${(o.metaPills || []).join("")}</span>
+    </div>
+    ${o.statusHtml || ""}
   `;
 }
 
@@ -1050,6 +1144,89 @@ function clearGameDetailChange(container, token) {
   return true;
 }
 
+/** A short menu of what can be done to one person, opened by tapping
+ * their row (2026-10-17, proposal 1 plan A).
+ *
+ * The rows used to carry two-character buttons — 請假, 代打, 取消, 銷假,
+ * 遞補, 移除 — which had to stay that short to fit beside a name at
+ * 390px, and at that length they could not say what they would do:
+ * 取消 next to a 代打 note could mean either thing, and 銷假 was a word
+ * nobody uses. Here each action has room for its full name and a line
+ * on what follows from it.
+ *
+ * `actions` are { label, hint, danger, attrs }, where attrs are the
+ * data attributes the sheet's click handler already routes on, so a
+ * button here does exactly what the old row button did. */
+function actionSheetHtml({ key, title, subtitle, actions }) {
+  return `
+    <div class="picker-backdrop" data-act-sheet="${key}" hidden>
+      <div class="picker act-sheet" role="dialog" aria-label="${escapeHtml(title)}">
+        <div class="picker-head">
+          <span class="act-title">${escapeHtml(title)}${
+            subtitle ? `<small>${escapeHtml(subtitle)}</small>` : ""
+          }</span>
+          <button type="button" class="picker-close" data-close-overlay aria-label="關閉">✕</button>
+        </div>
+        <div class="act-list">${actions
+          .map(
+            (a) => `<button type="button" class="act-btn${a.danger ? " danger" : ""}" data-act ${
+              a.attrs || ""
+            }><span class="act-label">${escapeHtml(a.label)}</span>${
+              a.hint ? `<small>${escapeHtml(a.hint)}</small>` : ""
+            }</button>`
+          )
+          .join("")}</div>
+      </div>
+    </div>`;
+}
+
+/** The same menu for a control that lives outside a game sheet — the
+ * hero card's 請假. Built on demand and removed on close; each action's
+ * `run` receives the pressed button. */
+function openActionSheet({ title, subtitle, actions }) {
+  const holder = document.createElement("div");
+  holder.innerHTML = actionSheetHtml({
+    key: "floating",
+    title,
+    subtitle,
+    actions: actions.map((a, i) => ({ ...a, attrs: `data-run="${i}"` })),
+  });
+  const sheet = holder.firstElementChild;
+  // Above an open game sheet, which is where the hero's 請假 also sits.
+  sheet.style.zIndex = "70";
+  sheet.hidden = false;
+  const close = () => sheet.remove();
+  sheet.addEventListener("click", (e) => {
+    if (e.target === sheet || e.target.closest("[data-close-overlay]")) {
+      close();
+      return;
+    }
+    const button = e.target.closest("[data-run]");
+    if (!button) return;
+    close();
+    actions[Number(button.dataset.run)].run(button);
+  });
+  document.body.appendChild(sheet);
+  const first = sheet.querySelector(".act-btn");
+  if (first) first.focus();
+}
+
+/** The chevron that marks a roster row as something to open. Drawn, not
+ * typed: the › glyph sits high in CJK fonts and read as punctuation, and
+ * the point of it is to be seen (「把 › 做大做明顯」, 2026-10-17). */
+const ROW_CHEVRON =
+  '<span class="att-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+
+/** Pickers a page may open in a rendered game sheet from outside it —
+ * the hero card's 請假 opening 請假並指定代打. Keyed by container, set on
+ * every render, so it always reaches the current one. */
+const _gameDetailOpeners = new WeakMap();
+
+function openAbsenceWithSubstitute(container, name) {
+  const openers = _gameDetailOpeners.get(container);
+  return !!(openers && openers.absentWithSub(name));
+}
+
 /** An empty group says so in its own words. A blank panel reads as a
  * page that failed to load — that has been reported twice. */
 function emptyPanel(text) {
@@ -1268,6 +1445,22 @@ function applySubstituteLocally(
   absence.covered_by = name;
   absence.filled_by = name;
   return { displacedName: displaced ? displaced.player_name : null };
+}
+
+/** Draws 請假並指定代打 once the server has answered: the absence, and
+ * the substitute in its slot. Nobody comes off the queue for it — the
+ * request never offered them the slot — unless the substitute was
+ * queued themselves, which applySubstituteLocally already handles. */
+function applyAbsenceWithSubstituteLocally(season, gameId, absentName, result, person) {
+  const game = season.games.find((item) => item.id === gameId);
+  if (!game || !result || !result.substitute) return { displacedName: null };
+  game.absences.push({
+    id: result.id,
+    player_name: absentName,
+    covered_by: null,
+    filled_by: null,
+  });
+  return applySubstituteLocally(season, gameId, result.id, result.substitute, person);
 }
 
 /** Draws an organizer's deliberate queue promotion immediately after
@@ -1595,7 +1788,7 @@ function renderGameDetail(container, season, game, options) {
       seen.add(name);
       let disabled = null;
       if (fixedNames.has(name)) disabled = "本季固定成員";
-      else if (onCourtNames.has(name)) disabled = "已在場上";
+      else if (onCourtNames.has(name)) disabled = "已在出席名單";
       else if (!queuedAreChoosable && queuedNames.has(name)) disabled = "候補中";
       else if (person.linked && !wholeClub) disabled = "需本人報名";
       out.push({
@@ -1628,7 +1821,10 @@ function renderGameDetail(container, season, game, options) {
     return peopleToPick(absence.player_name, true);
   }
 
-  function substituteForm(absence) {
+  /** `combined` is 請假並指定代打 for somebody still attending: there is
+   * no absence yet, so the form is keyed "new" and its confirm button
+   * names who is taking leave instead. */
+  function substituteForm(absence, combined = false) {
     const candidates = substituteCandidates(absence);
     const covering = game.confirmed_drop_ins.find((d) => d.covering === absence.player_name);
     const pickRows = pickGroupsHtml(
@@ -1645,7 +1841,11 @@ function renderGameDetail(container, season, game, options) {
       <div class="picker-backdrop" data-sub-form="${absence.id}" hidden>
         <div class="picker">
           <div class="picker-head">
-            <span>指定 ${escapeHtml(absence.player_name)} 的代打</span>
+            <span>${
+              combined
+                ? `${escapeHtml(absence.player_name)} 請假並指定代打`
+                : `指定 ${escapeHtml(absence.player_name)} 的代打`
+            }</span>
             <button type="button" class="picker-close" data-close-sub="${absence.id}" aria-label="關閉">✕</button>
           </div>
           ${
@@ -1662,7 +1862,9 @@ function renderGameDetail(container, season, game, options) {
               <option value="female"${femaleSelected}>女</option>
             </select>
           </div>
-          <button type="button" class="btn btn-primary" data-confirm-sub="${absence.id}">確認指定</button>
+          <button type="button" class="btn btn-primary" data-confirm-sub="${absence.id}"${
+            combined ? ` data-confirm-absent="${escapeHtml(absence.player_name)}"` : ""
+          }>${combined ? "確認請假與代打" : "確認指定"}</button>
         </div>
       </div>
     `;
@@ -1690,7 +1892,24 @@ function renderGameDetail(container, season, game, options) {
    * width and adds no height, so a row with nothing to say is the same
    * shape as a row with plenty.
    */
-  function rosterRow({ num, person, name, tone, note, controls, guest = true, changed = false }) {
+  function rosterRow({
+    num,
+    person,
+    name,
+    title,
+    subtitle,
+    tone,
+    note,
+    actions,
+    key,
+    guest = true,
+    changed = false,
+  }) {
+    // A row with something to do is itself the control: tapping it opens
+    // the menu drawn right after it (actionSheetHtml). The chevron is the
+    // only thing on the right now, and is drawn large and tinted so that
+    // a row reads as something to open rather than a line to read.
+    const acts = actions && actions.length ? actions : null;
     // The note (代打 / 臨打 / 缺額 / 候補) goes *inside* the name, as an
     // inline element, and that placement is the whole fix.
     //
@@ -1706,37 +1925,66 @@ function renderGameDetail(container, season, game, options) {
     // inner att-who: with the truncation on the whole thing, a long name
     // ate the 代打 note beside it and left a blank pill.
     return `
-      <div class="att-row${tone ? " " + tone : ""}${
+      <div class="att-row${tone ? " " + tone : ""}${acts ? " has-acts" : ""}${
         changed ? ` just-changed roster-change-${changed}${changed === "pending" ? " roster-row-entering" : ""}` : ""
-      }">
+      }"${acts ? ` role="button" tabindex="0" aria-haspopup="dialog" data-row-acts="${key}"` : ""}>
         <span class="att-num">${num}</span>
         ${avatarHtml(name, person && person.avatar_url)}
         <span class="att-name"><span class="att-who">${escapeHtml(name)}</span>${genderTag(
           person ? person.gender : null
         )}${guest ? guestTag(person) : ""}${note || ""}</span>
-        <span class="roster-note">${controls || ""}</span>
-      </div>`;
+        <span class="roster-note">${acts ? ROW_CHEVRON : ""}</span>
+      </div>${acts ? actionSheetHtml({ key, title: title || name, subtitle, actions: acts }) : ""}`;
   }
+
+  // Who comes off the queue when a slot opens: the first in it.
+  const queueHead = game.waitlist_entries[0] || null;
 
   const absentByName = {};
   for (const a of game.absences) absentByName[a.player_name] = a;
-  const canEdit = !!opts.onRecordAbsence;
+  const canEdit = !!opts.onRecordAbsence && !frozen;
+  const canRecordAbsence = opts.canRecordAbsence || (() => true);
+  // Taking leave and naming who covers, as one step: the substitute
+  // takes the slot directly and the queue is never offered it, so whoever
+  // queued first is not promoted and then bumped straight back out.
+  const offerAbsentWithSub =
+    canEdit && !!opts.onRecordAbsenceWithSubstitute && !!onAssignSubstitute;
 
   const attendingRows = [];
   for (const m of season.members) {
     if (absentByName[m.name]) continue;
+    const mayLeave = canEdit && canRecordAbsence(m);
     attendingRows.push({
       person: m,
       name: m.name,
+      subtitle: "固定成員・出席",
       tone: "",
       note: "",
       changed:
         change && change.tab === "attending" && change.names.has(m.name)
           ? change.phase
           : false,
-      controls: canEdit
-        ? `<button type="button" class="mini-action" data-mark-absent="${escapeHtml(m.name)}">請假</button>`
-        : "",
+      actions: mayLeave
+        ? [
+            {
+              label: "登記請假",
+              hint: queueHead
+                ? `空出的位置由候補 ${queueHead.player_name} 遞補`
+                : "空出的位置列為缺額",
+              attrs: `data-mark-absent="${escapeHtml(m.name)}"`,
+            },
+          ].concat(
+            offerAbsentWithSub
+              ? [
+                  {
+                    label: "請假並指定代打",
+                    hint: "登記請假，並由指定人選補上此位置",
+                    attrs: `data-absent-with-sub="${escapeHtml(m.name)}"`,
+                  },
+                ]
+              : []
+          )
+        : [],
     });
   }
   for (const d of game.confirmed_drop_ins) {
@@ -1772,18 +2020,30 @@ function renderGameDetail(container, season, game, options) {
         : d.brought_by_name
           ? `<span class="att-note by">${escapeHtml(d.brought_by_name)} 報名</span>`
           : '<span class="att-note">臨打</span>',
+      subtitle: d.covering
+        ? `代打・代 ${d.covering}`
+        : `臨打${d.brought_by_name ? `・${d.brought_by_name} 報名` : ""}`,
       // Only offered for signups this caller is entitled to undo — their
       // own, or a guest they brought — unless this is the organizer's
       // screen, which manages everybody's. `canRemoveDropIn` is how the
       // two pages differ; the server checks the same thing again.
-      controls:
+      actions:
         opts.onRemoveDropIn && !frozen && (opts.canRemoveDropIn || (() => true))(d)
-          ? `<button type="button" class="mini-action danger" data-remove-drop-in="${d.id}">移除</button>`
-          : "",
+          ? [
+              {
+                label: "移除報名",
+                danger: true,
+                hint: queueHead
+                  ? "自出席名單移除並沖銷費用；空出的位置由候補遞補"
+                  : "自出席名單移除並沖銷費用",
+                attrs: `data-remove-drop-in="${d.id}"`,
+              },
+            ]
+          : [],
     });
   }
   const attendingHtml = attendingRows
-    .map((row, i) => rosterRow({ ...row, num: i + 1 }))
+    .map((row, i) => rosterRow({ ...row, num: i + 1, key: `a${i}` }))
     .join("");
 
   const absentRows = [];
@@ -1794,38 +2054,48 @@ function renderGameDetail(container, season, game, options) {
     const offerCancel =
       !!absence.covered_by && !frozen && !!onCancelSubstitute && allowed && covering;
 
-    // Nouns, two characters, like every other mini-action in the app
-    // (儲存, 刪除, 編輯, 退款, 明細, 復原, 請假, 移除, 遞補, 固定, 臨打).
-    // These were the only four-character ones anywhere, and two of them
-    // sit side by side on this row: at 390px that pushed the note past
-    // the end of .att-name, which clips rather than wraps, so 「Momo 代打」
-    // came out as half a glyph. Measured 2026-09-23.
-    //
-    // 代打 covers both arranging one and changing one — it is the same
-    // panel either way, and 找/改 as a prefix read as instructions rather
-    // than as a label (2026-09-24: 「好像不夠正式中性」). Dropping the verb
-    // also shrinks the button, which was the other thing reported.
-    //
-    // 取消 is unambiguous despite reading like a bare verb: it is offered
-    // only when somebody *is* covering, and 銷假 only when nobody is —
-    // the two conditions below are mutually exclusive, so a row never
-    // carries both.
-    const controls =
-      (offerAssign
-        ? `<button type="button" class="mini-action" data-toggle-sub="${absence.id}">代打</button>`
-        : "") +
-      (offerCancel
-        ? `<button type="button" class="mini-action danger" data-cancel-sub="${covering.id}">取消</button>`
-        : "") +
-      (opts.onCancelAbsence && !absence.covered_by && !frozen
-        ? `<button type="button" class="mini-action" data-undo-absence="${absence.id}">銷假</button>`
-        : "");
+    // Full names now that they sit in a menu rather than on the row (see
+    // actionSheetHtml). 銷假 is 取消請假: it was the one word here nobody
+    // uses, chosen only because it was two characters long. 取消請假 is
+    // offered whoever fills the slot — the server sends them back to the
+    // queue — and says so in its own line.
+    const filler = absence.covered_by || absence.filled_by;
+    const actions = [];
+    if (offerAssign) {
+      actions.push({
+        label: absence.covered_by ? "更換代打" : "指定代打",
+        hint: absence.covered_by ? "改由其他人代打" : "指定由誰補上此位置",
+        attrs: `data-toggle-sub="${absence.id}"`,
+      });
+    }
+    if (offerCancel) {
+      actions.push({
+        label: "取消代打",
+        danger: true,
+        hint: `${absence.covered_by} 不再代打此位置`,
+        attrs: `data-cancel-sub="${covering.id}"`,
+      });
+    }
+    if (opts.onCancelAbsence && allowed && !frozen) {
+      actions.push({
+        label: "取消請假",
+        danger: !!filler,
+        hint: filler ? `恢復出席；${filler} 回到候補` : "恢復出席",
+        attrs: `data-undo-absence="${absence.id}"`,
+      });
+    }
 
     absentRows.push(
       rosterRow({
         num: "—",
+        key: `x${absentRows.length}`,
         person: season.members.find((m) => m.name === absence.player_name),
         name: absence.player_name,
+        subtitle: absence.covered_by
+          ? `請假・${absence.covered_by} 代打`
+          : absence.filled_by
+            ? `請假・${absence.filled_by} 已補上`
+            : "請假・缺額",
         tone: "absent",
         changed:
           change && change.tab === "absent" && change.names.has(absence.player_name)
@@ -1845,7 +2115,7 @@ function renderGameDetail(container, season, game, options) {
           : absence.filled_by
             ? `<span class="att-note">${escapeHtml(absence.filled_by)} 已補上</span>`
             : '<span class="att-note gap">缺額</span>',
-        controls,
+        actions,
       }) + (offerAssign ? substituteForm(absence) : "")
     );
   }
@@ -1863,9 +2133,14 @@ function renderGameDetail(container, season, game, options) {
     const swappable = game.confirmed_drop_ins;
     if (!swappable.length) return "";
     return `
-      <div class="sub-form" data-swap-form="${entry.id}" hidden>
-        <div class="or-line"><span>這一場已滿，選一位換下來</span></div>
-        <div class="sub-pick">
+      <div class="picker-backdrop" data-swap-form="${entry.id}" hidden>
+        <div class="picker">
+          <div class="picker-head">
+            <span>${escapeHtml(entry.player_name)} 遞補上場</span>
+            <button type="button" class="picker-close" data-close-overlay aria-label="關閉">✕</button>
+          </div>
+          <p class="picker-note">本場已滿，請選擇一位臨打換下；換下者回到候補。</p>
+          <div class="sub-pick">
           ${swappable
             .map(
               (d) => `
@@ -1876,6 +2151,7 @@ function renderGameDetail(container, season, game, options) {
             </div>`
             )
             .join("")}
+          </div>
         </div>
       </div>`;
   }
@@ -1884,12 +2160,16 @@ function renderGameDetail(container, season, game, options) {
   // text next to eighteen bordered cards, which made a queue of three
   // read as nothing at all and got reported as "the waitlist
   // disappeared" more than once.
+  const full = isGameFull(season, game);
   const waitlistRows = game.waitlist_entries
     .map((w, i) =>
       rosterRow({
         num: i + 1,
+        key: `q${i}`,
         person: w,
         name: w.player_name + (viewerName && w.player_name === viewerName ? "（你）" : ""),
+        title: w.player_name,
+        subtitle: `候補第 ${i + 1} 位${w.brought_by_name ? `・${w.brought_by_name} 報名` : ""}`,
         tone: "queued" + (viewerName && w.player_name === viewerName ? " me" : ""),
         changed:
           change && change.tab === "queued" && change.names.has(w.player_name)
@@ -1904,14 +2184,28 @@ function renderGameDetail(container, season, game, options) {
         // the court far more often than to strike them off, and the
         // queue's own order is exactly what they are overriding — the
         // person at the front is often the one who can't make it.
-        controls:
-          (opts.onPromoteFromWaitlist && !frozen
-            ? `<button type="button" class="mini-action" data-promote-waitlist="${w.id}">遞補</button>`
-            : "") +
-          (opts.onLeaveWaitlist && !frozen && (!opts.canLeaveWaitlist || opts.canLeaveWaitlist(w))
-            ? `<button type="button" class="mini-action danger" data-remove-waitlist="${w.id}">移除</button>`
-            : ""),
-      }) + (opts.onPromoteFromWaitlist ? swapOutPicker(w) : "")
+        actions: [
+          opts.onPromoteFromWaitlist && !frozen
+            ? {
+                label: "遞補上場",
+                hint: !full
+                  ? "排入出席名單"
+                  : game.confirmed_drop_ins.length
+                    ? "本場已滿，需選擇一位臨打換下"
+                    : "本場已滿，需先有人請假或調高人數上限",
+                attrs: `data-promote-waitlist="${w.id}"`,
+              }
+            : null,
+          opts.onLeaveWaitlist && !frozen && (!opts.canLeaveWaitlist || opts.canLeaveWaitlist(w))
+            ? {
+                label: "移除候補",
+                danger: true,
+                hint: "自候補名單移除",
+                attrs: `data-remove-waitlist="${w.id}"`,
+              }
+            : null,
+        ].filter(Boolean),
+      }) + (opts.onPromoteFromWaitlist && !frozen ? swapOutPicker(w) : "")
     )
     .join("");
 
@@ -1950,19 +2244,26 @@ function renderGameDetail(container, season, game, options) {
   if (container.dataset) container.dataset.gdActiveTab = activeTab;
 
   container.innerHTML = `
-    ${renderGameHero(season, game, {
-      metaPills: opts.heroMetaPills,
-      // Straight into the card, not stacked underneath it: .hero-actions
-      // draws its own top rule to separate itself from the facts above,
-      // which outside the card is a hairline floating on the page.
-      statusHtml: opts.statusHtml,
-      actionsHtml: opts.actionsHtml,
-    })}
+    ${
+      opts.compactHead
+        ? renderGameHeadLine(season, game, {
+            metaPills: opts.heroMetaPills,
+            statusHtml: opts.statusHtml,
+          })
+        : renderGameHero(season, game, {
+            metaPills: opts.heroMetaPills,
+            // Straight into the card, not stacked underneath it: .hero-actions
+            // draws its own top rule to separate itself from the facts above,
+            // which outside the card is a hairline floating on the page.
+            statusHtml: opts.statusHtml,
+            actionsHtml: opts.actionsHtml,
+          })
+    }
     ${
       closed
         ? '<div class="gdetail-locked">本季已結算，名單已確定</div>'
         : locked
-          ? '<div class="gdetail-locked">已過更動期限，這一場無法再變更</div>'
+          ? '<div class="gdetail-locked">已過更動期限，本場無法再變更</div>'
           : ""
     }
     ${extraHtml}
@@ -2000,7 +2301,7 @@ function renderGameDetail(container, season, game, options) {
       ).join("")}
     </div>
     <div class="gd-panel" data-gd-panel="attending"${activeTab === "attending" ? "" : " hidden"}>
-      <div class="att-list">${attendingHtml || emptyPanel("這一場本場尚無出席名單")}</div>
+      <div class="att-list">${attendingHtml || emptyPanel("本場尚無出席名單")}</div>
     </div>
     <div class="gd-panel" data-gd-panel="absent"${activeTab === "absent" ? "" : " hidden"}>
       ${
@@ -2016,7 +2317,41 @@ function renderGameDetail(container, season, game, options) {
           : emptyPanel("本場無人候補")
       }
     </div>
+    ${offerAbsentWithSub ? "<div data-absent-sub-holder></div>" : ""}
   `;
+
+  /** 請假並指定代打: the substitute picker for somebody still on court.
+   * Built when asked for rather than once per attending member — that
+   * would be eighteen copies of the whole club list in the page. */
+  function openAbsentWithSub(name) {
+    const holder = container.querySelector("[data-absent-sub-holder]");
+    if (!holder) return false;
+    holder.innerHTML = substituteForm({ id: "new", player_name: name, covered_by: null }, true);
+    const form = holder.querySelector("[data-sub-form]");
+    if (form) form.hidden = false;
+    return !!form;
+  }
+  _gameDetailOpeners.set(container, { absentWithSub: openAbsentWithSub });
+
+  // Enter or Space on a focused row opens its menu, as a click would;
+  // Escape closes whichever layer is on top.
+  container.onkeydown = (e) => {
+    if (e.key === "Escape") {
+      const open = Array.from(container.querySelectorAll(".picker-backdrop")).filter(
+        (el) => !el.hidden
+      );
+      if (open.length) {
+        open[open.length - 1].hidden = true;
+        e.preventDefault();
+      }
+      return;
+    }
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const row = e.target.closest && e.target.closest("[data-row-acts]");
+    if (!row || row !== e.target) return;
+    e.preventDefault();
+    row.click();
+  };
 
   // Assigned directly (not addEventListener) so re-rendering this same
   // container never accumulates duplicate handlers — matches
@@ -2038,10 +2373,39 @@ function renderGameDetail(container, season, game, options) {
       showGameDetailTab(container, tab.dataset.gdTab);
       return;
     }
+    const closeOverlay = e.target.closest("[data-close-overlay]");
+    if (closeOverlay) {
+      const layer = closeOverlay.closest(".picker-backdrop");
+      if (layer) layer.hidden = true;
+      return;
+    }
+    // A menu item closes its menu and then does exactly what the row
+    // button it replaced did: it carries the same data attribute, so it
+    // falls through to the same handler below.
+    const act = e.target.closest("[data-act]");
+    if (act) {
+      const menu = act.closest("[data-act-sheet]");
+      if (menu) menu.hidden = true;
+    }
+    const row = e.target.closest("[data-row-acts]");
+    if (row) {
+      const menu = container.querySelector(`[data-act-sheet="${row.dataset.rowActs}"]`);
+      if (menu) {
+        menu.hidden = false;
+        const first = menu.querySelector(".act-btn");
+        if (first) first.focus();
+      }
+      return;
+    }
+    const absentWithSub = e.target.closest("[data-absent-with-sub]");
+    if (absentWithSub) {
+      openAbsentWithSub(absentWithSub.dataset.absentWithSub);
+      return;
+    }
     const toggleSub = e.target.closest("[data-toggle-sub]");
     if (toggleSub) {
       const form = container.querySelector(`[data-sub-form="${toggleSub.dataset.toggleSub}"]`);
-      if (form) form.hidden = !form.hidden;
+      if (form) form.hidden = false;
       return;
     }
     const closeSub = e.target.closest("[data-close-sub]");
@@ -2075,7 +2439,16 @@ function renderGameDetail(container, season, game, options) {
       const genderSelect = container.querySelector(`[data-sub-gender="${id}"]`);
       const name = nameInput ? nameInput.value.trim() : "";
       if (!name) {
-        toast("請先選一個人，或直接輸入名字");
+        toast("請選擇人選，或直接輸入姓名");
+        return;
+      }
+      if (confirmSub.dataset.confirmAbsent && opts.onRecordAbsenceWithSubstitute) {
+        opts.onRecordAbsenceWithSubstitute(
+          confirmSub.dataset.confirmAbsent,
+          name,
+          (genderSelect && genderSelect.value) || null,
+          confirmSub
+        );
         return;
       }
       onAssignSubstitute(
@@ -2127,7 +2500,7 @@ function renderGameDetail(container, season, game, options) {
       // straight through; on a full game it opens the picker instead.
       const picker = container.querySelector(`[data-swap-form="${id}"]`);
       if (picker) {
-        picker.hidden = !picker.hidden;
+        picker.hidden = false;
         return;
       }
       opts.onPromoteFromWaitlist(id, promoteWaitlist, null);
@@ -2668,9 +3041,9 @@ const _API_ERROR_PATTERNS = [
   [/^That payment has already been undone$/, () => "這筆已經復原過了"],
   [/^No such ledger entry$/, () => "找不到這筆帳"],
   // Moving a game to another date.
-  [/^This season already has a game on that date$/, () => "那一天這一季已經有一場了"],
+  [/^This season already has a game on that date$/, () => "本季該日已有場次"],
   [/^That date has already been and gone$/, () => "那一天已經過了，請選之後的日期"],
-  [/^This game is cancelled, so it cannot be moved$/, () => "這一場已經取消，不能編輯"],
+  [/^This game is cancelled, so it cannot be moved$/, () => "本場已取消，無法編輯"],
   [/^Pick two different people to merge$/, () => "請選兩個不同的人合併"],
   [
     /^Only a name typed in by hand can be merged into someone else$/,
@@ -2685,7 +3058,7 @@ const _API_ERROR_PATTERNS = [
   [/^This is the club's only organizer$/, () => "這是球隊唯一的管理員，不能移除"],
   [
     /^Still a fixed member of a season/,
-    () => "還是某一季的固定成員，請先在那一季把他移除",
+    () => "仍是某一季的固定成員，請先將此人從該季名單移除",
   ],
   [
     /^Still has money to settle with this club/,
@@ -2695,10 +3068,10 @@ const _API_ERROR_PATTERNS = [
     /^Still signed up for a game to come/,
     () => "還有尚未進行的報名，請先取消報名再移除",
   ],
-  [/^That player isn't on court for that game$/, () => "這個人在那一場不在場上，不能收臨打費"],
+  [/^That player isn't on court for that game$/, () => "此人未列於該場出席名單，無法收取臨打費"],
   [
     /^You can only do that for yourself, unless you're the organizer$/,
-    () => "只能對自己這麼做，除非你是管理員",
+    () => "只有本人或管理員可以操作",
   ],
   [/^You can only list your own clubs$/, () => "只能查看自己的球隊"],
   [
@@ -2708,19 +3081,19 @@ const _API_ERROR_PATTERNS = [
   [/^You can only set your own gender$/, () => "只能設定自己的性別"],
   [
     /^That person has their own account/,
-    () => "這個人已經有自己的帳號，請讓他自己操作",
+    () => "此人已有 LINE 帳號，需由本人操作",
   ],
   [/^Those are the same player$/, () => "這是同一個人"],
 
   // Signup, absence, waitlist.
   [
     /^(.+?) is already signed up for this game$/,
-    (m) => `${m[1]}已經在這一場的名單上了`,
+    (m) => `${m[1]}已在本場名單上`,
   ],
-  [/^That player is already signed up for this game$/, () => "這個人已經在這一場的名單上了"],
+  [/^That player is already signed up for this game$/, () => "此人已在本場名單上"],
   [
     /^(.+?) is already on the waitlist for this game$/,
-    (m) => `${m[1]}已經在這一場的候補名單上了`,
+    (m) => `${m[1]}已在本場候補名單上`,
   ],
   [
     /^(.+?) is a fixed member of this season — no need to sign up$/,
@@ -2732,11 +3105,11 @@ const _API_ERROR_PATTERNS = [
   ],
   [
     /^This player already has an absence recorded for this game$/,
-    () => "這個人這一場已經請過假了",
+    () => "此人本場已請假",
   ],
   [/^This absence was cancelled$/, () => "這筆請假已經取消了"],
   [/^Already cancelled$/, () => "已經取消了"],
-  [/^Past this season's change deadline for this game$/, () => "已經過了這一場的更動期限"],
+  [/^Past this season's change deadline for this game$/, () => "已過本場更動期限"],
 
   // Capacity and the roster.
   //
@@ -2762,7 +3135,7 @@ const _API_ERROR_PATTERNS = [
   ],
   [
     /^Can't lower capacity to (\d+) — (\d+) people are already on the roster or on a game's court$/,
-    (m) => `人數上限不能調到 ${m[1]} 人——目前已經有 ${m[2]} 人在名單或場上了`,
+    (m) => `人數上限無法調為 ${m[1]} 人：目前已有 ${m[2]} 人在名單或出席中`,
   ],
   [
     /^This season already has (\d+) fixed members for (\d+) slots/,
@@ -2770,11 +3143,11 @@ const _API_ERROR_PATTERNS = [
   ],
   [
     /^This game is full \((\d+)\) and everyone in it was personally arranged/,
-    (m) => `這一場已經滿 ${m[1]} 人，且都是別人指定的代打——請先取消一位`,
+    (m) => `本場已滿 ${m[1]} 人，且皆為指定代打，請先取消一位`,
   ],
   [
     /^This game is full \((\d+)\)\. Name who comes out, or raise the capacity first\.$/,
-    (m) => `這一場已經滿 ${m[1]} 人。請先選一位換下來，或調高人數上限`,
+    (m) => `本場已滿 ${m[1]} 人，請先選擇一位換下，或調高人數上限`,
   ],
   [
     /^That roster entry is already linked to a LINE account$/,
@@ -2783,13 +3156,13 @@ const _API_ERROR_PATTERNS = [
   [/^That player has no LINE account to link$/, () => "這個人沒有 LINE 帳號可以連結"],
   [
     /^That LINE account already has (.+) of its own — remove the duplicate roster entry instead$/,
-    (m) => `這個 LINE 帳號已經有自己的${m[1]}紀錄了——請改移除重複的名單項目`,
+    (m) => `此 LINE 帳號已有${m[1]}紀錄，請改為移除重複的名單項目`,
   ],
 
   // Season and settlement.
   [
     /^Season is already settled — venue cost can't change now$/,
-    () => "這一季已經結算，場地費不能再改了",
+    () => "本季已結算，場地費無法再修改",
   ],
   // Both spellings. seasons.py says "Season is already settled" in most
   // places and "Season already settled" in one (seasons.py:974). The
@@ -2798,15 +3171,15 @@ const _API_ERROR_PATTERNS = [
   // wording of that route and the English reached the screen. Found
   // 2026-09-25 by running every HTTPException in the API through this
   // table, which is not something reading it could have caught.
-  [/^Season (is )?already settled$/, () => "這一季已經結算了"],
-  [/^Season is not settled$/, () => "這一季還沒結算，沒有東西可以復原"],
+  [/^Season (is )?already settled$/, () => "本季已結算"],
+  [/^Season is not settled$/, () => "本季尚未結算，無需復原"],
   [/^This settlement has already been undone$/, () => "這次結算已經復原過了"],
   [
     /settled — its books can't be deleted$/,
     () => "有一季已經結算，帳本不能刪除",
   ],
-  [/^This season has payments recorded/, () => "此季已有收款紀錄，無法刪除"],
-  [/^Season has ended$/, () => "此季已結束，無法發送繳費通知"],
+  [/^This season has payments recorded/, () => "本季已有收款紀錄，無法刪除"],
+  [/^Season has ended$/, () => "本季已結束，無法發送繳費通知"],
   [/^The previous season is not settled$/, () => "上一季結算後可發送繳費通知"],
   [/^Season can be settled from \d{4}-(\d{2})-(\d{2})$/, (m) => `${Number(m[1])}/${Number(m[2])} 起可結算`],
   [/^Game on \d{4}-(\d{2})-(\d{2}) has an open slot$/, (m) => `${Number(m[1])}/${Number(m[2])} 尚有缺額，補齊後可結算`],
@@ -2814,11 +3187,11 @@ const _API_ERROR_PATTERNS = [
 
   // Not found.
   [/^No club with id \d+$/, () => "找不到這個球隊"],
-  [/^No season with id \d+$/, () => "找不到這一季"],
-  [/^No game with id \d+$/, () => "找不到這一場"],
+  [/^No season with id \d+$/, () => "找不到該季別"],
+  [/^No game with id \d+$/, () => "找不到該場次"],
   [
     /^No game on (\d{4}-\d{2}-\d{2}) in this season$/,
-    (m) => `這一季沒有 ${m[1]} 這一場`,
+    (m) => `本季沒有 ${m[1]} 的場次`,
   ],
   [/^No absence with id \d+$/, () => "找不到這筆請假"],
   [/^No drop-in with id \d+/, () => "找不到這筆報名"],
@@ -2835,7 +3208,7 @@ const _API_ERROR_PATTERNS = [
 
   // Everything else that's actually reachable from ordinary use.
   [/^Name can't be empty$/, () => "名字不能空白"],
-  [/^Game is already cancelled$/, () => "這一場已經取消了"],
+  [/^Game is already cancelled$/, () => "本場已取消"],
   // The developer-only screens. An ordinary member never reaches these,
   // but an untranslated string is an untranslated string — and leaving
   // them out means the audit can never reach zero, which is how a
@@ -2849,7 +3222,7 @@ const _API_ERROR_PATTERNS = [
   [/^Nothing to report$/, () => "沒有內容可以回報"],
   [
     /^Couldn't send the report/,
-    () => "送出失敗，請直接跟管理員說",
+    () => "送出失敗，請直接聯絡管理員",
   ],
   [
     /^(Screenshot is too large|Screenshot isn't valid base64|Screenshot must be)/,
@@ -3137,7 +3510,7 @@ function showPageLoading(container) {
   clearTimeout(_loadingEscalation);
   _loadingEscalation = setTimeout(() => {
     const text = container.querySelector("[data-loading-text]");
-    if (text) text.textContent = "伺服器休眠中，正在喚醒——第一次開啟大約需要 30 秒。";
+    if (text) text.textContent = "伺服器正在啟動，首次開啟約需 30 秒。";
   }, 4000);
 }
 
@@ -3200,7 +3573,7 @@ function showPageError(container, detail) {
   container.innerHTML = `
     <div class="empty-state">
       <h3>連不上伺服器</h3>
-      <p>可能是網路不穩，或伺服器還在喚醒中。稍等一下再試一次。${detail ? `<br><span style="font-size:.75rem;opacity:.7">${escapeHtml(detail)}</span>` : ""}</p>
+      <p>可能是網路不穩或伺服器正在啟動，請稍後再試。${detail ? `<br><span style="font-size:.75rem;opacity:.7">${escapeHtml(detail)}</span>` : ""}</p>
       <button type="button" class="btn btn-primary" onclick="location.reload()">重新載入</button>
     </div>
   `;
@@ -3262,7 +3635,7 @@ function signInFailureHtml(identified) {
   if (identified === false) {
     return emptyStateHtml(
       "連不上伺服器",
-      "伺服器可能正在喚醒中，這通常要等 30 秒左右。稍等一下再重新載入就好。",
+      "伺服器正在啟動，約需 30 秒，請稍後重新載入。",
       { label: "重新載入", onclick: "location.reload()" }
     );
   }

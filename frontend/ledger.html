@@ -149,6 +149,12 @@
     `;
   }
 
+  // With one club there is nothing to choose between, so its breakdown
+  // opens on arrival rather than behind a list of one (proposal 7,
+  // 2026-10-17). Once only: getJsonSWR paints twice, and closing the
+  // sheet must leave it closed.
+  let openOnlyClub = true;
+
   async function renderClubs() {
     const list = document.getElementById("clubs-list");
     showPageLoading(list);
@@ -163,6 +169,10 @@
             clubs.map(clubRowHtml).join("") ||
             '<div class="empty">尚未加入任何球隊</div>';
           renderOwedTotal(clubs);
+          if (openOnlyClub && clubs.length === 1) {
+            openOnlyClub = false;
+            openDetail(clubs[0].id);
+          }
         },
         { headers: authHeader() }
       );
@@ -281,6 +291,7 @@
     const params = new URLSearchParams(location.search);
     const linked = params.get("club");
     if (linked) {
+      openOnlyClub = false;
       params.delete("club");
       const rest = params.toString();
       history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : ""));

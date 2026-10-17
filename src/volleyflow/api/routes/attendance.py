@@ -103,7 +103,32 @@ def record_absence(
     absence = AbsenceRow(player_id=player.id, game_id=game.id, recorded_at=_now())
     db.add(absence)
 
-    promoted = _promote_from_waitlist(db, game.id)
+    # Naming the substitute in the same request keeps the slot away from
+    # the queue. Done as two requests, the first offered it to whoever
+    # queued first and the second bumped them straight back out: a charge
+    # and a refund on their ledger for a place they never had. Anything
+    # the substitute is refused for rolls the absence back with it.
+    substitute = None
+    promoted = None
+    if payload.substitute is not None:
+        db.flush()
+        try:
+            drop_in, displaced, sub_player = _name_substitute(
+                db, absence, game, season, current_player, payload.substitute
+            )
+        except HTTPException:
+            db.rollback()
+            raise
+        db.flush()
+        substitute = DropInOut(
+            status="confirmed",
+            id=drop_in.id,
+            player_id=sub_player.id,
+            game_id=game.id,
+            displaced_player_id=displaced,
+        )
+    else:
+        promoted = _promote_from_waitlist(db, game.id)
 
     db.commit()
     db.refresh(absence)
@@ -116,6 +141,7 @@ def record_absence(
         game_id=absence.game_id,
         recorded_at=absence.recorded_at,
         promoted_from_waitlist=promoted,
+        substitute=substitute,
     )
 
 
@@ -211,6 +237,37 @@ def set_substitute(
     _require_self_or_organizer(db, season.club_id, current_player, absence.player_id)
     _require_season_open(season)
 
+    drop_in, displaced_player_id, player = _name_substitute(
+        db, absence, game, season, current_player, payload
+    )
+    db.commit()
+    db.refresh(drop_in)
+
+    return DropInOut(
+        status="confirmed",
+        id=drop_in.id,
+        player_id=player.id,
+        game_id=game.id,
+        displaced_player_id=displaced_player_id,
+    )
+
+
+def _name_substitute(
+    db: Session,
+    absence: AbsenceRow,
+    game: GameRow,
+    season: SeasonRow,
+    current_player: PlayerRow,
+    payload: SubstituteCreate,
+) -> tuple[DropInRow, int | None, PlayerRow]:
+    """Puts the named person on court in this absence's slot, replacing
+    whoever was arranged before. Shared by PUT /absences/{id}/substitute
+    and by POST /absences when the substitute comes with the absence.
+
+    Returns the substitute's drop-in, whoever was sent back to the queue
+    to make room, and the substitute. The caller commits.
+    """
+    absence_id = absence.id
     existing = (
         db.query(DropInRow)
         .filter(DropInRow.covers_absence_id == absence_id, DropInRow.playing())
@@ -305,16 +362,7 @@ def set_substitute(
         )
         db.add(drop_in)
     _record_drop_in_charge(db, drop_in, season, reverse=False)
-    db.commit()
-    db.refresh(drop_in)
-
-    return DropInOut(
-        status="confirmed",
-        id=drop_in.id,
-        player_id=player.id,
-        game_id=game.id,
-        displaced_player_id=displaced_player_id,
-    )
+    return drop_in, displaced_player_id, player
 
 
 @router.post("/drop-ins", response_model=DropInOut)

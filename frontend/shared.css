@@ -480,10 +480,15 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .glance { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; margin: 4px 0 6px; }
 
 /* bottom sheet a tapped calendar day (or a modal action) opens into */
+/* `backwards`, not `both`, on these entrance animations. A fill that
+   outlives the animation keeps a transform on the sheet, and a transform
+   makes it the box every position:fixed picker inside it is placed
+   against: the 代打 picker opened over a short roster came out the
+   height of the sheet and lost its title off the top (2026-10-17). */
 .gsheet-backdrop {
   position: fixed; inset: 0; background: var(--scrim);
   display: flex; align-items: flex-end; justify-content: center;
-  z-index: 50; animation: fadeIn .15s ease both;
+  z-index: 50; animation: fadeIn .15s ease backwards;
 }
 .gsheet-backdrop[hidden] { display: none; }
 /* A sheet is as tall as it needs to be, and no taller — but a short
@@ -498,7 +503,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   border-radius: 16px 16px 0 0;
   padding: 18px 16px 24px; position: relative;
   display: flex; flex-direction: column; align-items: stretch;
-  animation: slideUp .2s ease both;
+  animation: slideUp .2s ease backwards;
 }
 /* Nothing inside stretches to fill the leftover space: the content sits
    at the top and the empty room is below it, where it belongs. */
@@ -518,7 +523,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .gsheet-backdrop.full { align-items: stretch; }
 .gsheet.full {
   max-width: 640px; min-height: 100%; max-height: 100%;
-  border-radius: 0; padding-top: 0; animation: fadeIn .18s ease both;
+  border-radius: 0; padding-top: 0; animation: fadeIn .18s ease backwards;
 }
 .wizard-head {
   position: sticky; top: 0; z-index: 1; background: var(--surface);
@@ -701,6 +706,57 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   background: none; padding: 2px 0; color: var(--ink-faint); font-weight: 400;
 }
 .att-note.gap { background: var(--bad-soft); color: var(--bad); }
+
+/* A row with something to do opens a menu of it (actionSheetHtml). The
+   whole row is the target, and the chevron says so: large, tinted, and
+   the only thing on the right, so it reads as "open" rather than as
+   punctuation after a name. */
+.att-row.has-acts { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.att-row.has-acts:hover { border-color: var(--accent); }
+.att-row.has-acts:active { background: var(--accent-soft); }
+.att-row.has-acts:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.att-go {
+  width: 30px; height: 30px; border-radius: 50%; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); color: var(--accent);
+}
+.att-row.dropin .att-go { background: var(--surface); }
+.att-go svg { display: block; }
+
+.act-title small {
+  display: block; font-size: .78rem; font-weight: 400; color: var(--ink-soft); margin-top: 2px;
+}
+.act-list { display: flex; flex-direction: column; gap: 6px; }
+.act-btn {
+  display: block; width: 100%; text-align: left; padding: 12px 14px; border-radius: 11px;
+  border: 1px solid var(--rule); background: var(--surface-2); color: var(--ink);
+  font-family: var(--font-cjk); font-size: .95rem; font-weight: 700; cursor: pointer;
+}
+.act-btn:hover { border-color: var(--accent); }
+.act-btn small {
+  display: block; margin-top: 2px; font-size: .76rem; font-weight: 400; color: var(--ink-soft);
+}
+.act-btn.danger .act-label { color: var(--bad); }
+.picker-note { margin: 0 0 10px; font-size: .8rem; color: var(--ink-soft); }
+
+/* The game in one line at the top of the organizer's roster sheet —
+   see renderGameHeadLine. Clear of the sheet's ✕ on the right. */
+.gd-head {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px;
+  padding: 0 40px 10px 2px;
+}
+.gd-head-date {
+  font-family: var(--font-num); font-size: 1.3rem; font-weight: 800;
+  display: inline-flex; align-items: baseline; gap: 7px;
+}
+.gd-head-count { font-size: .82rem; color: var(--ink-faint); }
+.gd-head-count b {
+  font-family: var(--font-num); font-size: 1.15rem; font-weight: 800; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.gd-head-count b.full { color: var(--warn); }
+.gd-head-pills { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.gd-head-pills:empty { display: none; }
 
 .gender-tag { font-size: .68rem; margin-left: 4px; opacity: .8; }
 .gender-tag.male { color: var(--accent); }

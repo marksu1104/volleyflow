@@ -37,7 +37,7 @@
 
   <div id="content" hidden>
     <div class="field">
-      <label for="report-text">發生什麼事？</label>
+      <label for="report-text">問題描述</label>
       <textarea id="report-text" class="control" rows="5"
         placeholder="請說明發生問題的頁面、操作步驟與結果。例如：帳務頁按「已收」後金額未更新。"></textarea>
       <p class="hint">
@@ -144,7 +144,7 @@
     const box = document.getElementById("report-text");
     const text = box.value.trim();
     if (!text) {
-      toast("請先描述一下遇到的問題");
+      toast("請先說明遇到的問題");
       box.focus();
       return;
     }

@@ -244,6 +244,9 @@ class SeasonSummaryOut(BaseModel):
 class AbsenceCreate(BaseModel):
     player_name: str
     game_id: int
+    substitute: "SubstituteCreate | None" = None
+    """Who covers, named with the absence. The slot then goes straight to
+    them and is never offered to the waitlist."""
 
 
 class AbsenceOut(BaseModel):
@@ -253,6 +256,8 @@ class AbsenceOut(BaseModel):
     recorded_at: datetime
     promoted_from_waitlist: int | None = None
     """Player id pulled off the waitlist to fill this slot, if any."""
+    substitute: "DropInOut | None" = None
+    """The substitute's signup, when one was named with the absence."""
 
 
 class AbsenceCancelOut(BaseModel):
@@ -919,3 +924,8 @@ class PlayerLedgerOut(BaseModel):
     their fees are charged when they are booked, but are not due yet —
     and switches season without asking the server again."""
     entries: list[LedgerEntryOut]
+
+
+# Both name models defined further down this file.
+AbsenceCreate.model_rebuild()
+AbsenceOut.model_rebuild()

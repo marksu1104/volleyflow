@@ -23,7 +23,10 @@
 <div class="wrap wide">
   <div class="app-bar">
     <span class="app-bar-left">
-      <button type="button" class="back-btn" onclick="location.href='member.html'">‹ 會員頁</button>
+      <button type="button" id="club-chip" class="club-chip">
+        <i class="club-dot" id="club-dot">-</i><span id="club-chip-name" class="club-chip-name">選擇球隊</span><span class="caret">▾</span>
+      </button>
+      <select id="club-picker" class="club-picker" hidden aria-hidden="true" tabindex="-1"></select>
     </span>
     <button type="button" class="brand" onclick="location.href='member.html'">VolleyFlow</button>
     <span class="app-bar-right">
@@ -44,10 +47,6 @@
   </nav>
 
   <div class="picker-row picker-row-labeled">
-    <div id="club-picker-field" class="picker-field" hidden>
-      <label for="club-picker">球隊</label>
-      <select id="club-picker" class="season-picker club-picker" hidden></select>
-    </div>
     <div id="season-picker-field" class="picker-field" hidden>
       <label for="season-picker">季別</label>
       <span class="picker-control">
@@ -61,7 +60,7 @@
   <div id="page-state"></div>
 
   <p id="no-club-note" class="empty-club-note" hidden>
-    尚未加入任何球隊——請先到<a href="member.html">會員頁</a>用 LINE 開啟，建立或加入一個球隊。
+    尚未加入任何球隊。請於<a href="member.html">會員頁</a>以 LINE 開啟，建立或加入球隊。
   </p>
 
   <div id="wizard-backdrop" class="gsheet-backdrop full" hidden>
@@ -88,7 +87,7 @@
       <div class="field">
         <label for="c-cost">場地費總額</label>
         <input id="c-cost" class="control" type="number" step="1" min="0" inputmode="numeric" placeholder="整季實際要付的總金額">
-        <span class="hint">整季實際要付給場地的錢，<b>含你預計會開冷氣的那幾場</b>。下一格填冷氣一場多少，系統會把它從總額裡拆出來。</span>
+        <span class="hint">整季實際支付場地的金額，<b>包含預計開冷氣的場次</b>。冷氣費用請填於下一欄，系統會自動拆算。</span>
       </div>
 
       <div class="field" style="margin-bottom:13px">
@@ -183,7 +182,7 @@
     <div data-panel="3" hidden>
       <div class="set-row" style="cursor:pointer" onclick="openRosterSheet()">
         <span class="set-label">本季固定成員<span class="set-sub" id="roster-summary">讀取中…</span></span>
-        <span class="set-go">編輯 ›</span>
+        <span class="set-go" id="roster-go">編輯 ›</span>
       </div>
       <div id="roster-alert" class="todo-line" hidden onclick="openRosterSheet()">
         <i class="todo-dot calm"></i>
@@ -200,13 +199,13 @@
 
     <!-- 4. 確認 -->
     <div data-panel="4" hidden>
-      <div class="section-label" style="margin-top:0">這一季會是這樣</div>
+      <div class="section-label" style="margin-top:0">本季概要</div>
       <div id="confirm-diff"></div>
       <div id="create-preview" style="margin-top:12px"></div>
 
       <div class="btn-row" style="margin-top:14px">
         <button type="button" class="btn btn-quiet" data-go="3">上一步</button>
-        <button type="button" class="btn btn-primary" onclick="createSeason()">建立這一季</button>
+        <button type="button" class="btn btn-primary" onclick="createSeason()">建立本季</button>
       </div>
     </div>
   </div>
@@ -236,7 +235,7 @@
 
   <div id="settings-form" class="settings-form" hidden data-season-content>
     <div class="set-row" style="cursor:pointer" onclick="startNextSeason()">
-      <span class="set-label">開新一季<span class="set-sub">沿用這一季的設定和成員，日期接在最後一場之後</span></span>
+      <span class="set-label">開新一季<span class="set-sub">沿用本季的設定與成員，日期接續最後一場</span></span>
       <span class="set-go">›</span>
     </div>
 
@@ -265,7 +264,7 @@
       <label for="f-cost">場地費總額</label>
       <input id="f-cost" class="control" type="number" step="1" min="0">
       <span class="hint">整季實際要付給場地的錢，<b>含有開冷氣的那幾場</b>。</span>
-      <span id="cost-locked-note" class="hint" hidden>這一季已結算，場地費不能再改。</span>
+      <span id="cost-locked-note" class="hint" hidden>本季已結算，場地費無法再修改。</span>
     </div>
 
     <div class="field">
@@ -321,11 +320,14 @@
 
     <div id="settle-section" hidden>
       <div class="section-label">季末</div>
+      <!-- One place to settle: 帳務's 季末結算. This row used to be a
+           second name for the same thing (結束這一季), which read as a
+           different act; now it says where it happens and from when. -->
       <div class="set-row" style="cursor: pointer" onclick="goToSettlement()">
-        <span class="set-label">結束這一季<span class="set-sub">最後一場打完後再做</span></span>
+        <span class="set-label">季末結算<span class="set-sub" id="settle-sub">於帳務頁進行</span></span>
         <span class="set-go">›</span>
       </div>
-      <p class="hint">結束後名單與場地費會鎖住，餘額結轉到下一季。</p>
+      <p class="hint">結算後名單與場地費即鎖定；每人餘額可退款、收款或保留至下一季。</p>
     </div>
 
   </div>
@@ -363,14 +365,14 @@
   <div id="danger-section" hidden>
     <div class="section-label">刪除</div>
     <div class="set-row" id="delete-season-row">
-      <span class="set-label">刪除這一季<span class="set-sub">場次、請假、臨打、已記的季費都會消失</span></span>
+      <span class="set-label">刪除本季<span class="set-sub">場次、請假、臨打與已記入的季費將一併刪除</span></span>
       <button type="button" class="mini-action danger" onclick="deleteSeason()">刪除</button>
     </div>
     <div class="set-row">
       <span class="set-label">刪除整個球隊<span class="set-sub">連同底下所有季別一起刪除</span></span>
       <button type="button" class="mini-action danger" onclick="deleteClub()">刪除</button>
     </div>
-    <p class="hint">只有管理員能刪除，而且已經結算過的季別不能刪——那是已經結清的帳。</p>
+    <p class="hint">僅管理員可刪除；已結算的季別不可刪除。</p>
   </div>
 </div>
 
@@ -383,21 +385,21 @@
         <i class="radio"></i>
         <span>
           <span class="ch-title">場地費不算這場</span>
-          <span class="ch-body">場地不用付這場的錢——場地費會依剩餘場次重新分攤，每場單價會提高，整季應收金額不變。已收的錢不動，差額進到每個人的餘額。</span>
+          <span class="ch-body">本場不計場地費：場地費改由其餘場次分攤，每場金額提高，整季應收不變；差額計入每人餘額。</span>
         </span>
       </button>
       <button type="button" class="choice-card" data-refunded="false">
         <i class="radio"></i>
         <span>
           <span class="ch-title">場地費照算</span>
-          <span class="ch-body">場地費已經付出去，只是這天不打——每人每場的金額完全不變。</span>
+          <span class="ch-body">本場照付場地費：每人每場金額不變。</span>
         </span>
       </button>
     </div>
     <p class="hint">目前每人每場 <strong id="cancel-current-share"></strong>。取消後可以在「帳務」看到新的金額。</p>
     <div class="btn-row" style="margin-top: 13px">
       <button type="button" class="btn btn-quiet" onclick="closeCancelSheet()">關閉</button>
-      <button type="button" class="btn btn-danger" onclick="confirmCancelGame()">取消這一場</button>
+      <button type="button" class="btn btn-danger" onclick="confirmCancelGame()">取消本場</button>
     </div>
   </div>
 </div>
@@ -433,7 +435,7 @@
     </div>
 
     <div class="field">
-      <label for="g-cost-delta">這一場的場地費差額</label>
+      <label for="g-cost-delta">本場場地費差額</label>
       <input id="g-cost-delta" class="control" type="number" step="1" placeholder="0">
       <span class="hint" id="g-cost-hint"></span>
     </div>
@@ -441,7 +443,7 @@
     <div id="g-cost-warn" class="warn-box" hidden></div>
 
     <span class="hint">
-      改日期、時間或場地名稱不會動到任何人的錢；這一場已經記下的請假、報名和候補都會跟著走。
+      修改日期、時間或場地不影響任何人的金額；本場已登記的請假、報名與候補一併保留。
     </span>
 
     <div class="btn-row" style="margin-top: 13px">
@@ -455,6 +457,8 @@
 <script>
   // localhost -> the local API, anywhere else -> production. See apiBase.
   const API_BASE = apiBase();
+  // The club is chosen from the top bar, as on the member page.
+  mountClubChip(document.getElementById("club-chip"), document.getElementById("club-picker"));
   const LIFF_ID = "2011156233-6CouG6VI";
   let currentSeasonId = null;
   let currentSeason = null;
@@ -494,8 +498,6 @@
       stopLoadingEscalation();
       if (!id) document.getElementById("page-state").innerHTML = "";
       const hasClub = !!currentClubId();
-      document.getElementById("club-picker-field").hidden = !hasClub;
-      document.getElementById("club-picker").hidden = !hasClub;
       document.getElementById("no-club-note").hidden = hasClub;
       document.getElementById("club-name-section").hidden = !hasClub;
       // 刪除 sits outside #settings-form now, so it answers for its own
@@ -865,14 +867,16 @@
               </div>`
           )
           .join("")
-      : '<div class="empty">球隊裡尚無其他對象，請在下面直接輸入姓名</div>';
+      : '<div class="empty">球隊中尚無其他成員，請於下方直接輸入姓名</div>';
 
     const picked = selectedNames();
     const rosterLine = document.getElementById("roster-summary");
     if (rosterLine) {
       rosterLine.textContent = picked.length
         ? `${picked.length} 人・${picked.slice(0, 3).join("、")}${picked.length > 3 ? " 等" : ""}`
-        : "還沒挑人，點這裡開始";
+        : "尚未選擇成員";
+      const go = document.getElementById("roster-go");
+      if (go) go.textContent = picked.length ? "編輯 ›" : "選擇成員 ›";
     }
 
     // Somebody the club still owes, or who still owes the club, standing
@@ -988,7 +992,7 @@
         ? [added.length ? `新增 ${added.join("、")}` : "", gone.length ? `少了 ${gone.join("、")}` : ""]
             .filter(Boolean)
             .join("；")
-        : "跟上一季同一批人";
+        : "與上一季相同";
       row("固定成員", `${picked.length} 人`, escapeHtml(note));
     } else {
       row("固定成員", `${picked.length} 人`, picked.slice(0, 4).join("、"));
@@ -1050,7 +1054,7 @@
       // their season fee on the spot, so collecting it is what the
       // organizer does next — and this page reloading itself to show a
       // settings form nobody asked for was the 卡頓 in the old flow.
-      toast("已建立這一季，接下來收季費");
+      toast("已建立本季，請接著收取季費");
       location.href = "organizer-ledger.html";
     } catch (e) {
       toast("建立失敗：" + e.message);
@@ -1113,6 +1117,18 @@
     document.getElementById("f-deadline").value = season.change_deadline_hours;
 
     document.getElementById("settle-section").hidden = settled;
+    // The same window the ledger enforces: from three weeks before the
+    // last game (see organizer-ledger.html settleBlocker).
+    const last = season.games.map((g) => g.date).sort().pop();
+    let sub = "於帳務頁進行";
+    if (last) {
+      const opens = new Date(last + "T00:00:00");
+      opens.setDate(opens.getDate() - 21);
+      if (opens > new Date()) {
+        sub = `於帳務頁進行，${opens.getMonth() + 1}/${opens.getDate()} 起開放`;
+      }
+    }
+    document.getElementById("settle-sub").textContent = sub;
   }
 
   function gameStatusLabel(status) {
@@ -1263,7 +1279,7 @@
     const cost = document.getElementById("g-cost-delta");
     cost.value = originalDelta === 0 ? "" : String(originalDelta);
     document.getElementById("g-cost-hint").textContent =
-      `這一場目前每人 $${game.share}。換到比較貴的場地就填多出來的錢，比較便宜填負數，留空表示跟平常一樣。`;
+      `本場目前每人 $${game.share}。場地費較高時填入差額，較低時填負數；留空表示與平常相同。`;
     document.getElementById("g-cost-warn").hidden = true;
     // Assignment rather than addEventListener: this sheet is opened again
     // for every game, and addEventListener would stack one more handler
@@ -1287,11 +1303,11 @@
       warn.hidden = false;
       warn.textContent =
         `場地費總額會從 $${currentSeason.total_venue_cost} 變成 $${total}。` +
-        `只有這一場的每人金額會變，其他場次完全不動。` +
+        `僅本場的每人金額變動，其他場次不受影響。` +
         `每個人的帳上會補一筆差額，已經收到的錢不動。`;
     };
     document.getElementById("date-sheet-title").textContent =
-      `編輯 ${describeDate(game.date).label} 這一場`;
+      `編輯 ${describeDate(game.date).label} 場次`;
     document.getElementById("date-sheet-input").value = game.date;
     writeTimeValue("g-start", game.start_time);
     writeTimeValue("g-end", game.end_time);
@@ -1302,8 +1318,8 @@
     // shows what will actually happen instead of looking unanswered.
     loc.placeholder = currentSeason.location || "例如：晴光館";
     document.getElementById("g-location-hint").textContent = currentSeason.location
-      ? `留空就跟這一季一樣：${currentSeason.location}`
-      : "留空表示跟這一季一樣";
+      ? `留空表示與本季相同：${currentSeason.location}`
+      : "留空表示與本季相同";
     document.getElementById("date-sheet-backdrop").hidden = false;
   }
 
@@ -1340,7 +1356,7 @@
     try {
       await postJson(API_BASE, `/games/${dateSheetGameId}`, payload, "PATCH");
       closeDateSheet();
-      toast("這一場改好了", "good");
+      toast("已更新本場設定", "good");
       await loadSettings(currentSeasonId);
     } catch (e) {
       toast(e.message);
@@ -1350,7 +1366,7 @@
   function openCancelSheet(gameId, label) {
     cancelGameId = gameId;
     cancelRefunded = true;
-    document.getElementById("cancel-game-title").textContent = `取消 ${label} 這一場`;
+    document.getElementById("cancel-game-title").textContent = `取消 ${label} 場次`;
     document.getElementById("cancel-current-share").textContent = `$${currentSeason.share_per_game}`;
     document.querySelectorAll("#cancel-game-backdrop .choice-card").forEach((card) => {
       card.classList.toggle("on", card.dataset.refunded === "true");
@@ -1380,15 +1396,15 @@
   async function deleteSeason() {
     if (!currentSeason) return;
     const label = `${currentSeason.games.length} 場、${currentSeason.members.length} 位成員`;
-    if (!confirm(`確定要刪除這一季嗎？
+    if (!confirm(`確定要刪除本季嗎？
 
-${label} 以及已經記在每個人帳上的季費都會一起消失，無法復原。`)) {
+${label} 及已記入每人帳上的季費將一併刪除，無法復原。`)) {
       return;
     }
     try {
       await deleteJson(API_BASE, `/seasons/${currentSeasonId}`);
       forgetId("vf_org_season");
-      toast("已刪除這一季");
+      toast("已刪除本季");
       location.reload();
     } catch (e) {
       toast("刪除失敗：" + e.message);
