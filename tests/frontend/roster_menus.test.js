@@ -1,7 +1,6 @@
-// Tapping a name opens a menu of what can be done to that person
-// (2026-10-17). The rows used to carry two-character buttons that could
-// not say what they did — 取消 beside a 代打 note, and 銷假, a word
-// nobody uses — and 請假並指定代打 is one step instead of two.
+// Tapping a row opens it in place onto at most two buttons (2026-10-20,
+// replacing a menu from the bottom of the screen). 銷假 is 取消請假, and
+// 指定代打 on somebody still playing takes leave in the same step.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -41,13 +40,39 @@ function render(game, season, options) {
   return el.innerHTML;
 }
 
-test("a row with something to do opens a menu, marked by a large chevron", () => {
+test("a row with something to do opens in place, marked by a large chevron", () => {
   const { season, game } = sheet();
 
   const html = render(game, season, { onRecordAbsence() {} });
 
-  assert.match(html, /data-row-acts="a0"[\s\S]*?class="att-go"/);
-  assert.match(html, /data-act-sheet="a0"[\s\S]*?登記請假/);
+  assert.match(html, /data-row-acts[\s\S]*?class="att-go" data-row-toggle/);
+  assert.match(html, /class="row-acts"><button[^>]*data-mark-absent="Alice">請假</);
+  assert.doesNotMatch(html, /data-act-sheet/);
+});
+
+test("no row offers more than two buttons", () => {
+  const { season, game } = sheet({
+    absences: [{ id: 5, player_name: "Alice", covered_by: "Dave", filled_by: "Dave" }],
+    confirmed_drop_ins: [
+      { id: 200, player_id: 9, player_name: "Dave", covering: "Alice", linked: false },
+    ],
+    waitlist_entries: [{ id: 300, player_name: "Carol" }],
+  });
+
+  const html = render(game, season, {
+    onRecordAbsence() {},
+    onRecordAbsenceWithSubstitute() {},
+    onAssignSubstitute() {},
+    onCancelAbsence() {},
+    onCancelSubstitute() {},
+    onRemoveDropIn() {},
+    onPromoteFromWaitlist() {},
+    onLeaveWaitlist() {},
+  });
+
+  const groups = html.match(/<span class="row-acts">[\s\S]*?<\/span>/g) || [];
+  assert.ok(groups.length >= 4);
+  for (const g of groups) assert.ok((g.match(/<button/g) || []).length <= 2, g);
 });
 
 test("a sheet with nothing to change has no menus and no chevrons", () => {
@@ -71,17 +96,18 @@ test("the member screen offers leave only on the viewer's own row", () => {
   assert.doesNotMatch(html, /data-mark-absent="Alice"/);
 });
 
-test("登記請假 says who comes off the queue for the slot", () => {
+test("the queue's buttons are 遞補 and 移除", () => {
   const { season, game } = sheet({
     waitlist_entries: [{ id: 300, player_name: "Carol", gender: "female" }],
   });
 
-  const html = render(game, season, { onRecordAbsence() {} });
+  const html = render(game, season, { onPromoteFromWaitlist() {}, onLeaveWaitlist() {} });
 
-  assert.match(html, /空出的位置由候補 Carol 遞補/);
+  assert.match(html, /data-promote-waitlist="300">遞補</);
+  assert.match(html, /data-remove-waitlist="300">移除</);
 });
 
-test("取消請假 replaces 銷假, and says who goes back to the queue", () => {
+test("取消請假 replaces 銷假, and 取消代打 waits in the substitute picker", () => {
   const { season, game } = sheet({
     absences: [{ id: 5, player_name: "Alice", covered_by: "Dave", filled_by: "Dave" }],
     confirmed_drop_ins: [
@@ -95,22 +121,22 @@ test("取消請假 replaces 銷假, and says who goes back to the queue", () => 
     onCancelSubstitute() {},
   });
 
-  assert.match(html, /data-undo-absence="5"/);
-  assert.match(html, /取消請假/);
-  assert.match(html, /恢復出席；Dave 回到候補/);
-  assert.match(html, /data-cancel-sub="200"[\s\S]*?取消代打/);
-  assert.match(html, /更換代打/);
+  const row = html.split('class="row-acts"')[1].split("</span>")[0];
+  assert.match(row, /data-toggle-sub="5">更換代打</);
+  assert.match(row, /data-undo-absence="5">取消請假</);
+  assert.doesNotMatch(row, /取消代打/);
+  assert.match(html, /data-sub-form="5"[\s\S]*?data-cancel-sub="200">取消代打</);
   assert.doesNotMatch(html, /銷假/);
 });
 
-test("請假並指定代打 is offered only where the page can do it in one step", () => {
+test("指定代打 on a playing member is offered only where the page can do it in one step", () => {
   const { season, game } = sheet();
   const base = { onRecordAbsence() {}, onAssignSubstitute() {} };
 
   const offered = render(game, season, { ...base, onRecordAbsenceWithSubstitute() {} });
   const without = render(game, season, base);
 
-  assert.match(offered, /data-absent-with-sub="Bob"[\s\S]*?請假並指定代打/);
+  assert.match(offered, /data-absent-with-sub="Bob">指定代打</);
   assert.doesNotMatch(without, /data-absent-with-sub/);
 });
 
@@ -147,6 +173,27 @@ test("a locked night offers no menus on the member screen", () => {
   });
 
   assert.doesNotMatch(html, /data-row-acts/);
+});
+
+test("the 出席 list is split into 固定成員 and 臨打, numbered straight through", () => {
+  const { season, game } = sheet({
+    confirmed_drop_ins: [
+      { id: 200, player_id: 9, player_name: "Kevin", covering: null },
+      { id: 201, player_id: 8, player_name: "Dave", covering: null, brought_by_name: "Bob" },
+    ],
+  });
+
+  const html = render(game, season, {});
+
+  assert.match(html, /att-sec"><span>固定成員<\/span><b>2<\/b>[\s\S]*Alice[\s\S]*Bob/);
+  assert.match(html, /att-sec"><span>臨打<\/span><b>2<\/b>[\s\S]*att-num">3<[\s\S]*Kevin/);
+  assert.doesNotMatch(html, /att-note">臨打</, "the heading says it once");
+  assert.match(html, /Dave[\s\S]*?att-note by">Bob 報名</);
+});
+
+test("a list of members only needs no headings", () => {
+  const { season, game } = sheet();
+  assert.doesNotMatch(render(game, season, {}), /att-sec/);
 });
 
 test("the organizer's sheet names the game in one line, not a second card", () => {

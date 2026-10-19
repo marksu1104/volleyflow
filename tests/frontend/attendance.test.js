@@ -97,11 +97,12 @@ test("an uncovered absence is called out as a gap", () => {
   assert.match(html, /data-gd-tab="absent"[^>]*>請假 <b>2<\/b>/);
 });
 
-test("someone with no account is marked, wherever they appear", () => {
-  // They can't record their own absence, so the organizer needs to know
-  // to do it for them.
+test("the game sheet tags nobody for having no account", () => {
+  // 「訪客」 sat on fixed members the organizer had typed in — the one
+  // place it was wrong — and never on a guest somebody brought, whose row
+  // already says who brought them (2026-10-20).
   const html = render();
-  assert.match(html, /訪客/);
+  assert.doesNotMatch(html, /訪客|guest-tag/);
 });
 
 test("the waitlist keeps its order and marks the viewer", () => {
@@ -116,7 +117,7 @@ test("the waitlist keeps its order and marks the viewer", () => {
   assert.match(el.innerHTML, /（你）/);
 });
 
-test("a queued guest names who signed them up; a self-signup stays 候補", () => {
+test("a queued guest names who signed them up; a self-signup carries no note", () => {
   const { season, game } = fixture();
   game.waitlist_entries = [
     { id: 300, player_name: "芷若", gender: "female", brought_by_name: "周安" },
@@ -125,7 +126,8 @@ test("a queued guest names who signed them up; a self-signup stays 候補", () =
   const el = makeElement();
   renderGameDetail(el, season, game, {});
   assert.match(el.innerHTML, /芷若[\s\S]*?att-note by">周安 報名</);
-  assert.match(el.innerHTML, /宋青[\s\S]*?att-note">候補</);
+  const self = el.innerHTML.split("宋青")[1].split("</div>")[0];
+  assert.doesNotMatch(self, /att-note/, "the 候補 tab already says it");
 });
 
 test("editing controls appear only for a caller that can edit", () => {
@@ -692,19 +694,6 @@ test("only the person's name gives way when a row runs out of room", () => {
   const el = makeElement();
   renderGameDetail(el, season, game, {});
   assert.match(el.innerHTML, /<span class="att-who">/);
-});
-
-test("the absent list drops the 訪客 tag, which means nothing there", () => {
-  // It says "can't record their own absence" — moot for someone already
-  // absent, and it was the content that pushed the row past a phone's
-  // width.
-  const { season, game } = fixture();
-  const el = makeElement();
-  renderGameDetail(el, season, game, {});
-
-  const absent = el.innerHTML.split('<div class="att-row absent')[1].split("</div>")[0];
-  assert.doesNotMatch(absent, /guest-tag/);
-  assert.match(el.innerHTML, /guest-tag/, "but it still appears on the attendance list");
 });
 
 // seasonHasStarted draws the line the roster rules are

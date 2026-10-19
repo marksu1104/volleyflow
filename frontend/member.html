@@ -1152,34 +1152,13 @@
     });
   }
 
-  /** The hero card's 請假: leave alone, or leave with a substitute named
-   * in the same step. The same two choices as the viewer's own row in
-   * 名單 (see renderGameDetail). */
-  function chooseAbsence(gameId, btn) {
-    const game = currentSeason && currentSeason.games.find((g) => g.id === gameId);
-    if (!game) return;
-    const head = game.waitlist_entries[0];
-    const info = describeDate(game.date);
-    openActionSheet({
-      title: "請假",
-      subtitle: `${info.month}/${info.day}（${info.weekday.slice(1)}）`,
-      actions: [
-        {
-          label: "登記請假",
-          hint: head ? `空出的位置由候補 ${head.player_name} 遞補` : "空出的位置列為缺額",
-          run: () => recordAbsence(gameId, btn),
-        },
-        {
-          label: "請假並指定代打",
-          hint: "登記請假，並由指定人選補上此位置",
-          run: () => {
-            if (selectedGameId !== gameId) selectGame(gameId);
-            openGameSheet();
-            openAbsenceWithSubstitute(document.getElementById("game-detail"), playerName());
-          },
-        },
-      ],
-    });
+  /** The hero card's 指定代打 while still playing: the substitute
+   * picker for the viewer's own slot, which takes leave and names them
+   * in one step. It lives in the game sheet, so that opens first. */
+  function pickSubstituteAndLeave(gameId) {
+    if (selectedGameId !== gameId) selectGame(gameId);
+    openGameSheet();
+    openAbsenceWithSubstitute(document.getElementById("game-detail"), playerName());
   }
 
   /** 請假並指定代打 in one request — see POST /absences's `substitute`.
@@ -1374,7 +1353,10 @@
       return {
         status: "",
         actions:
-          `<button type="button" class="hact danger" onclick="chooseAbsence(${game.id}, this)">請假</button>` +
+          `<button type="button" class="hact danger" onclick="recordAbsence(${game.id}, this)">請假</button>` +
+          // Naming a substitute is taking leave, so it sits beside 請假
+          // rather than after it (proposal round 2, 2026-10-20).
+          `<button type="button" class="hact" onclick="pickSubstituteAndLeave(${game.id})">指定代打</button>` +
           bring,
       };
     }

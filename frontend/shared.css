@@ -707,36 +707,51 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 }
 .att-note.gap { background: var(--bad-soft); color: var(--bad); }
 
-/* A row with something to do opens a menu of it (actionSheetHtml). The
-   whole row is the target, and the chevron says so: large, tinted, and
-   the only thing on the right, so it reads as "open" rather than as
-   punctuation after a name. */
-.att-row.has-acts { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+/* A row with something to do opens in place, downward, onto at most two
+   buttons (see rosterRow). The chevron says the row opens: large,
+   tinted, the only thing on the right; it turns into ✕ while open. */
+.att-row.has-acts { cursor: pointer; flex-wrap: wrap; row-gap: 0; align-content: center; -webkit-tap-highlight-color: transparent; }
 .att-row.has-acts:hover { border-color: var(--accent); }
-.att-row.has-acts:active { background: var(--accent-soft); }
-.att-row.has-acts:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.att-row.open { border-color: var(--accent); }
 .att-go {
-  width: 30px; height: 30px; border-radius: 50%; flex: none;
+  width: 30px; height: 30px; border-radius: 50%; flex: none; border: 0; padding: 0; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--accent-soft); color: var(--accent);
 }
 .att-row.dropin .att-go { background: var(--surface); }
 .att-go svg { display: block; }
-
-.act-title small {
-  display: block; font-size: .78rem; font-weight: 400; color: var(--ink-soft); margin-top: 2px;
+.att-go .i-close, .att-row.open .att-go .i-open { display: none; }
+.att-row.open .att-go .i-close { display: block; }
+/* Below the name, the full width of the row. Collapsed to nothing, so a
+   closed row is exactly as tall as one with nothing to do. */
+.row-acts {
+  flex: 0 0 100%; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px;
+  max-height: 0; opacity: 0; overflow: hidden; visibility: hidden;
+  transition: max-height .22s ease, opacity .16s ease, margin-top .22s ease, visibility 0s .22s;
 }
-.act-list { display: flex; flex-direction: column; gap: 6px; }
-.act-btn {
-  display: block; width: 100%; text-align: left; padding: 12px 14px; border-radius: 11px;
-  border: 1px solid var(--rule); background: var(--surface-2); color: var(--ink);
-  font-family: var(--font-cjk); font-size: .95rem; font-weight: 700; cursor: pointer;
+.att-row.open .row-acts {
+  max-height: 48px; opacity: 1; margin-top: 9px; visibility: visible;
+  transition: max-height .22s ease, opacity .16s ease, margin-top .22s ease;
 }
-.act-btn:hover { border-color: var(--accent); }
-.act-btn small {
-  display: block; margin-top: 2px; font-size: .76rem; font-weight: 400; color: var(--ink-soft);
+.row-act {
+  height: 38px; border: 0; border-radius: 9px; cursor: pointer; white-space: nowrap;
+  font-family: var(--font-cjk); font-size: .88rem; font-weight: 700;
 }
-.act-btn.danger .act-label { color: var(--bad); }
+.row-act.primary { background: var(--accent); color: var(--surface); }
+.row-act.danger { background: var(--bad-soft); color: var(--bad); }
+.row-act.quiet { background: var(--surface-2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--rule-strong); }
+.att-row.dropin .row-act.quiet { background: var(--surface); }
+.picker-cancel-sub { margin-top: 8px; width: 100%; }
+@media (prefers-reduced-motion: reduce) {
+  .row-acts, .att-row.open .row-acts { transition: none; }
+}
+/* 固定成員 / 臨打 inside the 出席 list: what a row is, said once. */
+.att-sec {
+  display: flex; align-items: baseline; justify-content: space-between; margin: 10px 4px 4px;
+  font-size: .74rem; font-weight: 700; color: var(--ink-faint); letter-spacing: .04em;
+}
+.att-sec:first-child { margin-top: 2px; }
+.att-sec b { font-family: var(--font-num); font-size: .8rem; color: var(--ink-soft); }
 .picker-note { margin: 0 0 10px; font-size: .8rem; color: var(--ink-soft); }
 
 /* The game in one line at the top of the organizer's roster sheet —
