@@ -10,12 +10,6 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap">
 <link rel="stylesheet" href="shared.css">
 <style>
-  .name-save-row { display: flex; gap: 8px; }
-  .name-save-row input { flex: 1; }
-  .name-save-row button {
-    flex: none; padding: 0 16px; border: none; border-radius: 9px; background: var(--accent);
-    color: var(--surface); font-weight: 700; font-size: .86rem; cursor: pointer; font-family: var(--font-cjk);
-  }
   .no-liff { color: var(--ink-soft); font-size: .85rem; padding: 30px 0; text-align: center; }
 </style>
 </head>
@@ -29,66 +23,50 @@
     <span class="app-bar-right"></span>
   </div>
 
-  <h1>個人資料</h1>
-  <div id="identity" class="identity"></div>
-
+  <!-- Grouped one-line rows, values on the right (proposal round 3,
+       2026-10-20). It was a heading over a full-width button for every
+       item, with a grey note under most of them, which read as dense. -->
+  <div id="boot"></div>
   <div id="content" hidden>
-    <div class="prof">
-      <div class="avatar lg" id="avatar-lg">?</div>
-      <div>
-        <div class="prof-name" id="prof-name"></div>
-        <div class="prof-sub">LINE 已連結・名字取自 LINE 個人檔案</div>
-      </div>
+    <div class="me-head">
+      <div class="avatar" id="avatar-lg">?</div>
+      <div class="me-name" id="prof-name"></div>
+      <span class="state-pill ok">LINE 已連結</span>
     </div>
 
-    <div class="field">
-      <label for="name-input">名單上顯示的名字</label>
-      <div class="name-save-row">
-        <input id="name-input" class="control" type="text">
+    <div class="lgroup">個人設定</div>
+    <div class="lcard">
+      <button type="button" class="lrow" id="name-row" aria-expanded="false" aria-controls="name-edit">
+        <span class="lrow-k">顯示名稱</span><span class="lrow-v" id="name-value"></span><span class="lrow-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      </button>
+      <div class="lrow-edit" id="name-edit" hidden>
+        <input id="name-input" class="control" type="text" aria-label="顯示名稱">
         <button type="button" onclick="saveName()">儲存</button>
       </div>
-      <p class="hint">管理員和其他人在名單上看到的就是這個名字。</p>
-    </div>
-
-    <div class="field">
-      <label>性別</label>
-      <div class="seg-pick" id="gender-pick">
-        <button type="button" data-gender="male">男</button>
-        <button type="button" data-gender="female">女</button>
+      <div class="lrow static">
+        <span class="lrow-k">性別</span>
+        <span class="seg-mini" id="gender-pick">
+          <button type="button" data-gender="male">男</button>
+          <button type="button" data-gender="female">女</button>
+        </span>
       </div>
-      <p class="hint">只用來統計每場的男女人數，不影響帳務。</p>
     </div>
 
-    <div class="section-label" id="clubs-label"></div>
-    <div id="clubs-list"></div>
-    <p class="hint">餘額分球隊各自計算，不會互相流用。</p>
-    <!-- The rows above carry each club's balance; this is the way to the
-         breakdown behind those figures. A link rather than making the
-         rows tappable: this page is about the reader, and a club row
-         here is a fact about them, not a control. -->
-    <a class="btn btn-quiet" href="ledger.html">查看各隊明細</a>
+    <div class="lgroup">我的球隊</div>
+    <div class="lcard" id="clubs-list"></div>
 
-    <!-- A link, not the form. Reporting a problem is not a profile
-         setting, and the form used to sit below the name field, the
-         gender picker and the club list — three things nobody scrolls
-         past on their way to say something is broken. It has its own
-         page now, which is also where the LINE rich menu's third button
-         lands. Moved 2026-09-18. -->
-    <!-- The permanent home for this. The join screen asks once, but it
-         disappears on approval, and LINE will not push to anyone who has
-         not added the account — so there has to be somewhere to do it
-         afterwards. -->
-    <div class="section-label">官方帳號</div>
-    <a class="btn btn-quiet" id="oa-link">加入官方帳號</a>
-    <p class="hint">通知只會發給已加入官方帳號的人。</p>
-
-    <div class="section-label">回報問題</div>
-    <a class="btn btn-quiet" href="report.html">回報問題</a>
+    <div class="lgroup">通知與說明</div>
+    <div class="lcard">
+      <a class="lrow" id="oa-link"><span class="lrow-k">LINE 官方帳號</span><span id="oa-state"></span><span class="lrow-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></a>
+      <a class="lrow" href="report.html"><span class="lrow-k">回報問題</span><span class="lrow-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></a>
+    </div>
 
     <div id="dev-reports" hidden>
-      <div class="section-label">開發者</div>
-      <a class="btn btn-quiet" href="reports.html" id="dev-reports-link">查看問題回報</a>
-      <a class="btn btn-quiet" href="developer.html" id="dev-console-link">後台總覽</a>
+      <div class="lgroup">開發者</div>
+      <div class="lcard">
+        <a class="lrow" href="developer.html" id="dev-console-link"><span class="lrow-k">後台總覽</span><span class="lrow-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></a>
+        <a class="lrow" href="reports.html" id="dev-reports-link"><span class="lrow-k">問題回報</span><span class="lrow-v" id="dev-unread"></span><span class="lrow-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></a>
+      </div>
     </div>
   </div>
 
@@ -103,29 +81,31 @@
   let me = null;
 
   (async function init() {
-    const identityEl = document.getElementById("identity");
     // This page edits the Player row itself, so its id must be authoritative.
     // An organizer may have linked this LINE account to an older roster row
     // since the tab cached its identity; using that deleted id makes every
     // profile write miss the real person. Other pages may keep the fast
     // session cache, but profile deliberately re-identifies once on entry.
     sessionStorage.removeItem("vf_identity");
+    // Signing in is the slowest step here; say so rather than show a
+    // blank page while it runs.
+    showPageLoading(document.getElementById("boot"));
     const identified = await initLiffIdentity(API_BASE, LIFF_ID);
+    document.getElementById("boot").innerHTML = "";
     if (!identified) {
-      identityEl.textContent = "";
       const notice = document.getElementById("no-liff");
       notice.innerHTML = signInFailureHtml(identified);
       notice.hidden = false;
       return;
     }
     me = identified;
-    identityEl.textContent = `已用 LINE 身分登入：${identified.name}`;
     document.getElementById("content").hidden = false;
     // Wired here rather than hardcoded in the markup so the address
     // lives in exactly one place (shared.js) — member.html's join screen
     // offers the same link.
     document.getElementById("oa-link").href = OFFICIAL_ACCOUNT_URL;
     renderProfile();
+    showOfficialAccountState();
     if (me.is_developer) showDeveloperReports();
     await renderClubs();
   })();
@@ -143,17 +123,40 @@
       const res = await fetch(`${API_BASE}/reports`, { headers: authHeader() });
       if (!res.ok) return;
       const unread = (await res.json()).filter((r) => !r.read).length;
-      if (unread) {
-        document.getElementById("dev-reports-link").textContent = `查看問題回報（${unread} 則未讀）`;
-      }
+      document.getElementById("dev-unread").textContent = `${unread} 則未讀`;
     } catch (e) {
       // The link still works without a count.
     }
   }
 
+  /** 已加入 / 未加入 beside the official account, from LINE itself.
+   * Nothing at all when LINE could not be asked: guessing either way
+   * would be wrong for somebody (see LineReachableOut). */
+  async function showOfficialAccountState() {
+    try {
+      const res = await fetch(`${API_BASE}/players/me/line-reachable`, { headers: authHeader() });
+      if (!res.ok) return;
+      const { reachable } = await res.json();
+      const el = document.getElementById("oa-state");
+      if (reachable === true) el.innerHTML = '<span class="state-pill ok">已加入</span>';
+      else if (reachable === false) el.innerHTML = '<span class="state-pill warn">未加入</span>';
+    } catch (e) {
+      // The row still opens the account without a state beside it.
+    }
+  }
+
+  // 顯示名稱 opens in place, under its own row.
+  document.getElementById("name-row").addEventListener("click", () => {
+    const edit = document.getElementById("name-edit");
+    edit.hidden = !edit.hidden;
+    document.getElementById("name-row").setAttribute("aria-expanded", String(!edit.hidden));
+    if (!edit.hidden) document.getElementById("name-input").focus();
+  });
+
   function renderProfile() {
     paintSelfAvatar(document.getElementById("avatar-lg"), me);
     document.getElementById("prof-name").textContent = me.name;
+    document.getElementById("name-value").textContent = me.name;
     document.getElementById("name-input").value = me.name;
     for (const btn of document.querySelectorAll("#gender-pick [data-gender]")) {
       btn.classList.toggle("selected", me.gender === btn.dataset.gender);
@@ -175,6 +178,8 @@
       sessionStorage.removeItem("vf_identity");
       me.name = updated.name;
       renderProfile();
+      document.getElementById("name-edit").hidden = true;
+      document.getElementById("name-row").setAttribute("aria-expanded", "false");
       toast(
         updated.name !== name
           ? `「${name}」已經有人使用，改成了「${updated.name}」`
@@ -207,22 +212,20 @@
   // to report.html on 2026-09-18 — deleted here rather than left behind
   // as dead code, so there is exactly one place that can send a report.
 
+  /** One club: its name, the role if it is more than member, and where
+   * the money stands. The row opens that club's breakdown on the ledger
+   * page. 已結清 is said rather than left blank now that the figure is
+   * the row's value (2026-10-20); an unknown balance still shows nothing
+   * — see balanceBadgeHtml. */
   function clubRowHtml(club) {
     const roleTag = club.role === "organizer" ? '<span class="role-tag">管理員</span>' : "";
-    /* The balance rides on the club row itself now — see GET
-     * /players/{id}/clubs. It used to be fetched per club and passed in
-     * separately, which is what made this card slow.
-     *
-     * The badge, its NaN guard and its wording live in shared.js; see
-     * balanceBadgeHtml. No `settled` label here: this page is about the
-     * reader, and "you are square with this club" is not news on it. */
-    const balHtml = balanceBadgeHtml(club.balance);
+    const balHtml = balanceBadgeHtml(club.balance, { settled: "已結清" });
     return `
-      <div class="club-row display">
+      <a class="lrow" href="ledger.html?club=${encodeURIComponent(club.id)}">
         <i class="club-dot">${escapeHtml(firstGrapheme(club.name))}</i>
-        <span class="cr-name">${escapeHtml(club.name)}</span>
-        ${roleTag}${balHtml}
-      </div>
+        <span class="lrow-k"><span class="lrow-name">${escapeHtml(club.name)}</span>${roleTag}</span>
+        ${balHtml}<span class="lrow-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      </a>
     `;
   }
 
@@ -253,10 +256,9 @@
         `${API_BASE}/players/${me.id}/clubs`,
         (clubs) => {
           stopLoadingEscalation();
-          document.getElementById("clubs-label").textContent = `我的球隊 ${clubs.length} 個`;
           list.innerHTML =
             clubs.map((c) => clubRowHtml(c)).join("") ||
-            '<div class="empty">尚未加入任何球隊</div>';
+            '<div class="lrow static"><span class="lrow-k">尚未加入任何球隊</span></div>';
         },
         { headers: authHeader() }
       );

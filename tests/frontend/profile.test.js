@@ -101,3 +101,17 @@ test("a member is not labelled", () => {
 
   assert.ok(!/管理員/.test(html));
 });
+
+test("a club row opens that club's breakdown on the ledger page", () => {
+  // The rows are the way in to the money now; the separate 查看各隊明細
+  // button went with the round-three redesign (2026-10-20).
+  const html = clubRowHtml(club({ id: 42, balance: "-100" }));
+
+  assert.match(html, /<a class="lrow" href="ledger\.html\?club=42">/);
+});
+
+test("a settled club says so, as the row's value", () => {
+  const html = clubRowHtml(club({ balance: "0" }));
+
+  assert.match(html, /已結清/);
+});

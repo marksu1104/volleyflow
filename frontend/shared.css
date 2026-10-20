@@ -1558,3 +1558,46 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .is-busy::after { animation-duration: 1.6s; }
 }
+
+/* Grouped list cards — one line per row, the value on the right, the row
+   itself the control. First used by 個人資料 (proposal round 3,
+   2026-10-20), where every setting had been a heading over a full-width
+   button, with a grey note under most of them: dense, and read as
+   pressure rather than as a list of facts. */
+.lgroup { font-size: .85rem; font-weight: 700; color: var(--ink-soft); margin: 20px 4px 8px; }
+.lcard { background: var(--surface); border: 1px solid var(--rule); border-radius: 16px; overflow: hidden; }
+.lrow {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; box-sizing: border-box;
+  padding: 10px 16px; border: 0; background: none; color: var(--ink); text-decoration: none;
+  font-family: var(--font-cjk); font-size: .98rem; text-align: left; cursor: pointer;
+}
+.lrow + .lrow, .lrow + .lrow-edit, .lrow-edit + .lrow { border-top: 1px solid var(--rule); }
+.lrow.static { cursor: default; }
+.lrow-k { flex: 1; min-width: 0; font-weight: 500; display: flex; align-items: center; }
+/* Only the name gives way on a narrow screen; a tag beside it stays whole. */
+.lrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrow-k .role-tag { flex: none; }
+.lrow-v { color: var(--ink-soft); font-weight: 700; white-space: nowrap; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.lrow-go { color: var(--ink-faint); display: flex; flex: none; }
+.lrow .club-dot { width: 32px; height: 32px; font-size: .85rem; }
+.lrow .role-tag { margin-left: 6px; }
+.lrow .bal { font-size: 1rem; font-weight: 800; }
+.lrow .bal:not(.plus):not(.minus) { color: var(--ink-faint); font-family: var(--font-cjk); font-size: .88rem; font-weight: 700; }
+.lrow-edit { display: flex; gap: 8px; padding: 0 16px 14px; }
+.lrow-edit input { flex: 1; min-width: 0; }
+.lrow-edit button {
+  flex: none; padding: 0 16px; border: none; border-radius: 9px; background: var(--accent);
+  color: var(--surface); font-weight: 700; font-size: .9rem; cursor: pointer; font-family: var(--font-cjk);
+}
+.state-pill { font-size: .78rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+.state-pill.ok { background: var(--good-soft); color: var(--good); }
+.state-pill.warn { background: var(--warn-soft); color: var(--warn); }
+.seg-mini { display: inline-flex; background: var(--surface-2); border-radius: 10px; padding: 3px; gap: 2px; }
+.seg-mini button {
+  border: 0; background: none; padding: 6px 18px; border-radius: 8px; cursor: pointer;
+  font-family: var(--font-cjk); font-size: .92rem; font-weight: 700; color: var(--ink-soft);
+}
+.seg-mini button.selected { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .14); }
+.me-head { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px 0 4px; }
+.me-head .avatar { width: 72px; height: 72px; font-size: 1.6rem; }
+.me-head .me-name { font-size: 1.3rem; font-weight: 700; }
