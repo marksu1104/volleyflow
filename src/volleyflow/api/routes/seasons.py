@@ -1,7 +1,9 @@
 """Seasons: creating one, pricing it, its roster, and settling it."""
 
 from collections import defaultdict
+from dataclasses import replace
 from datetime import date
+from decimal import Decimal
 
 from fastapi import (
     APIRouter,
@@ -53,6 +55,8 @@ from volleyflow.api.routes._people import (
 from volleyflow.api.schemas import (
     AbsenceDetailOut,
     AirConditionedDatesUpdate,
+    AirConditionedPreviewGame,
+    AirConditionedPreviewOut,
     ClubMemberOut,
     DisplacedDropInOut,
     DropInDetailOut,
@@ -93,6 +97,7 @@ from volleyflow.notify.reminders import (
     notify_fee_due,
 )
 from volleyflow.pricing import share_per_game
+from volleyflow.schedule import GameStatus, Season
 from volleyflow.settlement import (
     season_shares,
 )
@@ -399,7 +404,11 @@ def set_air_conditioned_dates(
     an adjustment, exactly as editing the venue cost does.
 
     Refused once the season is settled, for the same reason every other
-    money-moving edit is: the books are closed.
+    money-moving edit is: the books are closed. Refused too for a game
+    already played (2026-10-21): what happened on that night is recorded
+    with games.set_game_air_conditioning, which moves the bill, and
+    letting the forecast be "corrected" afterwards as well would adjust
+    the same night twice, once each way.
     """
     season = db.get(SeasonRow, season_id)
     if season is None:
@@ -416,11 +425,106 @@ def set_air_conditioned_dates(
             status.HTTP_400_BAD_REQUEST,
             f"No game on {min(unknown)} in this season",
         )
+    today = _today_in_taiwan()
+    played = sorted(
+        game.date
+        for game in games
+        if game.date < today and (game.date in cooled) != game.air_conditioned
+    )
+    if played:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"The game on {played[0]} has been played — record whether the "
+            "air conditioning ran on the night instead",
+        )
     for game in games:
         game.air_conditioned = game.date in cooled
     db.flush()
     _sync_season_fee_ledger(db, season)
     db.commit()
+
+
+@router.post(
+    "/seasons/{season_id}/air-conditioned-dates/preview",
+    response_model=AirConditionedPreviewOut,
+)
+def preview_air_conditioned_dates(
+    season_id: int,
+    payload: AirConditionedDatesUpdate,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> AirConditionedPreviewOut:
+    """What correcting the forecast would do to every game's price and to
+    a member's season fee, without doing it.
+
+    The settings page shows this while the organizer taps dates, so the
+    figures come from the same pricing code as the books themselves
+    (settlement.season_shares) rather than from a second copy of the
+    rounding rules in the browser — which could not see cancelled games
+    or a night's own venue cost, and would then disagree with the ledger.
+    Writes nothing.
+    """
+    season_row = db.get(SeasonRow, season_id)
+    if season_row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    _require_organizer(db, season_row.club_id, current_player)
+
+    game_rows = (
+        db.query(GameRow)
+        .filter(GameRow.season_id == season_id)
+        .order_by(GameRow.date)
+        .all()
+    )
+    cooled = set(payload.dates)
+    unknown = cooled - {game.date for game in game_rows}
+    if unknown:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"No game on {min(unknown)} in this season",
+        )
+    member_rows = (
+        db.query(PlayerRow)
+        .join(SeasonMemberRow, SeasonMemberRow.player_id == PlayerRow.id)
+        .filter(SeasonMemberRow.season_id == season_id)
+        .all()
+    )
+    before = season_from_rows(season_row, game_rows, member_rows)
+    after = replace(
+        before,
+        games=tuple(
+            replace(game, air_conditioned=game.date in cooled) for game in before.games
+        ),
+    )
+    try:
+        shares_before = season_shares(before)
+        shares_after = season_shares(after)
+    except ValueError as e:
+        # More nights cooled than the venue bill can carry.
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+
+    def fee(shares: dict[int, Decimal], season: Season) -> Decimal:
+        return sum(
+            (
+                shares[game.id]
+                for game in season.games
+                if game.status != GameStatus.CANCELLED_REFUNDED
+            ),
+            Decimal("0"),
+        )
+
+    return AirConditionedPreviewOut(
+        season_fee_before=fee(shares_before, before),
+        season_fee_after=fee(shares_after, after),
+        games=[
+            AirConditionedPreviewGame(
+                date=game.date,
+                air_conditioned=game.air_conditioned,
+                share_before=shares_before[game.id],
+                share_after=shares_after[game.id],
+            )
+            for game in after.games
+        ],
+    )
 
 
 @router.post("/seasons/{season_id}/members", response_model=SeasonMemberAddOut)

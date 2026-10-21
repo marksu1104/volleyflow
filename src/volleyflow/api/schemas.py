@@ -210,6 +210,23 @@ class AirConditionedDatesUpdate(BaseModel):
     really did run, or really didn't, and the bill moves with it."""
 
 
+class AirConditionedPreviewGame(BaseModel):
+    date: date
+    air_conditioned: bool
+    share_before: Decimal
+    share_after: Decimal
+
+
+class AirConditionedPreviewOut(BaseModel):
+    """What a corrected forecast would cost: every game's per-person
+    share before and after, and a member's season fee before and after.
+    Nothing is written — see seasons.preview_air_conditioned_dates."""
+
+    season_fee_before: Decimal
+    season_fee_after: Decimal
+    games: list[AirConditionedPreviewGame]
+
+
 class GameOut(BaseModel):
     id: int
     date: date

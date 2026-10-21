@@ -107,35 +107,56 @@ function mountClubChip(chip, select) {
 
 /** The list behind the club chip: one row per club this page manages. */
 function openClubChooser(select) {
-  const clubs = Array.from(select.options).filter((o) => o.value);
+  // No options at all means the list has not arrived yet; once it has,
+  // a club-less list still carries one empty-valued 尚無球隊 option (see
+  // initClubAndSeasonPickers). Saying 尚未管理任何球隊 to somebody who
+  // tapped before the list loaded was wrong (found 2026-10-21), so the
+  // sheet says it is loading and fills itself in when the list lands.
+  const rowsHtml = () => {
+    if (!select.options.length) {
+      return '<div class="page-state"><div class="spinner" role="status" aria-label="載入中"></div><p>載入中…</p></div>';
+    }
+    const clubs = Array.from(select.options).filter((o) => o.value);
+    return clubs.length
+      ? clubs
+          .map(
+            (o) => `
+        <button type="button" class="club-row${o.value === select.value ? " on" : ""}" data-club="${escapeHtml(o.value)}">
+          <i class="club-dot">${escapeHtml(firstGrapheme(o.textContent))}</i>
+          <span class="cr-name"><span class="cr-title">${escapeHtml(o.textContent)}</span></span>
+        </button>`
+          )
+          .join("")
+      : '<div class="empty">尚未管理任何球隊</div>';
+  };
   const backdrop = document.createElement("div");
   backdrop.className = "gsheet-backdrop";
   backdrop.innerHTML = `
     <div class="gsheet">
       <button type="button" class="gsheet-close" aria-label="關閉">✕</button>
       <h3>球隊</h3>
-      ${
-        clubs.length
-          ? clubs
-              .map(
-                (o) => `
-        <button type="button" class="club-row${o.value === select.value ? " on" : ""}" data-club="${escapeHtml(o.value)}">
-          <i class="club-dot">${escapeHtml(firstGrapheme(o.textContent))}</i>
-          <span class="cr-name"><span class="cr-title">${escapeHtml(o.textContent)}</span></span>
-        </button>`
-              )
-              .join("")
-          : '<div class="empty">尚未管理任何球隊</div>'
-      }
+      <div data-club-rows>${rowsHtml()}</div>
     </div>`;
+  const observer =
+    typeof MutationObserver === "undefined"
+      ? null
+      : new MutationObserver(() => {
+          const rows = backdrop.querySelector("[data-club-rows]");
+          if (rows) rows.innerHTML = rowsHtml();
+        });
+  if (observer) observer.observe(select, { childList: true, subtree: true, characterData: true });
+  const close = () => {
+    if (observer) observer.disconnect();
+    backdrop.remove();
+  };
   backdrop.addEventListener("click", (e) => {
     if (e.target === backdrop || e.target.closest(".gsheet-close")) {
-      backdrop.remove();
+      close();
       return;
     }
     const row = e.target.closest("[data-club]");
     if (!row) return;
-    backdrop.remove();
+    close();
     if (row.dataset.club === select.value) return;
     select.value = row.dataset.club;
     select.dispatchEvent(new Event("change"));
@@ -348,7 +369,22 @@ function seasonHasStarted(season) {
  * the person who gets asked "why is tonight more expensive". */
 function acPill(season, game) {
   if (!game.air_conditioned || !(Number(season.ac_surcharge) > 0)) return "";
-  return `<span class="meta-pill ac">含冷氣 +$${acExtraEach(season, game)}</span>`;
+  return `<span class="meta-pill ac">${snowIcon(12)}含冷氣 +$${acExtraEach(season, game)}</span>`;
+}
+
+/** Air conditioning is drawn the same everywhere it appears — blue, with
+ * this snowflake (2026-10-21; it was orange on some screens and blue on
+ * others). */
+function snowIcon(size) {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v20M4.9 6l14.2 12M4.9 18L19.1 6"/><path d="M9 3.5l3 2 3-2M9 20.5l3-2 3 2"/></svg>`;
+}
+
+/** The same snowflake struck through, for "no air conditioning". The
+ * slash runs between two of the flake's arms and has a gap cut either
+ * side of it (class "cut", stroked in the colour behind), or at this
+ * size it merges into the arms and reads as a second snowflake. */
+function snowOffIcon(size) {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g opacity=".7"><path d="M12 2v20M4.9 6l14.2 12M4.9 18L19.1 6"/><path d="M9 3.5l3 2 3-2M9 20.5l3-2 3 2"/></g><path class="cut" d="M2 9.5l20 5" stroke-width="6"/><path d="M2 9.5l20 5" stroke-width="2.4"/></svg>`;
 }
 
 // The server's own prices where a cooled game has one, so this matches the ledger.
@@ -3031,6 +3067,14 @@ const _API_ERROR_PATTERNS = [
   ],
 
   // Season and settlement.
+  [
+    /^The game on (\d{4})-(\d{2})-(\d{2}) has been played — record whether the air conditioning ran on the night instead$/,
+    (m) => `${Number(m[2])}/${Number(m[3])} 的場次已結束，請於總覽記錄當天實際是否開冷氣`,
+  ],
+  [
+    /^air conditioning and venue changes cost more than the whole venue bill/,
+    () => "冷氣與場地差額合計超過場地費總額，請檢查金額",
+  ],
   [
     /^Season is already settled — venue cost can't change now$/,
     () => "本季已結算，場地費無法再修改",

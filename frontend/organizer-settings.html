@@ -13,10 +13,6 @@
   .settings-form { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
   .settings-form[hidden] { display: none; }
   .empty-club-note { color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center; }
-  .save-btn {
-    padding: 11px 20px; border: none; border-radius: 10px; background: var(--ink); color: var(--surface);
-    font-size: .88rem; font-weight: 700; cursor: pointer; font-family: var(--font-cjk);
-  }
 </style>
 </head>
 <body>
@@ -72,7 +68,7 @@
     </div>
   <div id="create-season-form" class="settings-form">
     <div class="empty-state" id="create-season-blurb" style="text-align:left">
-      <p>一季 = 一段時間內的一組場次 + 一筆場地費 + 一份固定成員名單。填完下面幾格，系統會把場地費平均分攤成每人每場的金額，並在開季時就把季費記到每個人的帳上。</p>
+      <p>一季包含一段期間的場次、場地費與固定成員名單。系統依人數上限將場地費分攤為每人每場金額，並於開季時記入每位成員的季費。</p>
     </div>
 
     <div class="stepper">
@@ -86,14 +82,14 @@
     <div data-panel="1">
       <div class="field">
         <label for="c-cost">場地費總額</label>
-        <input id="c-cost" class="control" type="number" step="1" min="0" inputmode="numeric" placeholder="整季實際要付的總金額">
+        <input id="c-cost" class="control" type="number" step="1" min="0" inputmode="numeric" placeholder="整季實際支付的總金額">
         <span class="hint">整季實際支付場地的金額，<b>包含預計開冷氣的場次</b>。冷氣費用請填於下一欄，系統會自動拆算。</span>
       </div>
 
       <div class="field" style="margin-bottom:13px">
         <label for="c-ac">每場冷氣費用</label>
-        <input id="c-ac" class="control" type="number" step="1" min="0" inputmode="numeric" placeholder="沒有另外收就留 0">
-        <span class="hint">跟場地費總額同一個基準（優惠後）。下一步可以勾選哪幾天開冷氣，開季後每一場也都還能個別改。</span>
+        <input id="c-ac" class="control" type="number" step="1" min="0" inputmode="numeric" placeholder="無冷氣費用請填 0">
+        <span class="hint">與場地費總額相同基準（優惠後）。下一步可選擇開冷氣的場次，開季後仍可修改。</span>
       </div>
 
       <div class="field-pair" style="margin-bottom:13px">
@@ -155,20 +151,30 @@
             </select>
           </div>
           <div class="field">
-            <label for="g-start">從哪天開始</label>
+            <label for="g-start">起始日期</label>
             <input id="g-start" class="control" type="date">
           </div>
           <div class="field" style="flex:0 1 90px">
-            <label for="g-weeks">週數</label>
+            <label for="g-weeks">場次數</label>
             <input id="g-weeks" class="control" type="number" min="1" max="52" value="13">
           </div>
         </div>
         <button type="button" class="btn btn-quiet" onclick="generateDates()">產生場次</button>
+      </div>
 
-        <div id="date-chips" class="chips"></div>
+      <!-- The same grid as 設定 › 場次 › 修改預定, so setting the forecast
+           up and correcting it later work the same way. -->
+      <div class="st-card" style="margin-top:12px">
+        <div class="st-card-head"><h3>場次與預定冷氣</h3><button type="button" class="st-edit" id="wz-all-ac" onclick="toggleAllAc()" hidden>全部開啟</button></div>
+        <p class="day-hint" id="wz-hint"></p>
+        <div id="date-grid"></div>
+        <div class="day-tools">
+          <button type="button" class="btn btn-quiet" id="wz-remove" onclick="toggleRemoving()">移除場次</button>
+          <button type="button" class="btn btn-quiet" onclick="addOneOffDate()">＋ 新增日期</button>
+        </div>
         <div id="gen-summary" class="gen-summary"></div>
       </div>
-      <p class="hint">可刪除或新增場次，場次數影響每人每場金額。<br>標示 <span class="chip-ac on">冷氣</span> 為預定冷氣場次，開季後可於設定頁修正。</p>
+      <p class="hint">場次數影響每人每場金額；開季後仍可於設定頁修改預定冷氣場次。</p>
 
       <div class="btn-row" style="margin-top:14px">
         <button type="button" class="btn btn-quiet" data-go="1">上一步</button>
@@ -189,7 +195,7 @@
         <span class="t-main" id="roster-alert-text"></span>
         <span class="t-go">›</span>
       </div>
-      <p class="hint">季費是用<b>人數上限</b>算的，所以名單多一人少一人只動到那個人自己的帳，其他人不受影響。</p>
+      <p class="hint">季費依<b>人數上限</b>計算；名單增減只影響該成員本人的帳，其他人不受影響。</p>
 
       <div class="btn-row" style="margin-top:14px">
         <button type="button" class="btn btn-quiet" data-go="2">上一步</button>
@@ -222,9 +228,9 @@
       </div>
       <div id="roster-list" class="pick"></div>
 
-      <div class="or-line" style="margin:14px 0 8px"><span>不在球隊裡的人</span></div>
+      <div class="or-line" style="margin:14px 0 8px"><span>球隊以外的人</span></div>
       <div class="add-member-row" style="margin:0">
-        <input id="c-extra-name" class="control" type="text" placeholder="直接輸入名字">
+        <input id="c-extra-name" class="control" type="text" placeholder="輸入姓名">
         <button type="button" class="btn btn-quiet" onclick="addExtraName()">加入</button>
       </div>
       <div id="extra-names" class="chips"></div>
@@ -233,146 +239,86 @@
     </div>
   </div>
 
-  <div id="settings-form" class="settings-form" hidden data-season-content>
-    <div class="set-row" style="cursor:pointer" onclick="startNextSeason()">
-      <span class="set-label">開新一季<span class="set-sub">沿用本季的設定與成員，日期接續最後一場</span></span>
-      <span class="set-go">›</span>
-    </div>
-
-    <!-- 場次 first: it is what an organizer comes back here to do — move
-         a date, call a night off — and it used to sit 1,294px down,
-         under seven fields that are set once and rarely touched. -->
-    <div class="section-label">場次</div>
-    <div id="upcoming-games"></div>
-    <button type="button" class="fold" id="past-games-toggle" hidden></button>
-    <div id="past-games" hidden></div>
-
-    <!-- Only shown when the season prices air conditioning at all. This
-         corrects the forecast made at setup; the per-game switch on the
-         management page records what actually happened and moves the
-         venue cost with it. -->
-    <div id="ac-block" hidden>
-      <div class="section-label">冷氣場次<span id="ac-count" class="section-note"></span></div>
-      <p class="hint">修正開季時的預定，場地費總額不變。</p>
-      <div id="ac-dates" class="chips"></div>
-      <button type="button" class="btn btn-quiet" id="ac-save" onclick="saveAcDates(this)">儲存冷氣場次</button>
-    </div>
-
-    <div class="section-label">本季設定 · 金額</div>
-
-    <div class="field">
-      <label for="f-cost">場地費總額</label>
-      <input id="f-cost" class="control" type="number" step="1" min="0">
-      <span class="hint">整季實際要付給場地的錢，<b>含有開冷氣的那幾場</b>。</span>
-      <span id="cost-locked-note" class="hint" hidden>本季已結算，場地費無法再修改。</span>
-    </div>
-
-    <div class="field">
-      <label for="f-ac">每場冷氣費用</label>
-      <input id="f-ac" class="control" type="number" step="1" min="0" placeholder="沒有另外收就留 0">
-      <span class="hint">有開冷氣的場次，每人會多分攤這筆的 1/人數上限。</span>
-    </div>
-
-    <div class="section-label">本季設定 · 場地與規則</div>
-
-    <div class="field-pair">
-      <div class="field">
-        <label for="f-capacity">人數上限</label>
-        <input id="f-capacity" class="control" type="number" step="1" min="1">
-      </div>
-      <div class="field">
-        <label for="f-min-roster">最低人數門檻</label>
-        <input id="f-min-roster" class="control" type="number" step="1" min="0">
-      </div>
-    </div>
-
-    <div class="field-pair">
-      <div class="field">
-        <label for="f-start-h">開始時間</label>
-        <div class="time-pair">
-          <select id="f-start-h" class="control"></select><span>:</span><select id="f-start-m" class="control"></select>
-        </div>
-      </div>
-      <div class="field">
-        <label for="f-end-h">結束時間</label>
-        <div class="time-pair">
-          <select id="f-end-h" class="control"></select><span>:</span><select id="f-end-m" class="control"></select>
-        </div>
-      </div>
-    </div>
-
-    <div class="field">
-      <label for="f-location">地點</label>
-      <input id="f-location" class="control" type="text" placeholder="例如：晴光館">
-    </div>
-
-    <div class="field">
-      <label for="f-deadline">更動截止（開賽前幾小時）</label>
-      <input id="f-deadline" class="control" type="number" step="1" min="0" placeholder="24">
-      <p class="hint">截止後成員無法請假或報名；名單狀況與遞補通知於截止時發送。</p>
-    </div>
-
-    <div id="cost-warn-note" class="warn-box" hidden>
-      改場地費會重新計算整季每人每場的金額，包含已經打過的場次。已收的錢不動，差額會進到各人的餘額。
-    </div>
-
-    <button type="button" class="save-btn" onclick="saveSettings()">儲存</button>
-
-    <div id="settle-section" hidden>
-      <div class="section-label">季末</div>
-      <!-- One place to settle: 帳務's 季末結算. This row used to be a
-           second name for the same thing (結束這一季), which read as a
-           different act; now it says where it happens and from when. -->
-      <div class="set-row" style="cursor: pointer" onclick="goToSettlement()">
-        <span class="set-label">季末結算<span class="set-sub" id="settle-sub">於帳務頁進行</span></span>
-        <span class="set-go">›</span>
-      </div>
-      <p class="hint">結算後名單與場地費即鎖定；每人餘額可退款、收款或保留至下一季。</p>
-    </div>
-
+  <!-- 本季／場次／球隊 (proposal round 3, 2026-10-21). The page was one
+       2,700px form with every field open at once; each block now shows
+       its values and an 編輯 opens a sheet, so nothing is half-edited and
+       the notes appear only where they are about to matter. -->
+  <div id="set-tabs" class="gd-tabs st-tabs" role="tablist" hidden>
+    <button type="button" role="tab" class="gd-tab active" data-set-tab="season" aria-selected="true">本季</button>
+    <button type="button" role="tab" class="gd-tab" data-set-tab="games" aria-selected="false">場次</button>
+    <button type="button" role="tab" class="gd-tab" data-set-tab="club" aria-selected="false">球隊</button>
   </div>
 
-  <!-- Down here, not at the top. A club's name is set on the day it is
-       created and then essentially never again, yet it used to be the
-       first thing on this page — above 場次, which is what an organizer
-       actually opens 設定 to do. Deliberately still a sibling of
-       #settings-form rather than a child: a club with no season yet has
-       to be renameable, and that form stays hidden until a season
-       exists. Moved 2026-09-17. -->
-  <div id="club-name-section" class="settings-form" hidden>
-    <div class="section-label" style="margin-top:0">球隊</div>
-    <div class="field">
-      <label for="club-name">球隊名稱</label>
-      <input id="club-name" class="control" type="text" maxlength="20" autocomplete="off">
-      <div class="under-field">
-        <span class="hint" id="club-name-hint">會顯示在每位成員畫面的左上角，最多 20 個字。</span>
-        <button type="button" class="mini-action" id="club-name-save" onclick="renameClub(this)" disabled>儲存</button>
+  <div id="settings-form" hidden data-season-content>
+    <div id="settled-note" class="gdetail-locked" hidden style="margin:0 0 12px">本季已結算，費用與場次已鎖定。</div>
+
+    <div data-set-panel="season">
+      <div class="st-card">
+        <div class="st-season-title" id="season-title"></div>
+        <div class="st-season-meta" id="season-meta"></div>
       </div>
+
+      <div class="st-card">
+        <div class="st-card-head"><h3>費用</h3><button type="button" class="st-edit" id="edit-cost" onclick="openCostSheet()">編輯</button></div>
+        <div class="st-prices" id="price-tiles"></div>
+        <div class="st-price-foot"><span>每人季費</span><b id="season-fee"></b></div>
+        <p class="st-note" id="cost-locked-note" hidden style="margin:10px 0 0">本季已結算，費用無法再修改。</p>
+      </div>
+
+      <div class="st-card">
+        <div class="st-card-head"><h3>場地與規則</h3><button type="button" class="st-edit" onclick="openRulesSheet()">編輯</button></div>
+        <div class="st-facts" id="rule-facts"></div>
+      </div>
+
+      <div class="lcard">
+        <a class="lrow" href="organizer-members.html"><span class="lrow-k">固定成員</span><span class="lrow-v" id="roster-count"></span><span class="lrow-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></a>
+        <!-- One place to settle: 帳務's 季末結算. This row says where it
+             happens and from when. -->
+        <button type="button" class="lrow" id="settle-row" onclick="goToSettlement()"><span class="lrow-k">季末結算</span><span class="lrow-v" id="settle-sub"></span><span class="lrow-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+        <button type="button" class="lrow" onclick="startNextSeason()"><span class="lrow-k">建立下一季</span><span class="lrow-v">沿用本季設定</span><span class="lrow-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+      </div>
+
+      <!-- Destructive things last and folded away, under everything an
+           organizer comes here to do. -->
+      <button type="button" class="st-fold" aria-expanded="false" data-fold="season-adv">進階 <span class="car">▾</span></button>
+      <div data-fold-body="season-adv" hidden>
+        <div class="lcard">
+          <button type="button" class="lrow danger" onclick="deleteSeason()"><span class="lrow-k">刪除本季</span><span class="lrow-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+        </div>
+        <p class="hint">場次、請假、臨打與已記入的季費將一併刪除；已結算或已有收款的季別無法刪除。</p>
+      </div>
+    </div>
+
+    <div data-set-panel="games" hidden>
+      <!-- Only when the season prices air conditioning at all. 修改預定
+           corrects the forecast made at setup and leaves the venue bill
+           alone; what actually happened on a night is recorded on 總覽,
+           which moves the bill. -->
+      <div class="st-card" id="ac-block" hidden>
+        <div class="st-card-head"><h3>冷氣場次</h3><button type="button" class="st-edit" id="forecast-open" onclick="openForecastSheet()">修改預定</button></div>
+        <p class="st-sum" id="ac-sum"></p>
+        <div id="ac-grid"></div>
+      </div>
+      <div class="lgroup">待進行場次</div>
+      <div class="lcard" id="upcoming-games"></div>
+      <button type="button" class="st-fold" id="past-games-toggle" aria-expanded="false" hidden></button>
+      <div class="lcard" id="past-games" hidden></div>
     </div>
   </div>
 
-  <!-- Last on the page, and outside #settings-form on purpose.
-       Destructive things belong at the bottom, under everything you
-       might have come here to do — it used to sit inside the form with
-       the club's name field below it, so a rename button lived beneath
-       two delete buttons. Moved 2026-09-18 at the organizer's request.
-
-       Being outside the form means it no longer inherits the form's
-       visibility, so it manages its own: the section appears once a club
-       is chosen, and 刪除這一季 hides itself when there is no season —
-       otherwise this would offer to delete something that does not
-       exist. See the season-picker callback. -->
-  <div id="danger-section" hidden>
-    <div class="section-label">刪除</div>
-    <div class="set-row" id="delete-season-row">
-      <span class="set-label">刪除本季<span class="set-sub">場次、請假、臨打與已記入的季費將一併刪除</span></span>
-      <button type="button" class="mini-action danger" onclick="deleteSeason()">刪除</button>
+  <!-- Outside #settings-form: a club with no season yet still has a name
+       and can still be deleted. -->
+  <div data-set-panel="club" id="club-panel" hidden>
+    <div class="lcard">
+      <button type="button" class="lrow" onclick="openClubSheet()"><span class="lrow-k">球隊名稱</span><span class="lrow-v" id="club-name-value"></span><span class="lrow-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
     </div>
-    <div class="set-row">
-      <span class="set-label">刪除整個球隊<span class="set-sub">連同底下所有季別一起刪除</span></span>
-      <button type="button" class="mini-action danger" onclick="deleteClub()">刪除</button>
+    <button type="button" class="st-fold" aria-expanded="false" data-fold="club-adv">進階 <span class="car">▾</span></button>
+    <div data-fold-body="club-adv" hidden>
+      <div class="lcard">
+        <button type="button" class="lrow danger" onclick="deleteClub()"><span class="lrow-k">刪除整個球隊</span><span class="lrow-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+      </div>
+      <p class="hint">所有季別、場次與帳務紀錄將一併刪除；僅管理員可執行。</p>
     </div>
-    <p class="hint">僅管理員可刪除；已結算的季別不可刪除。</p>
   </div>
 </div>
 
@@ -396,10 +342,10 @@
         </span>
       </button>
     </div>
-    <p class="hint">目前每人每場 <strong id="cancel-current-share"></strong>。取消後可以在「帳務」看到新的金額。</p>
+    <p class="hint">本場目前每人 <strong id="cancel-current-share"></strong>；取消後的新金額可於帳務頁查看。</p>
     <div class="btn-row" style="margin-top: 13px">
-      <button type="button" class="btn btn-quiet" onclick="closeCancelSheet()">關閉</button>
-      <button type="button" class="btn btn-danger" onclick="confirmCancelGame()">取消本場</button>
+      <button type="button" class="btn btn-quiet" onclick="closeCancelSheet()">返回</button>
+      <button type="button" class="btn btn-danger" onclick="confirmCancelGame()">確認取消</button>
     </div>
   </div>
 </div>
@@ -408,6 +354,9 @@
   <div class="gsheet">
     <button class="gsheet-close" aria-label="關閉" onclick="closeDateSheet()">✕</button>
     <h3 id="date-sheet-title"></h3>
+    <div class="lcard st-sheet-info" id="game-sheet-info"></div>
+    <p class="st-note" id="game-sheet-note" hidden></p>
+    <div id="game-edit-fields">
     <div class="field">
       <label for="date-sheet-input">日期</label>
       <input id="date-sheet-input" class="control" type="date">
@@ -445,10 +394,111 @@
     <span class="hint">
       修改日期、時間或場地不影響任何人的金額；本場已登記的請假、報名與候補一併保留。
     </span>
+    </div>
 
     <div class="btn-row" style="margin-top: 13px">
       <button type="button" class="btn btn-quiet" onclick="closeDateSheet()">關閉</button>
-      <button type="button" class="btn btn-primary" onclick="saveGameEdit()">儲存</button>
+      <button type="button" class="btn btn-primary" id="game-save" onclick="saveGameEdit()">儲存</button>
+    </div>
+    <div class="st-danger" id="game-cancel-zone">
+      <button type="button" class="btn btn-danger" onclick="cancelFromGameSheet()">取消本場次</button>
+    </div>
+  </div>
+</div>
+
+<div id="cost-backdrop" class="gsheet-backdrop" hidden>
+  <div class="gsheet">
+    <button class="gsheet-close" aria-label="關閉" onclick="closeSheet('cost-backdrop')">✕</button>
+    <h3>費用</h3>
+    <div class="field">
+      <label for="f-cost">場地費總額</label>
+      <input id="f-cost" class="control" type="number" step="1" min="0" inputmode="numeric">
+      <span class="hint">整季實際支付場地的金額，包含預定開冷氣的場次。</span>
+    </div>
+    <div class="field">
+      <label for="f-ac">每場冷氣費用</label>
+      <input id="f-ac" class="control" type="number" step="1" min="0" inputmode="numeric" placeholder="無冷氣費用請填 0">
+      <span class="hint">開冷氣的場次，每人多分攤此金額除以人數上限。</span>
+    </div>
+    <div id="cost-warn-note" class="warn-box" hidden>
+      修改場地費總額將重新計算整季每人每場金額，包含已結束的場次；已收款項不變，差額計入每人餘額。
+    </div>
+    <div class="btn-row" style="margin-top: 13px">
+      <button type="button" class="btn btn-quiet" onclick="closeSheet('cost-backdrop')">取消</button>
+      <button type="button" class="btn btn-primary" onclick="saveCost()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<div id="rules-backdrop" class="gsheet-backdrop" hidden>
+  <div class="gsheet">
+    <button class="gsheet-close" aria-label="關閉" onclick="closeSheet('rules-backdrop')">✕</button>
+    <h3>場地與規則</h3>
+    <div class="field-pair" style="margin-bottom:13px">
+      <div class="field">
+        <label for="f-capacity">人數上限</label>
+        <input id="f-capacity" class="control" type="number" step="1" min="1" inputmode="numeric">
+      </div>
+      <div class="field">
+        <label for="f-min-roster">最低人數門檻</label>
+        <input id="f-min-roster" class="control" type="number" step="1" min="0" inputmode="numeric">
+      </div>
+    </div>
+    <div class="field-pair" style="margin-bottom:13px">
+      <div class="field">
+        <label for="f-start-h">開始時間</label>
+        <div class="time-pair">
+          <select id="f-start-h" class="control"></select><span>:</span><select id="f-start-m" class="control"></select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="f-end-h">結束時間</label>
+        <div class="time-pair">
+          <select id="f-end-h" class="control"></select><span>:</span><select id="f-end-m" class="control"></select>
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <label for="f-location">地點</label>
+      <input id="f-location" class="control" type="text" placeholder="例如：晴光館">
+    </div>
+    <div class="field">
+      <label for="f-deadline">更動截止（開賽前時數）</label>
+      <input id="f-deadline" class="control" type="number" step="1" min="0" placeholder="24" inputmode="numeric">
+      <p class="hint">截止後成員無法請假或報名；名單確定與遞補通知於此時發送。管理員不受此限制。</p>
+    </div>
+    <div class="btn-row" style="margin-top: 13px">
+      <button type="button" class="btn btn-quiet" onclick="closeSheet('rules-backdrop')">取消</button>
+      <button type="button" class="btn btn-primary" onclick="saveRules()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<div id="club-backdrop" class="gsheet-backdrop" hidden>
+  <div class="gsheet">
+    <button class="gsheet-close" aria-label="關閉" onclick="closeSheet('club-backdrop')">✕</button>
+    <h3>球隊名稱</h3>
+    <div class="field">
+      <input id="club-name" class="control" type="text" maxlength="20" autocomplete="off" aria-label="球隊名稱">
+      <span class="hint" id="club-name-hint">顯示於每位成員畫面的左上角，最多 20 字。</span>
+    </div>
+    <div class="btn-row" style="margin-top: 13px">
+      <button type="button" class="btn btn-quiet" onclick="closeSheet('club-backdrop')">取消</button>
+      <button type="button" class="btn btn-primary" id="club-name-save" onclick="renameClub(this)" disabled>儲存</button>
+    </div>
+  </div>
+</div>
+
+<div id="forecast-backdrop" class="gsheet-backdrop" hidden>
+  <div class="gsheet">
+    <button class="gsheet-close" aria-label="關閉" onclick="closeSheet('forecast-backdrop')">✕</button>
+    <h3>修改預定冷氣場次</h3>
+    <p class="day-hint">點選日期切換是否開冷氣。已結束的場次無法修改，場地費總額不變。</p>
+    <div id="forecast-grid"></div>
+    <div class="st-facts" id="forecast-preview" style="margin:16px 0 4px"></div>
+    <div class="btn-row" style="margin-top: 13px">
+      <button type="button" class="btn btn-quiet" onclick="closeSheet('forecast-backdrop')">取消</button>
+      <button type="button" class="btn btn-primary" id="ac-save" onclick="saveAcDates(this)">儲存</button>
     </div>
   </div>
 </div>
@@ -460,6 +510,88 @@
   // The club is chosen from the top bar, as on the member page.
   mountClubChip(document.getElementById("club-chip"), document.getElementById("club-picker"));
   const LIFF_ID = "2011156233-6CouG6VI";
+
+  /* ---- 本季／場次／球隊 ---- */
+  // Remembered for this visit only, so coming back from 帳務 lands on the
+  // tab that was open. A convenience: the page works without it.
+  let setTab = "season";
+  try {
+    const saved = sessionStorage.getItem("vf_set_tab");
+    if (["season", "games", "club"].includes(saved)) setTab = saved;
+  } catch {}
+  let clubChosen = false;
+
+  function showSetTab(tab) {
+    setTab = tab;
+    try { sessionStorage.setItem("vf_set_tab", tab); } catch {}
+    for (const b of document.querySelectorAll("[data-set-tab]")) {
+      const on = b.dataset.setTab === tab;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", String(on));
+    }
+    for (const panel of document.querySelectorAll("[data-set-panel]")) {
+      panel.hidden = panel.dataset.setPanel !== tab || (panel.id === "club-panel" && !clubChosen);
+    }
+  }
+  document.getElementById("set-tabs").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-set-tab]");
+    if (b) showSetTab(b.dataset.setTab);
+  });
+
+  // 進階 and 已結束場次 open and close in place.
+  document.addEventListener("click", (e) => {
+    const fold = e.target.closest("[data-fold]");
+    if (!fold) return;
+    const body = document.querySelector(`[data-fold-body="${fold.dataset.fold}"]`);
+    if (!body) return;
+    body.hidden = !body.hidden;
+    fold.setAttribute("aria-expanded", String(!body.hidden));
+  });
+
+  function openSheet(id) { document.getElementById(id).hidden = false; }
+  function closeSheet(id) { document.getElementById(id).hidden = true; }
+
+  const LIST_GO =
+    '<span class="lrow-go" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+  const FACT_ICONS = {
+    people: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c.6-3.3 3-5 6-5s5.4 1.7 6 5"/><circle cx="17" cy="9" r="2.4"/><path d="M16.5 14.2c2.3.2 3.9 1.8 4.5 4.8"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    pin: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  };
+  function factIcon(name) {
+    return `<span class="st-ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${FACT_ICONS[name]}</svg></span>`;
+  }
+
+  /** Today in the browser's own calendar, which is Taiwan's for everyone
+   * using this app — not toISOString, which is UTC and called this
+   * morning's games "yesterday's" until 08:00. */
+  function todayKey() {
+    return dateKey(new Date());
+  }
+
+  /** The season's games as one even grid, seven to a row — the 場次
+   * card, the 修改預定 sheet and the wizard's dates step all draw it, so
+   * the three look and work the same. `items` are {iso, on, past, off};
+   * `attr` names the data attribute a tappable cell carries. */
+  function dayGridHtml(items, o = {}) {
+    if (!items.length) return '<p class="st-note" style="margin:0">尚無場次，請先產生場次。</p>';
+    const legend = o.legend === false
+      ? ""
+      : `<div class="day-legend"><span><i class="on"></i>${o.onLabel || "預定冷氣"}</span><span><i></i>一般場次</span>${
+          o.lockPast && items.some((it) => it.past) ? '<span><i class="past"></i>已結束</span>' : ""
+        }</div>`;
+    const cells = items.map((it) => {
+      const d = new Date(it.iso + "T00:00:00");
+      const locked = (o.lockPast && it.past) || it.off;
+      const cls = "day-cell" + (it.on && !it.off ? " on" : "") + (o.lockPast && it.past ? " done" : "") +
+        (it.off ? " off" : "") + (o.removing ? " removing" : "");
+      const act = o.attr && !locked ? ` ${o.attr}="${it.iso}"` : "";
+      return `<button type="button" class="${cls}"${act}${act ? "" : " disabled"} aria-pressed="${!!it.on}" aria-label="${d.getMonth() + 1}/${d.getDate()}${it.on ? " 冷氣" : ""}"><b>${d.getDate()}</b><small>${d.getMonth() + 1}月</small>${o.removing ? '<span class="del" aria-hidden="true">✕</span>' : ""}</button>`;
+    });
+    return legend + `<div class="day-grid">${cells.join("")}</div>`;
+  }
+
   let currentSeasonId = null;
   let currentSeason = null;
   let originalVenueCost = null;
@@ -499,12 +631,11 @@
       if (!id) document.getElementById("page-state").innerHTML = "";
       const hasClub = !!currentClubId();
       document.getElementById("no-club-note").hidden = hasClub;
-      document.getElementById("club-name-section").hidden = !hasClub;
-      // 刪除 sits outside #settings-form now, so it answers for its own
-      // visibility: the section needs a club, and 刪除這一季 needs a
-      // season to delete.
-      document.getElementById("danger-section").hidden = !hasClub;
-      document.getElementById("delete-season-row").hidden = !id;
+      // The tabs need a club; 本季 and 場次 also need a season, and stay
+      // inside #settings-form, which loadSettings reveals.
+      document.getElementById("set-tabs").hidden = !hasClub;
+      clubChosen = hasClub;
+      showSetTab(setTab);
       if (hasClub) fillClubName();
       setWizardOpen((hasClub && !id) || creatingNextSeason);
       // Deliberately not revealed here: loadSettings shows it once the
@@ -698,7 +829,7 @@
     const startValue = document.getElementById("g-start").value;
     const weeks = Number(document.getElementById("g-weeks").value) || 0;
     if (!startValue || weeks < 1) {
-      toast("請填開始日期和週數");
+      toast("請填寫起始日期與場次數");
       return;
     }
     // Walk forward to the first matching weekday on or after the start
@@ -734,12 +865,31 @@
     renderWizard();
   }
 
+  function toggleAllAc() {
+    const acSurcharge = Number(document.getElementById("c-ac").value) || 0;
+    setAllAc(wizardDates.some((d) => !(acSurcharge > 0 && wizardAcDates.has(d))));
+  }
+
+  // 移除場次 turns a tap on a date from "toggle its air conditioning"
+  // into "remove it", until 完成.
+  let wizardRemoving = false;
+  function toggleRemoving() {
+    wizardRemoving = !wizardRemoving;
+    renderWizard();
+  }
+  document.getElementById("date-grid").addEventListener("click", (e) => {
+    const ac = e.target.closest("[data-wz-ac]");
+    if (ac) { toggleAcDate(ac.dataset.wzAc); return; }
+    const del = e.target.closest("[data-wz-del]");
+    if (del) removeDate(del.dataset.wzDel);
+  });
+
   function addOneOffDate() {
-    const value = prompt("要新增哪一天？（格式 YYYY-MM-DD）");
+    const value = prompt("請輸入日期（格式：YYYY-MM-DD）");
     if (!value) return;
     const iso = value.trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-      toast("日期格式要像 2026-07-07");
+      toast("日期格式應為 2026-07-07");
       return;
     }
     if (!wizardDates.includes(iso)) wizardDates.push(iso);
@@ -804,24 +954,32 @@
   }
 
   function renderWizard() {
-    // step 2: date chips + running total
+    // step 2: the dates as the shared grid, plus the running total. With
+    // no air-conditioning charge a date has nothing to toggle, so only
+    // 移除場次 makes the cells tappable.
     const acSurcharge = Number(document.getElementById("c-ac").value) || 0;
     const acOn = (d) => acSurcharge > 0 && wizardAcDates.has(d);
-    const acToggle = (d) =>
-      acSurcharge > 0
-        ? `<button type="button" class="chip-ac${acOn(d) ? " on" : ""}" aria-pressed="${acOn(d)}" onclick="toggleAcDate('${d}')">冷氣</button>`
-        : "";
+    if (!wizardDates.length) wizardRemoving = false;
+    document.getElementById("date-grid").innerHTML = dayGridHtml(
+      wizardDates.map((iso) => ({ iso, on: acOn(iso), past: false, off: false })),
+      {
+        attr: wizardRemoving ? "data-wz-del" : acSurcharge > 0 ? "data-wz-ac" : null,
+        removing: wizardRemoving,
+        legend: acSurcharge > 0,
+      }
+    );
+    document.getElementById("wz-hint").textContent = wizardRemoving
+      ? "點選日期以移除該場次。"
+      : acSurcharge > 0
+        ? "點選日期切換是否開冷氣。"
+        : "如需刪除日期，請按「移除場次」。";
     const anyOff = wizardDates.some((d) => !acOn(d));
-    const acAll =
-      acSurcharge > 0 && wizardDates.length
-        ? `<span class="chip add" onclick="setAllAc(${anyOff})">${anyOff ? "全部開冷氣" : "全部不開"}</span>`
-        : "";
-    document.getElementById("date-chips").innerHTML =
-      wizardDates
-        .map(
-          (d) => `<span class="chip">${describeDate(d).label}${acToggle(d)}<button type="button" aria-label="移除" onclick="removeDate('${d}')">✕</button></span>`
-        )
-        .join("") + '<span class="chip add" onclick="addOneOffDate()">＋ 新增日期</span>' + acAll;
+    const allBtn = document.getElementById("wz-all-ac");
+    allBtn.hidden = !(acSurcharge > 0 && wizardDates.length);
+    allBtn.textContent = anyOff ? "全部開啟" : "全部關閉";
+    const removeBtn = document.getElementById("wz-remove");
+    removeBtn.textContent = wizardRemoving ? "完成" : "移除場次";
+    removeBtn.disabled = !wizardDates.length;
 
     const cost = Number(document.getElementById("c-cost").value) || 0;
     const memberCount = selectedNames().length;
@@ -833,14 +991,14 @@
 
     const summary = document.getElementById("gen-summary");
     if (wizardDates.length === 0) {
-      summary.innerHTML = '<span>尚無場次</span>';
+      summary.innerHTML = "<span>尚無場次</span>";
     } else {
       const span = `${describeDate(wizardDates[0]).label} – ${describeDate(wizardDates[wizardDates.length - 1]).label}`;
       summary.innerHTML =
         `<b>${wizardDates.length} 場</b><span>${span}</span>` +
         (share
-          ? `<span>· 每人每場 $${share}${cooledCount ? "（沒開冷氣的場次）" : ""}</span>`
-          : "<span>· 挑完成員才算得出金額</span>");
+          ? `<span>・${cooledCount ? "一般場次" : ""}每人 $${share}${cooledCount ? `・冷氣場次每人 $${prices.cooled}` : ""}</span>`
+          : "<span>・填妥場地費與人數上限後顯示金額</span>");
     }
 
     // step 3: the roster itself lives in a sheet and the step carries one
@@ -906,14 +1064,14 @@
     if (!cost || !wizardDates.length || !capacity) {
       preview.innerHTML = emptyStateHtml(
         "資料尚未齊全",
-        `目前：場地費 $${cost || 0}、${wizardDates.length} 場、上限 ${capacity || 0} 人。三個都填好才算得出每個人要收多少。`
+        `目前：場地費 $${cost || 0}、${wizardDates.length} 場、人數上限 ${capacity || 0} 人。三項皆填妥後才能計算每人金額。`
       );
       return;
     }
     if (!prices) {
       preview.innerHTML = emptyStateHtml(
-        "冷氣費比場地費還多",
-        `勾了 ${cooledCount} 場冷氣、每場 $${acSurcharge}，加起來超過場地費總額 $${cost}。請檢查金額或少勾幾場。`
+        "冷氣費用超過場地費總額",
+        `已選 ${cooledCount} 場冷氣、每場 $${acSurcharge}，合計超過場地費總額 $${cost}。請檢查金額或減少冷氣場次。`
       );
       return;
     }
@@ -925,14 +1083,14 @@
       </div>
       <p class="hint" style="margin-top:0">
         ${cooledCount
-          ? `場地費總額已經含冷氣：沒開冷氣的場次每人 $${prices.plain}、開冷氣的 ${cooledCount} 場每人 $${prices.cooled}，整季 $${seasonFee}。`
-          : `$${cost} ÷ ${wizardDates.length} 場 ÷ 上限 ${capacity} 人 = 每人每場 $${share}，整季 $${seasonFee}。`}
-        ${acSurcharge > 0 ? "開季後每一場的冷氣還是可以個別改。" : ""}
-        ${memberCount ? `建立後這筆金額會直接記到 ${memberCount} 個人的帳上，可以在「帳務 · 季費」收款。` : "尚未選擇成員，可於開季後再新增；新增成員不會變動其他人的金額。"}
+          ? `場地費總額已包含冷氣：一般場次每人 $${prices.plain}，冷氣場次 ${cooledCount} 場每人 $${prices.cooled}，整季每人 $${seasonFee}。`
+          : `$${cost} ÷ ${wizardDates.length} 場 ÷ 人數上限 ${capacity} 人 = 每人每場 $${share}，整季每人 $${seasonFee}。`}
+        ${acSurcharge > 0 ? "開季後仍可修改預定冷氣場次。" : ""}
+        ${memberCount ? `建立後將記入 ${memberCount} 位成員的帳，可於「帳務 › 季費」收款。` : "尚未選擇成員，可於開季後新增；新增成員不影響其他人的金額。"}
       </p>
       <p class="hint" style="margin-top:6px">
-        金額是用<b>人數上限</b>算的，所以之後加人退人都只動到那個人自己的帳，其他人不受影響。
-        名單沒滿又沒有臨打補上的場次，收到的就會少於場地費。
+        金額依<b>人數上限</b>計算，之後成員增減只影響該成員本人的帳。
+        名單未滿且無臨打補上的場次，實收將少於場地費。
       </p>
     `;
   }
@@ -973,9 +1131,9 @@
       const span = `${describeDate(wizardDates[0]).label} – ${describeDate(wizardDates[wizardDates.length - 1]).label}`;
       row("場次", `${wizardDates.length} 場`, span);
     } else {
-      row("場次", "尚未排", "回上一步產生日期");
+      row("場次", "尚未安排", "請回上一步產生場次");
     }
-    if (acSurcharge > 0) row("開冷氣", `${cooled} 場`, `每場 $${acSurcharge}`);
+    if (acSurcharge > 0) row("冷氣場次", `${cooled} 場`, `每場冷氣費用 $${acSurcharge}`);
     row("人數上限", `${capacity} 人`, changed(capacity, last ? last.capacity : 0, " 人"));
     row("最低人數", `${minRoster} 人`, changed(minRoster, last ? last.minimum_roster : 0, " 人"));
     const startsAt = readTimeValue("c-start");
@@ -1021,11 +1179,11 @@
     const memberNames = selectedNames();
 
     if (gameDates.length === 0) {
-      toast("至少要有一個場次日期");
+      toast("請至少安排一個場次");
       return;
     }
     if (memberNames.length === 0) {
-      toast("至少要有一位固定成員");
+      toast("請至少選擇一位固定成員");
       return;
     }
 
@@ -1082,7 +1240,7 @@
         (season) => {
           if (!settingsLoad.current(ticket)) return;
           currentSeason = season;
-          fillForm(season);
+          renderSeasonTab(season);
           renderGames(season);
           renderAcDates(season);
           document.getElementById("page-state").innerHTML = "";
@@ -1097,38 +1255,85 @@
     }
   }
 
-  function fillForm(season) {
+  /** 本季: the season's span, what one night costs, the rules, and the
+   * ways out to 名單, 季末結算 and the next season. Every figure comes
+   * from the server — a game's `share` is its price, already rounded by
+   * the one function that rounds (pricing.shares_by_game); this only
+   * picks and adds them. */
+  function renderSeasonTab(season) {
     const settled = season.settled_at !== null;
     originalVenueCost = season.total_venue_cost;
+    document.getElementById("settled-note").hidden = !settled;
 
-    const costInput = document.getElementById("f-cost");
-    costInput.value = season.total_venue_cost;
-    document.getElementById("f-ac").value = season.ac_surcharge;
-    costInput.disabled = settled;
+    const dates = season.games.map((g) => g.date).sort();
+    document.getElementById("season-title").textContent = seasonSpanLabel(dates);
+    const weekdays = new Set(dates.map((d) => new Date(d + "T00:00:00").getDay()));
+    const weekly = weekdays.size === 1 && dates.length ? `每${describeDate(dates[0]).weekday}・` : "";
+    const cancelled = season.games.filter((g) => g.status !== "scheduled").length;
+    document.getElementById("season-meta").textContent =
+      `${weekly}共 ${dates.length} 場次` + (cancelled ? `，其中 ${cancelled} 場已取消` : "");
+
+    // A night's price where nothing else moves it: no venue change, and
+    // not called off with its cost spread over the rest.
+    const typical = (cooled) =>
+      season.games.find(
+        (g) => g.status === "scheduled" && !!g.air_conditioned === cooled && Number(g.venue_cost_delta || 0) === 0
+      );
+    const plainGame = typical(false);
+    const cooledGame = typical(true);
+    const plain = plainGame ? Number(plainGame.share) : Number(season.share_per_game);
+    const pricesAc = Number(season.ac_surcharge) > 0;
+    const tile = (label, value, cool) =>
+      `<div class="st-price${cool ? " cool" : ""}"><div class="st-price-label">${cool ? snowIcon(15) : ""}${label}</div><div class="st-price-value">${
+        value == null || Number.isNaN(value) ? "—" : `$${value}`
+      }</div></div>`;
+    document.getElementById("price-tiles").innerHTML = pricesAc
+      ? tile("一般場次", plain, false) +
+        tile("冷氣場次", cooledGame ? Number(cooledGame.share) : plain + acExtraEach(season, null), true)
+      : tile("每人每場", plain, false);
+    const fee = season.games
+      .filter((g) => g.status !== "cancelled_refunded")
+      .reduce((sum, g) => sum + Number(g.share || 0), 0);
+    document.getElementById("season-fee").textContent = `$${fee.toLocaleString("en-US")}`;
+    document.getElementById("edit-cost").hidden = settled;
     document.getElementById("cost-locked-note").hidden = !settled;
-    // Hidden until the figure actually changes — see the f-cost listener.
-    document.getElementById("cost-warn-note").hidden = true;
 
-    document.getElementById("f-capacity").value = season.capacity;
-    document.getElementById("f-min-roster").value = season.minimum_roster;
-    writeTimeValue("f-start", season.game_start_time);
-    writeTimeValue("f-end", season.game_end_time);
-    document.getElementById("f-location").value = season.location || "";
-    document.getElementById("f-deadline").value = season.change_deadline_hours;
+    const time = season.game_start_time
+      ? `${season.game_start_time.slice(0, 5)}–${(season.game_end_time || "").slice(0, 5)}`
+      : "未設定";
+    const fact = (icon, k, v) =>
+      `<div class="st-fact">${factIcon(icon)}<span class="st-fk">${k}</span><span class="st-fv">${v}</span></div>`;
+    document.getElementById("rule-facts").innerHTML =
+      fact("people", "人數上限", `${season.capacity} 人`) +
+      fact("people", "最低人數", `${season.minimum_roster} 人`) +
+      fact("clock", "時間", escapeHtml(time)) +
+      fact("pin", "地點", escapeHtml(season.location || "未設定")) +
+      fact("lock", "更動截止", `開賽前 ${season.change_deadline_hours} 小時`);
 
-    document.getElementById("settle-section").hidden = settled;
+    document.getElementById("roster-count").textContent = `${season.members.length} 人`;
     // The same window the ledger enforces: from three weeks before the
     // last game (see organizer-ledger.html settleBlocker).
-    const last = season.games.map((g) => g.date).sort().pop();
-    let sub = "於帳務頁進行";
+    document.getElementById("settle-row").hidden = settled;
+    const last = dates[dates.length - 1];
+    let sub = "已開放";
     if (last) {
       const opens = new Date(last + "T00:00:00");
       opens.setDate(opens.getDate() - 21);
-      if (opens > new Date()) {
-        sub = `於帳務頁進行，${opens.getMonth() + 1}/${opens.getDate()} 起開放`;
-      }
+      if (opens > new Date()) sub = `${opens.getMonth() + 1}/${opens.getDate()} 開放`;
     }
     document.getElementById("settle-sub").textContent = sub;
+  }
+
+  /** "2026 年 9–12 月", or across a new year "2025 年 12 月–2026 年 2 月". */
+  function seasonSpanLabel(dates) {
+    if (!dates.length) return "尚無場次";
+    const a = new Date(dates[0] + "T00:00:00");
+    const b = new Date(dates[dates.length - 1] + "T00:00:00");
+    if (a.getFullYear() !== b.getFullYear()) {
+      return `${a.getFullYear()} 年 ${a.getMonth() + 1} 月–${b.getFullYear()} 年 ${b.getMonth() + 1} 月`;
+    }
+    const months = a.getMonth() === b.getMonth() ? `${a.getMonth() + 1}` : `${a.getMonth() + 1}–${b.getMonth() + 1}`;
+    return `${a.getFullYear()} 年 ${months} 月`;
   }
 
   function gameStatusLabel(status) {
@@ -1147,13 +1352,29 @@
    * stays put and every game is simply re-priced around it. Using the
    * per-game switch to fix a mistyped forecast inflated the bill one
    * game at a time, which is why this exists.
+   *
+   * Games already played are not offered (2026-10-21): what happened on
+   * those nights is recorded on 總覽, and the server refuses it too.
    */
   let acDates = new Set();
   // The season this block is currently showing. Kept here rather than
-  // read from currentSeason so the three functions below depend only on
-  // what renderAcDates was handed — they are the same object in the
-  // page, and this way they can be exercised without one.
+  // read from currentSeason so the functions below depend only on what
+  // renderAcDates was handed — they are the same object in the page,
+  // and this way they can be exercised without one.
   let acSeason = null;
+
+  function acItems(season, chosen) {
+    const today = todayKey();
+    return season.games
+      .slice()
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+      .map((g) => ({
+        iso: g.date,
+        on: chosen ? chosen.has(g.date) : !!g.air_conditioned,
+        past: g.date < today,
+        off: g.status !== "scheduled",
+      }));
+  }
 
   function renderAcDates(season) {
     acSeason = season;
@@ -1161,34 +1382,113 @@
     // Nothing to place when the venue doesn't charge for the AC at all.
     block.hidden = !(Number(season.ac_surcharge) > 0);
     if (block.hidden) return;
-    acDates = new Set(
-      season.games.filter((g) => g.air_conditioned).map((g) => g.date)
-    );
-    drawAcDates(season);
+    const cooled = season.games.filter((g) => g.air_conditioned && g.status === "scheduled").length;
+    document.getElementById("ac-sum").textContent =
+      `預定 ${cooled} 場・每場冷氣費用 $${Number(season.ac_surcharge).toLocaleString("en-US")}`;
+    document.getElementById("ac-grid").innerHTML = dayGridHtml(acItems(season), { lockPast: true });
+    // Only while there is a game still to come to correct.
+    const today = todayKey();
+    const correctable = season.games.some((g) => g.date >= today && g.status === "scheduled");
+    document.getElementById("forecast-open").hidden = season.settled_at !== null || !correctable;
   }
 
-  function drawAcDates(season) {
-    const settled = season.settled_at !== null;
-    document.getElementById("ac-dates").innerHTML = season.games
-      .map((g) => {
-        const on = acDates.has(g.date);
-        return `<span class="chip">${describeDate(g.date).label}<button type="button" class="chip-ac${
-          on ? " on" : ""
-        }" aria-pressed="${on}"${settled ? " disabled" : ""} onclick="toggleSeasonAcDate('${
-          g.date
-        }')">冷氣</button></span>`;
-      })
-      .join("");
-    document.getElementById("ac-count").textContent = `${acDates.size} 場`;
-    document.getElementById("ac-save").disabled = settled;
+  function openForecastSheet() {
+    if (!acSeason) return;
+    acDates = new Set(acSeason.games.filter((g) => g.air_conditioned).map((g) => g.date));
+    drawForecast();
+    openSheet("forecast-backdrop");
   }
+
+  document.getElementById("forecast-grid").addEventListener("click", (e) => {
+    const cell = e.target.closest("[data-fc]");
+    if (cell) toggleSeasonAcDate(cell.dataset.fc);
+  });
 
   function toggleSeasonAcDate(iso) {
     // Local until 儲存: a half-finished correction must not re-price the
     // season one tap at a time.
     if (acDates.has(iso)) acDates.delete(iso);
     else acDates.add(iso);
-    drawAcDates(acSeason);
+    drawForecast();
+  }
+
+  const forecastLoad = staleGuard();
+
+  /** The grid, and what the change would cost. The figures are the
+   * server's (POST .../air-conditioned-dates/preview): the browser does
+   * not repeat the rounding rules, which would not see a cancelled night
+   * or a night's own venue cost and would then disagree with the books. */
+  function drawForecast() {
+    const season = acSeason;
+    document.getElementById("forecast-grid").innerHTML = dayGridHtml(acItems(season, acDates), {
+      attr: "data-fc",
+      lockPast: true,
+    });
+    const before = season.games.filter((g) => g.air_conditioned && g.status === "scheduled").length;
+    const after = season.games.filter((g) => acDates.has(g.date) && g.status === "scheduled").length;
+    const countRow = `<div class="st-fact"><span class="st-fk">冷氣場次</span><span class="st-fv">${
+      before === after ? `${after} 場` : `<span class="was">${before}</span> → ${after} 場`
+    }</span></div>`;
+    const preview = document.getElementById("forecast-preview");
+    preview.innerHTML =
+      countRow +
+      '<div class="st-fact"><span class="st-fk">每人費用</span><span class="st-fv"><i class="spinner sm" aria-hidden="true"></i> 計算中</span></div>';
+    const ticket = forecastLoad.take();
+    // A read, not a write: plain fetch rather than postJson, which would
+    // mark the tapped date as busy and show the page's 儲存中 marker.
+    previewAcDates(season.id, [...acDates])
+      .then((result) => {
+        if (!forecastLoad.current(ticket)) return;
+        preview.innerHTML = countRow + forecastFigures(season, result);
+      })
+      .catch((e) => {
+        if (!forecastLoad.current(ticket)) return;
+        preview.innerHTML = countRow +
+          `<div class="st-fact"><span class="st-fk">每人費用</span><span class="st-fv">${escapeHtml(e.message)}</span></div>`;
+      });
+  }
+
+  async function previewAcDates(seasonId, dates) {
+    const res = await fetch(`${API_BASE}/seasons/${seasonId}/air-conditioned-dates/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify({ dates }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(translateApiError(data.detail || String(res.status)));
+    return data;
+  }
+
+  /** Before → after, for a plain night, a cooled night and the season. A
+   * "plain" or "cooled" night is one with nothing else moving its price
+   * — still on, and no venue change of its own. */
+  function forecastFigures(season, result) {
+    const byDate = new Map(season.games.map((g) => [g.date, g]));
+    const ordinary = result.games.filter((g) => {
+      const game = byDate.get(g.date);
+      return game && game.status === "scheduled" && Number(game.venue_cost_delta || 0) === 0;
+    });
+    const pick = (cooled, when) => {
+      const g = ordinary.find((x) => (when === "before" ? !!byDate.get(x.date).air_conditioned : x.air_conditioned) === cooled);
+      return g ? Number(when === "before" ? g.share_before : g.share_after) : null;
+    };
+    const change = (a, b) =>
+      a == null && b == null
+        ? "—"
+        : a === b || a == null
+          ? `$${b}`
+          : b == null
+            ? "—"
+            : `<span class="was">$${a}</span> → $${b}`;
+    const fee = (n) => `$${Number(n).toLocaleString("en-US")}`;
+    const feeBefore = Number(result.season_fee_before);
+    const feeAfter = Number(result.season_fee_after);
+    const row = (k, v) => `<div class="st-fact"><span class="st-fk">${k}</span><span class="st-fv">${v}</span></div>`;
+    return (
+      row("一般場次每人", change(pick(false, "before"), pick(false, "after"))) +
+      row("冷氣場次每人", change(pick(true, "before"), pick(true, "after"))) +
+      row("每人季費", feeBefore === feeAfter ? fee(feeAfter) : `<span class="was">${fee(feeBefore)}</span> → ${fee(feeAfter)}`)
+    );
   }
 
   async function saveAcDates() {
@@ -1199,67 +1499,127 @@
         { dates: [...acDates] },
         "PUT"
       );
-      toast("冷氣場次已更新", "good");
+      closeSheet("forecast-backdrop");
+      toast("已更新預定冷氣場次", "good");
       // Re-read: every game's share moved, and the season fee with it.
       await loadSettings(acSeason.id);
     } catch (e) {
-      toast("更新失敗：" + translateApiError(e.message));
+      toast("更新失敗：" + e.message);
     }
   }
 
+  /** One line per game: the date, anything that makes this night unlike
+   * the others, its air conditioning and its price. The row opens the
+   * game's sheet. */
+  function gameRowHtml(g, pricesAc) {
+    const info = describeDate(g.date);
+    const d = new Date(g.date + "T00:00:00");
+    const notes = [];
+    const status = gameStatusLabel(g.status);
+    if (status) notes.push(`<small class="off">${status}</small>`);
+    const delta = Number(g.venue_cost_delta || 0);
+    if (delta) notes.push(`<small>場地差額 ${delta > 0 ? "+" : "−"}$${Math.abs(delta)}</small>`);
+    const own = [g.start_time ? g.start_time.slice(0, 5) : "", g.location || ""].filter(Boolean).join("・");
+    if (own) notes.push(`<small class="own">${escapeHtml(own)}</small>`);
+    const ac = pricesAc && g.air_conditioned && g.status === "scheduled"
+      ? `<span class="ac-tag">${snowIcon(13)}冷氣</span>`
+      : "";
+    const price = g.status === "cancelled_refunded" ? "—" : `$${g.share}`;
+    return `<button type="button" class="lrow" onclick="openGameSheet(${g.id})"><span class="st-gdate"><b>${d.getMonth() + 1}/${d.getDate()}<span>${info.weekday}</span></b>${notes.join("")}</span>${ac}<span class="st-price-cell">${price}</span>${LIST_GO}</button>`;
+  }
+
   function renderGames(season) {
-    const today = new Date().toISOString().slice(0, 10);
-    const upcoming = season.games.filter((g) => g.date >= today);
-    const past = season.games.filter((g) => g.date < today);
-    const settled = season.settled_at !== null;
+    const today = todayKey();
+    const sorted = season.games.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    const upcoming = sorted.filter((g) => g.date >= today);
+    const past = sorted.filter((g) => g.date < today);
+    const pricesAc = Number(season.ac_surcharge) > 0;
 
-    function row(g) {
-      const info = describeDate(g.date);
-      const status = gameStatusLabel(g.status);
-      const open = !settled && g.status === "scheduled";
-      // Cancelling stays available on a night already played — a game
-      // recorded wrongly still has to be correctable. Moving one does
-      // not: a date in the past is not somewhere to move a game to.
-      const movable = open && g.date >= today;
-      const action = open
-        ? `<span class="row-actions">${
-            movable
-              ? `<button type="button" class="mini-action" onclick="openGameEdit(${g.id})">編輯</button>`
-              : ""
-          }<button type="button" class="mini-action danger" onclick="openCancelSheet(${g.id}, '${info.label}')">取消</button></span>`
-        : status
-          ? `<span class="hint" style="margin:0">${status}</span>`
-          : "";
-      // Only the nights that differ say anything, so the list reads as
-      // "these are all the same except this one" at a glance rather than
-      // repeating the season's venue on every row.
-      const own = [g.start_time ? g.start_time.slice(0, 5) : "", g.location || ""]
-        .filter(Boolean)
-        .join(" · ");
-      const sub = own ? `<span class="set-sub">${escapeHtml(own)}</span>` : "";
-      return `<div class="set-row"><span class="set-label">${info.label}${sub}</span>${action}</div>`;
-    }
-
-    document.getElementById("upcoming-games").innerHTML = upcoming.map(row).join("") || '<div class="empty">沒有場次</div>';
+    document.getElementById("upcoming-games").innerHTML =
+      upcoming.map((g) => gameRowHtml(g, pricesAc)).join("") ||
+      '<div class="lrow"><span class="lrow-k">尚無待進行場次</span></div>';
 
     const pastToggle = document.getElementById("past-games-toggle");
     const pastList = document.getElementById("past-games");
     if (past.length === 0) {
       pastToggle.hidden = true;
       pastList.hidden = true;
-    } else {
-      pastToggle.hidden = false;
-      pastToggle.textContent = `已打過的 ${past.length} 場 ▾`;
-      pastList.hidden = true;
-      pastList.innerHTML = past.map(row).join("");
-      pastToggle.onclick = () => {
-        pastList.hidden = !pastList.hidden;
-        pastToggle.textContent = `已打過的 ${past.length} 場 ${pastList.hidden ? "▾" : "▴"}`;
-      };
+      return;
     }
+    pastToggle.hidden = false;
+    pastToggle.innerHTML = `已結束場次（${past.length}）<span class="car">▾</span>`;
+    pastList.innerHTML = past.map((g) => gameRowHtml(g, pricesAc)).join("");
+    pastToggle.setAttribute("aria-expanded", String(!pastList.hidden));
+    pastToggle.onclick = () => {
+      pastList.hidden = !pastList.hidden;
+      pastToggle.setAttribute("aria-expanded", String(!pastList.hidden));
+    };
   }
 
   let dateSheetGameId = null;
+
+  /** One game: what it costs and its air conditioning, then whatever may
+   * still be done to it.
+   *
+   * A game still to come can be moved, re-timed, given its own venue or
+   * venue cost, or called off. A game already played can only be called
+   * off — a night recorded wrongly still has to be correctable — and a
+   * date in the past is not somewhere to move a game to. A cancelled
+   * game, or any game of a settled season, is only read.
+   */
+  function openGameSheet(gameId) {
+    const game = currentSeason.games.find((g) => g.id === gameId);
+    if (!game) return;
+    const settled = currentSeason.settled_at !== null;
+    const scheduled = game.status === "scheduled";
+    const past = game.date < todayKey();
+    const editable = !settled && scheduled && !past;
+    const cancellable = !settled && scheduled;
+    dateSheetGameId = gameId;
+
+    document.getElementById("date-sheet-title").textContent = `${describeDate(game.date).label} 場次`;
+    const rows = [];
+    const infoRow = (k, v, extra) =>
+      `<div class="lrow"><span class="lrow-k">${k}</span><span class="lrow-v">${v}</span>${extra || ""}</div>`;
+    if (Number(currentSeason.ac_surcharge) > 0 && scheduled) {
+      const forecastable = editable;
+      rows.push(
+        infoRow(
+          "冷氣",
+          past ? (game.air_conditioned ? "開啟" : "未開啟") : game.air_conditioned ? "預定開啟" : "預定不開啟",
+          forecastable
+            ? '<button type="button" class="st-edit" onclick="closeDateSheet(); openForecastSheet()">修改預定</button>'
+            : ""
+        )
+      );
+    }
+    rows.push(infoRow("每人費用", game.status === "cancelled_refunded" ? "不計費" : `$${game.share}`));
+    const status = gameStatusLabel(game.status);
+    if (status) rows.push(infoRow("狀態", status));
+    document.getElementById("game-sheet-info").innerHTML = rows.join("");
+
+    const note = document.getElementById("game-sheet-note");
+    note.textContent = settled
+      ? "本季已結算，場次無法修改。"
+      : !scheduled
+        ? ""
+        : past
+          ? "已結束的場次無法修改日期、時間與地點。"
+          : "";
+    note.hidden = !note.textContent;
+    document.getElementById("game-edit-fields").hidden = !editable;
+    document.getElementById("game-save").hidden = !editable;
+    document.getElementById("game-cancel-zone").hidden = !cancellable;
+
+    if (editable) fillGameFields(game);
+    document.getElementById("date-sheet-backdrop").hidden = false;
+  }
+
+  function cancelFromGameSheet() {
+    const id = dateSheetGameId;
+    closeDateSheet();
+    openCancelSheet(id);
+  }
 
   /** Moving a night rather than calling it off and booking another.
    *
@@ -1271,10 +1631,7 @@
    */
   let originalDelta = 0;
 
-  function openGameEdit(gameId) {
-    const game = currentSeason.games.find((g) => g.id === gameId);
-    if (!game) return;
-    dateSheetGameId = gameId;
+  function fillGameFields(game) {
     originalDelta = Number(game.venue_cost_delta || 0);
     const cost = document.getElementById("g-cost-delta");
     cost.value = originalDelta === 0 ? "" : String(originalDelta);
@@ -1302,12 +1659,10 @@
       const total = Number(currentSeason.total_venue_cost) + moved;
       warn.hidden = false;
       warn.textContent =
-        `場地費總額會從 $${currentSeason.total_venue_cost} 變成 $${total}。` +
-        `僅本場的每人金額變動，其他場次不受影響。` +
-        `每個人的帳上會補一筆差額，已經收到的錢不動。`;
+        `場地費總額將從 $${currentSeason.total_venue_cost} 變為 $${total}。` +
+        `僅本場的每人金額變動，其他場次不受影響；` +
+        `每人帳上將補記差額，已收款項不變。`;
     };
-    document.getElementById("date-sheet-title").textContent =
-      `編輯 ${describeDate(game.date).label} 場次`;
     document.getElementById("date-sheet-input").value = game.date;
     writeTimeValue("g-start", game.start_time);
     writeTimeValue("g-end", game.end_time);
@@ -1320,7 +1675,6 @@
     document.getElementById("g-location-hint").textContent = currentSeason.location
       ? `留空表示與本季相同：${currentSeason.location}`
       : "留空表示與本季相同";
-    document.getElementById("date-sheet-backdrop").hidden = false;
   }
 
   function closeDateSheet() {
@@ -1330,7 +1684,7 @@
   async function saveGameEdit() {
     const value = document.getElementById("date-sheet-input").value;
     if (!value) {
-      toast("請先選一個日期");
+      toast("請選擇日期");
       return;
     }
     // Sent whole rather than diffed: an empty venue box or an unset hour
@@ -1356,18 +1710,20 @@
     try {
       await postJson(API_BASE, `/games/${dateSheetGameId}`, payload, "PATCH");
       closeDateSheet();
-      toast("已更新本場設定", "good");
+      toast("已更新本場次設定", "good");
       await loadSettings(currentSeasonId);
     } catch (e) {
       toast(e.message);
     }
   }
 
-  function openCancelSheet(gameId, label) {
+  function openCancelSheet(gameId) {
+    const game = currentSeason.games.find((g) => g.id === gameId);
+    if (!game) return;
     cancelGameId = gameId;
     cancelRefunded = true;
-    document.getElementById("cancel-game-title").textContent = `取消 ${label} 場次`;
-    document.getElementById("cancel-current-share").textContent = `$${currentSeason.share_per_game}`;
+    document.getElementById("cancel-game-title").textContent = `取消 ${describeDate(game.date).label} 場次`;
+    document.getElementById("cancel-current-share").textContent = `$${game.share}`;
     document.querySelectorAll("#cancel-game-backdrop .choice-card").forEach((card) => {
       card.classList.toggle("on", card.dataset.refunded === "true");
     });
@@ -1387,6 +1743,7 @@
     try {
       await postJson(API_BASE, `/games/${cancelGameId}/cancel`, { refunded: cancelRefunded });
       closeCancelSheet();
+      toast("已取消本場次", "good");
       loadSettings(currentSeasonId);
     } catch (e) {
       toast("取消失敗：" + e.message);
@@ -1418,6 +1775,7 @@ ${label} 及已記入每人帳上的季費將一併刪除，無法復原。`)) {
       `${API_BASE}/clubs/${currentClubId()}`,
       (club) => {
         loadedClubName = club.name;
+        document.getElementById("club-name-value").textContent = club.name;
         const input = document.getElementById("club-name");
         if (document.activeElement !== input) input.value = club.name;
         updateClubNameRow();
@@ -1429,20 +1787,28 @@ ${label} 及已記入每人帳上的季費將一併刪除，無法復原。`)) {
   const clubNameInput = document.getElementById("club-name");
   clubNameInput.addEventListener("input", updateClubNameRow);
 
-  // 儲存只在名字真的改過時才亮起來，剩餘字數也只在那時候才值得說。
+  // 儲存 lights up only once the name has actually changed, and the
+  // characters left are only worth saying then.
   function updateClubNameRow() {
     const value = clubNameInput.value.trim();
     const changed = value.length > 0 && value !== loadedClubName;
     document.getElementById("club-name-save").disabled = !changed;
     document.getElementById("club-name-hint").textContent = changed
-      ? `還可以打 ${CLUB_NAME_MAX - clubNameInput.value.length} 個字`
-      : "會顯示在每位成員畫面的左上角，最多 20 個字。";
+      ? `尚可輸入 ${CLUB_NAME_MAX - clubNameInput.value.length} 字`
+      : "顯示於每位成員畫面的左上角，最多 20 字。";
+  }
+
+  function openClubSheet() {
+    clubNameInput.value = loadedClubName;
+    updateClubNameRow();
+    openSheet("club-backdrop");
+    clubNameInput.focus();
   }
 
   async function renameClub(btn) {
     const name = document.getElementById("club-name").value.trim();
     if (!name) {
-      toast("球隊名稱不能空白");
+      toast("球隊名稱不可空白");
       return;
     }
     if (name.length > CLUB_NAME_MAX) {
@@ -1457,8 +1823,10 @@ ${label} 及已記入每人帳上的季費將一併刪除，無法復原。`)) {
       if (option && option.textContent === loadedClubName) option.textContent = club.name;
       loadedClubName = club.name;
       document.getElementById("club-name").value = club.name;
+      document.getElementById("club-name-value").textContent = club.name;
       updateClubNameRow();
-      toast("已更新球隊名稱");
+      closeSheet("club-backdrop");
+      toast("已更新球隊名稱", "good");
     } catch (e) {
       toast("改名失敗：" + e.message);
     } finally {
@@ -1469,8 +1837,8 @@ ${label} 及已記入每人帳上的季費將一併刪除，無法復原。`)) {
   async function deleteClub() {
     const warning =
       "確定要刪除整個球隊嗎？\n\n" +
-      "底下所有季別、場次和帳務紀錄都會一起消失，無法復原。\n" +
-      "（成員本人的帳號不會被刪除，只是不再屬於這個球隊。）";
+      "所有季別、場次與帳務紀錄將一併刪除，無法復原。\n" +
+      "成員的 LINE 帳號不受影響，僅不再屬於此球隊。";
     if (!confirm(warning)) {
       return;
     }
@@ -1490,17 +1858,55 @@ ${label} 及已記入每人帳上的季費將一併刪除，無法復原。`)) {
     location.href = "organizer-ledger.html#settle";
   }
 
-  async function saveSettings() {
-    const costInput = document.getElementById("f-cost");
-    if (!costInput.disabled) {
-      const newCost = costInput.value.trim();
-      if (newCost !== String(originalVenueCost)) {
-        if (!confirm("場地費變更會重新計算整季每人每場的金額，包含已經打過的場次，確定要儲存嗎？")) {
-          return;
-        }
+  function openCostSheet() {
+    const s = currentSeason;
+    if (!s || s.settled_at !== null) return;
+    document.getElementById("f-cost").value = s.total_venue_cost;
+    document.getElementById("f-ac").value = s.ac_surcharge;
+    // Hidden until the figure actually changes — see the f-cost listener.
+    document.getElementById("cost-warn-note").hidden = true;
+    openSheet("cost-backdrop");
+  }
+
+  function openRulesSheet() {
+    const s = currentSeason;
+    if (!s) return;
+    document.getElementById("f-capacity").value = s.capacity;
+    document.getElementById("f-min-roster").value = s.minimum_roster;
+    writeTimeValue("f-start", s.game_start_time);
+    writeTimeValue("f-end", s.game_end_time);
+    document.getElementById("f-location").value = s.location || "";
+    document.getElementById("f-deadline").value = s.change_deadline_hours;
+    openSheet("rules-backdrop");
+  }
+
+  /** The venue bill and the air conditioning's share of it. Locked once
+   * the season is settled, by the same rule on the server: both are
+   * subtracted from each other to price a game. */
+  async function saveCost() {
+    const newCost = document.getElementById("f-cost").value.trim();
+    if (newCost !== String(originalVenueCost)) {
+      if (!confirm("修改場地費總額將重新計算整季每人每場金額（含已結束的場次）。確定要儲存嗎？")) {
+        return;
       }
     }
+    const payload = {
+      total_venue_cost: newCost,
+      ac_surcharge: document.getElementById("f-ac").value.trim() || "0",
+    };
+    try {
+      await postJson(API_BASE, `/seasons/${currentSeasonId}`, payload, "PATCH");
+      closeSheet("cost-backdrop");
+      toast("已更新費用", "good");
+      loadSettings(currentSeasonId);
+    } catch (e) {
+      toast("儲存失敗：" + e.message);
+    }
+  }
 
+  /** Capacity, times, venue and the change deadline. Still editable on a
+   * settled season, as before: none of them re-prices it. */
+  async function saveRules() {
     const deadlineValue = document.getElementById("f-deadline").value;
     const payload = {
       capacity: Number(document.getElementById("f-capacity").value),
@@ -1510,17 +1916,10 @@ ${label} 及已記入每人帳上的季費將一併刪除，無法復原。`)) {
       location: document.getElementById("f-location").value.trim() || null,
       change_deadline_hours: deadlineValue === "" ? 24 : Number(deadlineValue),
     };
-    if (!costInput.disabled) {
-      payload.total_venue_cost = costInput.value.trim();
-      // Locked by the same rule as the venue cost: both are subtracted
-      // from each other to price a game, so a settled season can't have
-      // either moved under it.
-      payload.ac_surcharge = document.getElementById("f-ac").value.trim() || "0";
-    }
-
     try {
       await postJson(API_BASE, `/seasons/${currentSeasonId}`, payload, "PATCH");
-      toast("設定已儲存");
+      closeSheet("rules-backdrop");
+      toast("已更新場地與規則", "good");
       loadSettings(currentSeasonId);
     } catch (e) {
       toast("儲存失敗：" + e.message);

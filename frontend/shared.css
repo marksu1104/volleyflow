@@ -714,7 +714,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .att-row.has-acts:hover { border-color: var(--accent); }
 .att-row.open { border-color: var(--accent); }
 .att-go {
-  width: 30px; height: 30px; border-radius: 50%; flex: none; border: 0; padding: 0; cursor: pointer;
+  width: 34px; height: 34px; border-radius: 50%; flex: none; border: 0; padding: 0; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--accent-soft); color: var(--accent);
 }
@@ -1444,7 +1444,7 @@ textarea {
   .pending-chip::before { animation-duration: 2s; }
   .pending-chip { transition: opacity .18s ease-out; }
 }
-.meta-pill.ac { background: var(--warn-soft); color: var(--warn); font-weight: 700; }
+
 
 /* ---- a game's air conditioning ----
    A switch rather than a button: a button shows what you *can do*, a
@@ -1459,20 +1459,35 @@ textarea {
   margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rule);
 }
 .ac-switch .lbl { font-size: .84rem; font-weight: 700; flex: none; }
-.ac-seg { display: flex; gap: 3px; background: var(--surface-2); padding: 3px; border-radius: 9px; flex: none; }
+.ac-seg { display: flex; gap: 2px; background: var(--surface-2); padding: 3px; border-radius: 10px; flex: none; }
+/* Both the same fixed width, each with its icon, so switching never
+   makes either button grow or shrink (2026-10-21). */
 .ac-seg button {
-  border: none; background: none; padding: 6px 15px; border-radius: 7px; cursor: pointer;
-  font-family: var(--font-cjk); font-size: .82rem; font-weight: 700; color: var(--ink-faint);
+  width: 52px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  border: none; background: none; padding: 6px 0; border-radius: 8px; cursor: pointer;
+  font-family: var(--font-cjk); font-size: .88rem; font-weight: 700; color: var(--ink-soft);
 }
-.ac-seg button[aria-pressed="true"] { background: var(--warn); color: var(--surface); }
-.ac-seg button.off[aria-pressed="true"] { background: var(--ink-soft); }
+.ac-seg button svg { flex: none; }
+.ac-seg button.cool[aria-pressed="true"] { background: var(--accent); color: var(--surface); }
+.ac-seg button.plain[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .14); }
+/* The gap cut around the slash of the 關 icon takes the colour behind it. */
+.ac-seg .cut { stroke: var(--surface-2); }
+.ac-seg button.plain[aria-pressed="true"] .cut { stroke: var(--surface); }
 .ac-cost {
-  flex: 1; text-align: right; font-size: .78rem; color: var(--ink-soft);
-  font-variant-numeric: tabular-nums;
+  flex: 1 0 auto; text-align: right; font-size: .88rem; color: var(--ink-soft);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
 }
+/* Fixed width, so +$30 and +$0 take the same room. */
+.ac-cost b { display: inline-block; min-width: 2.4em; text-align: right; font-family: var(--font-num); font-weight: 800; color: var(--accent); }
+.ac-cost b.zero { color: var(--ink-soft); }
+.ac-switch { flex-wrap: wrap; }
+.ac-switch .lbl { font-size: .9rem; }
 /* Explains the price beside it, so a member seeing 235 instead of 205
    doesn't have to ask why. */
-.meta-pill.ac { background: var(--warn-soft); color: var(--warn); font-weight: 700; }
+.meta-pill.ac {
+  background: var(--accent-soft); color: var(--accent); font-weight: 700;
+  display: inline-flex; align-items: center; gap: 4px;
+}
 
 /* A picker that owns the screen while it is open.
    Choosing who stands in for somebody is a decision of its own, and it
@@ -1601,3 +1616,92 @@ textarea {
 .me-head { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px 0 4px; }
 .me-head .avatar { width: 72px; height: 72px; font-size: 1.6rem; }
 .me-head .me-name { font-size: 1.3rem; font-weight: 700; }
+
+
+/* ---- 設定 (proposal round 3, 2026-10-21) ----
+   Values are read, not edited in place: every block shows its figures and
+   an 編輯 opens a sheet. Fewer, larger words; the notes live in the
+   sheets, where they are about to matter. */
+.st-tabs { margin-bottom: 14px; }
+.st-card { background: var(--surface); border: 1px solid var(--rule); border-radius: 16px; padding: 16px; margin-bottom: 12px; }
+.st-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.st-card-head h3 { margin: 0; font-size: 1rem; font-weight: 700; }
+.st-edit {
+  border: 0; background: var(--accent-soft); color: var(--accent); font-family: var(--font-cjk);
+  font-weight: 700; font-size: .85rem; padding: 6px 14px; border-radius: 9px; cursor: pointer; flex: none;
+}
+.st-season-title { font-family: var(--font-num); font-weight: 800; font-size: 1.35rem; line-height: 1.2; }
+.st-season-meta { color: var(--ink-soft); font-size: .9rem; margin-top: 2px; }
+.st-prices { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.st-price { border-radius: 14px; padding: 14px; background: var(--surface-2); min-width: 0; }
+.st-price.cool { background: var(--accent-soft); }
+.st-price-label { display: flex; align-items: center; gap: 6px; font-size: .88rem; font-weight: 700; color: var(--ink-soft); }
+.st-price.cool .st-price-label { color: var(--accent); }
+.st-price-value { font-family: var(--font-num); font-weight: 800; font-size: 1.7rem; line-height: 1.15; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.st-price-foot { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; font-size: .92rem; }
+.st-price-foot b { font-family: var(--font-num); font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.st-facts { display: flex; flex-direction: column; gap: 12px; }
+.st-fact { display: flex; align-items: center; gap: 12px; font-size: .95rem; }
+.st-ic { width: 36px; height: 36px; border-radius: 10px; background: var(--surface-2); color: var(--ink-soft); display: grid; place-items: center; flex: none; }
+.st-fk { color: var(--ink-soft); flex: 1; min-width: 0; }
+.st-fv { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.was { text-decoration: line-through; color: var(--ink-faint); font-weight: 500; }
+.st-sum { color: var(--ink-soft); font-size: .92rem; margin: -4px 0 12px; }
+.st-fold {
+  display: flex; justify-content: center; align-items: center; gap: 6px; width: 100%; padding: 12px;
+  border: 0; background: none; color: var(--ink-soft); font-family: var(--font-cjk);
+  font-size: .9rem; font-weight: 700; cursor: pointer;
+}
+.st-fold .car { transition: transform .2s ease; }
+.st-fold[aria-expanded="true"] .car { transform: rotate(180deg); }
+.lrow.danger .lrow-k { color: var(--bad); }
+.st-gdate { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.st-gdate b { font-family: var(--font-num); font-size: 1.05rem; font-weight: 800; }
+.st-gdate b span { font-family: var(--font-cjk); font-size: .88rem; font-weight: 500; color: var(--ink-soft); margin-left: 4px; }
+.st-gdate small { font-size: .82rem; font-weight: 700; color: var(--warn); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-gdate small.off { color: var(--bad); }
+.st-gdate small.own { color: var(--ink-soft); font-weight: 500; }
+.ac-tag {
+  display: inline-flex; align-items: center; gap: 3px; flex: none; font-size: .8rem; font-weight: 700;
+  color: var(--accent); background: var(--accent-soft); padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+}
+.lrow .st-price-cell { font-family: var(--font-num); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.st-sheet-info { margin-bottom: 14px; }
+.st-danger { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--rule); }
+.st-danger .btn { margin-top: 0; }
+.st-note { font-size: .88rem; color: var(--ink-soft); margin: 0 0 12px; }
+
+/* One even grid of the season's games, seven to a row: shared by the
+   場次 card, the 修改預定 sheet and the wizard's dates step, so all
+   three look and work the same. A filled square has the air
+   conditioning booked. */
+.day-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 10px; font-size: .85rem; color: var(--ink-soft); }
+.day-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.day-legend i { width: 12px; height: 12px; border-radius: 4px; border: 1.5px solid var(--rule-strong); background: var(--surface); }
+.day-legend i.on { background: var(--accent); border-color: var(--accent); }
+.day-legend i.past { opacity: .4; }
+.day-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.day-cell {
+  position: relative; min-width: 0; height: 52px; padding: 0; border-radius: 11px;
+  border: 1.5px solid var(--rule-strong); background: var(--surface); color: var(--ink); cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  font-family: var(--font-cjk); transition: background .15s ease, border-color .15s ease;
+}
+.day-cell b { font-family: var(--font-num); font-weight: 800; font-size: 1rem; line-height: 1.1; }
+.day-cell small { font-size: .62rem; font-weight: 600; color: var(--ink-faint); }
+.day-cell.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.day-cell.on small { color: var(--surface); opacity: .8; }
+.day-cell.done { opacity: .4; }
+.day-cell.off b { text-decoration: line-through; color: var(--ink-faint); }
+.day-cell:disabled { cursor: default; }
+.day-cell.removing { border-color: var(--bad); }
+.day-cell .del {
+  position: absolute; top: 3px; right: 3px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--bad); color: #fff; font-size: .5rem; line-height: 14px; text-align: center;
+}
+.day-hint { font-size: .9rem; color: var(--ink-soft); margin: 0 0 8px; }
+.day-tools { display: flex; gap: 8px; margin-top: 10px; }
+.day-tools .btn { flex: 1; margin-top: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .day-cell, .st-fold .car { transition: none; }
+}

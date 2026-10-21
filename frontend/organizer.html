@@ -412,12 +412,12 @@
       <div class="ac-switch">
         <span class="lbl">本場冷氣</span>
         <span class="ac-seg">
-          <button type="button" aria-pressed="${on}"
-            onclick="toggleAirConditioning(${game.id}, true)">開</button>
-          <button type="button" class="off" aria-pressed="${!on}"
-            onclick="toggleAirConditioning(${game.id}, false)">關</button>
+          <button type="button" class="cool" aria-pressed="${on}"
+            onclick="toggleAirConditioning(${game.id}, true)">${snowIcon(16)}開</button>
+          <button type="button" class="plain" aria-pressed="${!on}"
+            onclick="toggleAirConditioning(${game.id}, false)">${snowOffIcon(16)}關</button>
         </span>
-        <span class="ac-cost">${on ? `每人 +$${each}` : "每人不加收"}</span>
+        <span class="ac-cost">每人 ${on ? `<b>+$${each}</b>` : '<b class="zero">+$0</b>'}</span>
       </div>`;
   }
 

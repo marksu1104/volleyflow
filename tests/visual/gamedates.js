@@ -64,6 +64,10 @@ const seasonOf = async (id) => (await fetch(`${API}/seasons/${id}`, { headers: a
     // permanent check that opens the settings page. It was once a row
     // that collapsed into itself — `.btn { width: 100% }` — so its shape
     // is worth measuring, not just its presence.
+    // The name is edited in its own sheet on the 球隊 tab (2026-10-21).
+    await page.click('[data-set-tab="club"]');
+    await page.click("#club-panel .lrow");
+    await page.waitForSelector("#club-backdrop:not([hidden])", { timeout: 10000 });
     const nameField = await page.evaluate(() => {
       const input = document.getElementById("club-name");
       const save = document.getElementById("club-name-save");
@@ -74,29 +78,32 @@ const seasonOf = async (id) => (await fetch(`${API}/seasons/${id}`, { headers: a
         saveDisabled: save.disabled,
       };
     });
-    report("球隊名稱是一個完整寬度的欄位，旁邊一顆小的儲存", [
+    report("球隊名稱是一個完整寬度的欄位，儲存在名字改過前不能按", [
       ...(nameField.value === CLUB ? [] : [`欄位裡是「${nameField.value}」`]),
       ...(nameField.inputWidth >= 240 ? [] : [`輸入框只有 ${nameField.inputWidth}px 寬`]),
-      ...(nameField.saveWidth <= 110 ? [] : [`儲存鍵有 ${nameField.saveWidth}px 寬`]),
       ...(nameField.saveDisabled ? [] : ["還沒改就可以按儲存"]),
     ]);
 
-    const offered = await page.evaluate(() => {
-      const rows = [...document.querySelectorAll("#upcoming-games .set-row")];
-      return {
-        rows: rows.length,
-        withMove: rows.filter((r) => r.textContent.includes("編輯")).length,
-        withCancel: rows.filter((r) => r.textContent.includes("取消")).length,
-      };
-    });
+    await page.click("#club-backdrop .btn-quiet");
+    await page.click('[data-set-tab="games"]');
+
+    // Every game still to come opens a sheet that can move it and call it off.
+    await page.click("#upcoming-games .lrow:first-child");
+    await page.waitForSelector("#date-sheet-backdrop:not([hidden])", { timeout: 10000 });
+    const offered = await page.evaluate(() => ({
+      rows: document.querySelectorAll("#upcoming-games .lrow").length,
+      editable: !document.getElementById("game-edit-fields").hidden,
+      cancellable: !document.getElementById("game-cancel-zone").hidden,
+    }));
     report("還沒打的場次都可以編輯", [
       ...(offered.rows > 0 ? [] : ["設定頁沒有列出任何場次"]),
-      ...(offered.withMove === offered.rows ? [] : [`${offered.rows} 列裡只有 ${offered.withMove} 列能改`]),
-      ...(offered.withCancel === offered.rows ? [] : ["取消不見了"]),
+      ...(offered.editable ? [] : ["場次視窗不能修改日期"]),
+      ...(offered.cancellable ? [] : ["取消不見了"]),
     ]);
+    await page.click("#date-sheet-backdrop .btn-quiet");
 
     // A day later — the seeded games are a week apart, so it is free.
-    await page.click("#upcoming-games .set-row:first-child .mini-action");
+    await page.click("#upcoming-games .lrow:first-child");
     await page.waitForSelector("#date-sheet-backdrop:not([hidden])", { timeout: 10000 });
     const sheet = await page.evaluate(() => ({
       title: document.getElementById("date-sheet-title").textContent,
@@ -121,7 +128,7 @@ const seasonOf = async (id) => (await fetch(`${API}/seasons/${id}`, { headers: a
     const moved = after.games.find((g) => g.id === target.id) || {};
     const shown = await page.evaluate(() => document.getElementById("upcoming-games").innerText);
     report("改完之後日期真的變了，記錄也跟著走", [
-      ...(sheet.title.includes("編輯") ? [] : [`面板標題是 ${sheet.title}`]),
+      ...(sheet.title.includes("場次") ? [] : [`面板標題是 ${sheet.title}`]),
       ...(sheet.value === target.date ? [] : [`面板帶的是 ${sheet.value}，該場是 ${target.date}`]),
       ...(moved.date === movedTo ? [] : [`伺服器上是 ${moved.date}，應該是 ${movedTo}`]),
       ...(shown.includes(`${next.getMonth() + 1}/${next.getDate()}`) ? [] : ["畫面上沒有看到新的日期"]),
@@ -132,7 +139,7 @@ const seasonOf = async (id) => (await fetch(`${API}/seasons/${id}`, { headers: a
 
     const other = after.games.find((g) => g.id !== target.id && g.date > today);
     if (other) {
-      await page.click("#upcoming-games .set-row:first-child .mini-action");
+      await page.click("#upcoming-games .lrow:first-child");
       await page.waitForSelector("#date-sheet-backdrop:not([hidden])", { timeout: 10000 });
       await page.evaluate((value) => {
         const el = document.getElementById("date-sheet-input");
@@ -147,7 +154,7 @@ const seasonOf = async (id) => (await fetch(`${API}/seasons/${id}`, { headers: a
       });
       const still = await seasonOf(seasons[0].id);
       report("兩場不能排在同一天", [
-        ...(said.includes("已經有一場") ? [] : [`畫面說的是「${said}」`]),
+        ...(said.includes("已有場次") ? [] : [`畫面說的是「${said}」`]),
         ...(still.games.find((g) => g.id === target.id).date === movedTo ? [] : ["日期還是被改掉了"]),
       ]);
       await page.evaluate(() => closeDateSheet());

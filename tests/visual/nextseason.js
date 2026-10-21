@@ -33,7 +33,7 @@ function report(name, problems) {
   await page.waitForSelector("#settings-form:not([hidden])", { timeout: 20000 });
 
   // 1. 設定 — carried over from the season being continued.
-  await page.click("text=開新一季");
+  await page.click("text=建立下一季");
   await page.waitForSelector("#create-season-form:not([hidden])", { timeout: 10000 });
   const step1 = await page.evaluate(() => ({
     steps: [...document.querySelectorAll(".stepper .step")].map((s) => s.textContent.trim()),
@@ -63,15 +63,15 @@ function report(name, problems) {
   await page.click('[data-go="2"]');
   await page.waitForTimeout(300);
   const step2 = await page.evaluate(() => ({
-    chips: document.querySelectorAll("#date-chips .chip:not(.add)").length,
+    chips: document.querySelectorAll("#date-grid .day-cell").length,
     summary: document.getElementById("gen-summary").textContent.replace(/\s+/g, " ").trim(),
-    cooled: document.querySelectorAll("#date-chips .chip-ac.on").length,
+    cooled: document.querySelectorAll("#date-grid .day-cell.on").length,
     first: (typeof wizardDates !== "undefined" && wizardDates[0]) || "",
   }));
   report("第 2 步的日期接在上一季最後一場之後", [
     ...(step2.chips > 0 ? [] : ["沒有產生任何場次"]),
     ...(step2.first && step2.first > lastDate ? [] : [`第一場 ${step2.first} 不在 ${lastDate} 之後`]),
-    ...(step2.summary.includes("每人每場") ? [] : [`摘要沒有金額: ${step2.summary}`]),
+    ...(/每人 \$\d/.test(step2.summary) ? [] : [`摘要沒有金額: ${step2.summary}`]),
     ...(step2.cooled === (current.games.every((g) => g.air_conditioned) ? step2.chips : 0)
       ? []
       : [`冷氣場次 ${step2.cooled}，上一季 ${current.games.filter((g) => g.air_conditioned).length}/${current.games.length}`]),

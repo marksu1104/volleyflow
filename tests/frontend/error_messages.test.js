@@ -63,6 +63,7 @@ const KNOWN_MESSAGES = [
   "That roster entry is already linked to a LINE account",
   "That player has no LINE account to link",
   "That LINE account already has ledger entries of its own — remove the duplicate roster entry instead",
+  "The game on 2026-10-06 has been played — record whether the air conditioning ran on the night instead",
   "Season is already settled — venue cost can't change now",
   "Season is already settled",
   "Season already settled",

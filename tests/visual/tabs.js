@@ -68,7 +68,7 @@ function report(name, problems) {
     // Tab one must still be where it was, and must still fetch its own.
     await first.bringToFront();
     const after = await first.evaluate(() => currentClubId());
-    await first.click("text=開新一季");
+    await first.click("text=建立下一季");
     await first.waitForSelector("#create-season-form:not([hidden])", { timeout: 10000 });
     await first.click('[data-go="2"]');
     await first.waitForTimeout(200);

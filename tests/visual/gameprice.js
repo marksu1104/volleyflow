@@ -59,31 +59,29 @@ const num = (v) => Number(v);
     await page.waitForSelector("#settings-form:not([hidden])", { timeout: 25000 });
     await page.waitForTimeout(900);
 
-    // 刪除 moved out of the form and below the club's name on
-    // 2026-09-18, and hides its season row when there is no season.
-    // Measured rather than assumed: a section that manages its own
-    // visibility is exactly the kind that silently stops appearing.
-    const order = await page.evaluate(() => {
-      const y = (id) => {
-        const el = document.getElementById(id);
-        return el && !el.hidden ? Math.round(el.getBoundingClientRect().top) : null;
+    // Since 2026-10-21 the club's name and deleting it live on the 球隊
+    // tab, the delete folded under 進階. Measured rather than assumed: a
+    // panel that manages its own visibility is exactly the kind that
+    // silently stops appearing.
+    await page.click('[data-set-tab="club"]');
+    const club = await page.evaluate(() => {
+      const panel = document.getElementById("club-panel");
+      return {
+        shown: !!panel && !panel.hidden,
+        name: !!panel && panel.textContent.includes("球隊名稱"),
+        danger: !!panel && panel.textContent.includes("刪除整個球隊"),
       };
-      return { games: y("upcoming-games"), name: y("club-name-section"), danger: y("danger-section") };
     });
-    report("刪除排在最後，球隊名稱在它上面", [
-      ...(order.danger === null ? ["刪除區沒有顯示"] : []),
-      ...(order.name === null ? ["球隊名稱沒有顯示"] : []),
-      ...(order.games !== null && order.danger !== null && order.games < order.danger
-        ? []
-        : ["場次沒有排在刪除之前"]),
-      ...(order.name !== null && order.danger !== null && order.name < order.danger
-        ? []
-        : ["球隊名稱沒有排在刪除之前"]),
+    report("球隊分頁有球隊名稱，刪除收在進階", [
+      ...(club.shown ? [] : ["球隊分頁沒有顯示"]),
+      ...(club.name ? [] : ["球隊名稱沒有顯示"]),
+      ...(club.danger ? [] : ["刪除整個球隊不見了"]),
     ]);
+    await page.click('[data-set-tab="games"]');
 
-    // Open the game's edit sheet through the button the organizer would
-    // actually press, not by calling openGameEdit directly.
-    await page.click(`#upcoming-games .set-row:first-child .mini-action`);
+    // Open the game's sheet through the row the organizer would actually
+    // tap, not by calling openGameSheet directly.
+    await page.click(`#upcoming-games .lrow:first-child`);
     await page.waitForSelector("#date-sheet-backdrop:not([hidden])", { timeout: 10000 });
     const sheet = await page.evaluate(() => ({
       cost: document.getElementById("g-cost-delta").value,
@@ -141,7 +139,7 @@ const num = (v) => Number(v);
 
     // Clearing it has to put the season back exactly, or the organizer
     // cannot undo a typo.
-    await page.click(`#upcoming-games .set-row:first-child .mini-action`);
+    await page.click(`#upcoming-games .lrow:first-child`);
     await page.waitForSelector("#date-sheet-backdrop:not([hidden])", { timeout: 10000 });
     await page.fill("#g-cost-delta", "");
     await page.click("#date-sheet-backdrop .btn-primary");

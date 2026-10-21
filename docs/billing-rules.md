@@ -176,6 +176,24 @@ someone for another $30 — or handing it back — because the forecast was
 wrong costs more goodwill than the difference is worth. The members
 absorb it, which is what a season fee is for.
 
+There are therefore two different corrections, and they must not be
+confused:
+
+| | Correcting the forecast | Recording the night |
+|---|---|---|
+| When | the forecast was typed in wrongly | the AC ran, or didn't, unlike the forecast |
+| Endpoint | `PUT /seasons/{id}/air-conditioned-dates` | `PUT /games/{id}/air-conditioning` |
+| `total_venue_cost` | unchanged — only which nights carry the AC portion moves | moves by `ac_surcharge` |
+| Members | every game re-priced; a season fee moves only by rounding | that night's share moves for everyone |
+| Games | still to come only | any |
+
+A forecast for a night already played is refused (2026-10-21): what
+happened on that night is recorded the second way, and allowing both
+would adjust the same night twice, once each way. The settings page
+previews a corrected forecast before it is saved through
+`POST /seasons/{id}/air-conditioned-dates/preview`, which runs the same
+`season_shares` as the books and writes nothing.
+
 ### A different venue for one night
 
 Added 2026-09-17, at the organizer's request: 「有時候會換場地，那個場地
