@@ -1,0 +1,98 @@
+name: Restore drill
+
+# A backup is only proven by reading it back. backup_db.py and
+# restore_db.py had been round-tripped against the dev branch, never
+# against production: the one database whose backup anybody will ever
+# need. This does it on demand. It dumps production, builds an empty
+# database from the migrations, restores the dump into it, dumps that
+# again and compares the two row for row.
+#
+# Production rows pass through this runner and nowhere else. The dumps
+# live in the runner's temp directory and vanish with it, nothing is
+# uploaded as an artifact, and the log says only which tables matched,
+# not how many rows they hold, because this repository's logs are
+# public. Production is only read; everything written goes to the
+# throwaway Postgres beside the job.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: drill
+          POSTGRES_PASSWORD: drill
+          POSTGRES_DB: drill
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U drill"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SCRATCH_DATABASE_URL: postgresql+psycopg://drill:drill@localhost:5432/drill
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # GitHub masks a secret only where its whole value appears. A
+      # connection error quotes the host on its own, so each part is
+      # masked separately before anything connects.
+      - name: Mask production connection details
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "PRODUCTION_DATABASE_URL is not set" >&2
+            exit 1
+          fi
+          python3 - <<'EOF'
+          import os
+          from urllib.parse import urlsplit
+
+          url = urlsplit(os.environ["DATABASE_URL"])
+          for part in (url.hostname, url.username, url.password):
+              if part:
+                  print(f"::add-mask::{part}")
+          EOF
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+
+      # Its stdout lists every table with its row count.
+      - name: Back up production
+        run: uv run python scripts/backup_db.py --out "$RUNNER_TEMP/production.json" > /dev/null
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+
+      - name: Build an empty database from the migrations
+        run: uv run alembic upgrade head
+        env:
+          DATABASE_URL: ${{ env.SCRATCH_DATABASE_URL }}
+
+      # A failed insert makes SQLAlchemy quote the rows it was inserting,
+      # and these are production's, so none of this step's output reaches
+      # the log. To see why it failed, reproduce it against the dev branch.
+      - name: Restore the backup and dump it again
+        run: |
+          if ! uv run python scripts/restore_db.py "$RUNNER_TEMP/production.json" --yes > /dev/null 2>&1; then
+            echo "The restore failed. Its output is withheld because it quotes production rows." >&2
+            exit 1
+          fi
+          uv run python scripts/backup_db.py --out "$RUNNER_TEMP/restored.json" > /dev/null
+        env:
+          DATABASE_URL: ${{ env.SCRATCH_DATABASE_URL }}
+
+      - name: Compare
+        run: uv run python scripts/compare_dumps.py "$RUNNER_TEMP/production.json" "$RUNNER_TEMP/restored.json"

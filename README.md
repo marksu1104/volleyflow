@@ -350,7 +350,12 @@ branch instead of in-memory SQLite — excluded by default
 (`uv run pytest -q`), run explicitly with `uv run pytest -m postgres`.
 `scripts/backup_db.py` / `restore_db.py` are two of them: a plain-JSON
 dump and restore, independent of Neon's own point-in-time recovery
-(6 hours on the free plan) for a mistake found later than that.
+(6 hours on the free plan) for a mistake found later than that. The
+restore drill (`.github/workflows/restore-drill.yml`, run by hand) does
+the same round trip against production: it dumps production, restores
+the dump into a throwaway Postgres on the runner, dumps that again and
+compares every row. Its log says only which tables matched, because
+this repository's logs are public.
 
 ## Running it locally
 
