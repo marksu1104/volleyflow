@@ -223,12 +223,14 @@ async function auditPage(browser, path) {
     // DEVELOPER_LINE_USER_ID answers 503 so the page can distinguish that
     // state from a forbidden identity. That is the expected empty state
     // described in PAGES above, not an application crash. Keep the
-    // exception exact so any other 5xx still fails the audit.
+    // exception exact so any other 5xx still fails the audit: only GETs,
+    // only these pages, only their own developer-only reads (the
+    // overview reads four of them since 2026-10-22).
     const expectedUnconfigured =
       r.status() === 503 &&
       method === "GET" &&
       ((path === "reports.html" && pathname === "/reports") ||
-        (path === "developer.html" && pathname === "/developer/overview"));
+        (path === "developer.html" && pathname.startsWith("/developer/")));
     if (expectedUnconfigured) {
       notes.push(`${line}（本機未設定開發者權限）`);
       return;

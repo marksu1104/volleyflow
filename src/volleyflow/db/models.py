@@ -541,3 +541,54 @@ class LedgerEntryRow(Base):
     payments for it cover its fee, or when the player owes nothing for
     the season at all — a lump sum at 季末結算 settles every night.
     An undo carries the same night as the payment it reverses."""
+
+
+class ErrorEventRow(Base):
+    """A request the server failed on, kept for the developer's overview.
+
+    Written by api/error_reporting.py alongside the log line, so a crash
+    can be read from the app rather than only from Render's log. Text
+    rather than foreign keys, like a problem report: a record of what
+    happened, which must not block deleting anything it mentions. Rows
+    go after 30 days.
+    """
+
+    __tablename__ = "error_events"
+    __table_args__ = (Index("ix_error_events_occurred_at", "occurred_at"),)
+
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
+    occurred_at: Mapped[datetime]
+    method: Mapped[str]
+    path: Mapped[str]
+    page: Mapped[str | None] = mapped_column(default=None)
+    """The screen the request came from (its Referer's file name)."""
+    error_type: Mapped[str]
+    message: Mapped[str]
+    location: Mapped[str]
+    """The deepest line of this project's own code it passed through."""
+
+
+class AuditEventRow(Base):
+    """Who did what to whose money or membership, and when — the record
+    CLAUDE.md asks of every data change ("who, when, what changed"),
+    started 2026-10-22 with the operations that move money or people.
+
+    Written in the same transaction as the change it describes, so the
+    two can never disagree. Names are copied in rather than joined:
+    the record has to outlive merges, renames and deleted clubs. Never
+    updated or deleted.
+    """
+
+    __tablename__ = "audit_events"
+    __table_args__ = (Index("ix_audit_events_occurred_at", "occurred_at"),)
+
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
+    occurred_at: Mapped[datetime]
+    action: Mapped[str]
+    actor_id: Mapped[int | None] = mapped_column(default=None)
+    actor_name: Mapped[str]
+    club_id: Mapped[int | None] = mapped_column(default=None)
+    club_name: Mapped[str | None] = mapped_column(default=None)
+    subject_name: Mapped[str | None] = mapped_column(default=None)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 0), default=None)
+    detail: Mapped[str | None] = mapped_column(default=None)

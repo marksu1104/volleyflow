@@ -5,7 +5,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from volleyflow.api.error_reporting import ErrorReportingMiddleware
+from volleyflow.api.error_reporting import ErrorReportingMiddleware, store_error_event
 from volleyflow.api.line_webhook import router as line_webhook_router
 from volleyflow.api.routes import router
 
@@ -50,6 +50,8 @@ _dev_login = os.environ.get("VOLLEYFLOW_DEV_LOGIN") == "1"
 # out through CORS and get its header — see ErrorReportingMiddleware's
 # own docstring for what goes wrong the other way around.
 app.add_middleware(ErrorReportingMiddleware)
+# Crashes are kept for the developer's overview too, not only logged.
+app.state.error_store = store_error_event
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,

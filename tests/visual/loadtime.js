@@ -86,9 +86,13 @@ const PAGES = [
   {
     file: "developer.html",
     what: "後台總覽",
-    // Resolves on the permission empty state too, which is fine: the
-    // round trip is what is being timed, not the verdict.
-    ready: `((document.getElementById("overview") || {}).innerHTML || "").trim().length > 0`,
+    // The four figures replace their spinners once /developer/overview
+    // answers. Resolves on the permission empty state too, which removes
+    // #kpis altogether — fine: the round trip is what is being timed, not
+    // the verdict. (The page's blocks are static markup since 2026-10-22,
+    // so "#overview has content" would be true before any request.)
+    ready: `(() => { const k = document.getElementById("kpis");
+      return !k || (k.innerHTML.trim().length > 0 && !k.querySelector(".spinner")); })()`,
   },
   {
     file: "reports.html",

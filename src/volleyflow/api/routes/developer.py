@@ -1,12 +1,18 @@
 """What the whole installation looks like, for the one person who keeps
 it running.
 
-Read-only and deliberately shallow: counts, not rows, and no money. The
-job of this is to notice something odd — a club that never got a season,
-people stuck waiting for an organizer who hasn't looked, reports piling
-up unread — and then go and look at it properly in the app. Anything
-that would show a particular person's balance belongs to their own
-club's organizer.
+Read-only and deliberately shallow: counts, not rows, and no balances.
+The job of this is to notice something odd — a club that never got a
+season, people stuck waiting for an organizer who hasn't looked, reports
+piling up unread, a crash — and then go and look at it properly in the
+app. Anything that would show a particular person's balance belongs to
+their own club's organizer.
+
+Two lists are the exception, added 2026-10-22: the server errors of the
+last week, and the audit trail. A trail of who changed what has to say
+what the change was — a payment entered as 2,875 instead of 285 is
+exactly the thing to catch — so it carries the amount of each payment,
+never a running balance.
 
 Gated exactly like routes/reports.py, and written out again rather than
 imported from it: nothing imports a route module (see routes/__init__).
@@ -14,7 +20,7 @@ imported from it: nothing imports a route module (see routes/__init__).
 
 import os
 from collections import defaultdict
-from datetime import datetime
+from datetime import UTC, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
@@ -22,15 +28,23 @@ from sqlalchemy.orm import Session
 
 from volleyflow.api.dependencies import get_db
 from volleyflow.api.routes._people import (
+    _TAIWAN,
     _today_in_taiwan,
     get_current_player,
     is_developer,
 )
-from volleyflow.api.schemas import DeveloperClubOut, DeveloperOverviewOut
+from volleyflow.api.schemas import (
+    AuditEventOut,
+    DeveloperClubOut,
+    DeveloperErrorOut,
+    DeveloperOverviewOut,
+)
 from volleyflow.db.models import (
+    AuditEventRow,
     ClubMemberRow,
     ClubRow,
     DropInRow,
+    ErrorEventRow,
     GameRow,
     LedgerEntryRow,
     PlayerRow,
@@ -115,6 +129,23 @@ def developer_overview(
 
     newest = db.query(ClubRow.name).order_by(ClubRow.id.desc()).limit(5).all()
 
+    monday = today - timedelta(days=today.weekday())
+    week_started = (
+        datetime.combine(monday, time(), tzinfo=_TAIWAN)
+        .astimezone(UTC)
+        .replace(tzinfo=None)
+    )
+    active_clubs = (
+        db.query(func.count(func.distinct(SeasonRow.club_id)))
+        .join(GameRow, GameRow.season_id == SeasonRow.id)
+        .filter(
+            GameRow.status == GameStatus.SCHEDULED,
+            GameRow.date >= today - timedelta(days=30),
+            GameRow.date <= today + timedelta(days=30),
+        )
+        .scalar()
+    )
+
     return DeveloperOverviewOut(
         clubs=db.query(ClubRow).count(),
         players=db.query(PlayerRow).count(),
@@ -146,4 +177,72 @@ def developer_overview(
         )
         .count(),
         newest_clubs=[name for (name,) in newest],
+        active_clubs=int(active_clubs or 0),
+        games_this_week=db.query(GameRow)
+        .filter(
+            GameRow.status == GameStatus.SCHEDULED,
+            GameRow.date >= monday,
+            GameRow.date <= monday + timedelta(days=6),
+        )
+        .count(),
+        signups_this_week=db.query(DropInRow)
+        .filter(DropInRow.signed_up_at >= week_started)
+        .count(),
     )
+
+
+@router.get("/developer/errors", response_model=list[DeveloperErrorOut])
+def developer_errors(
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> list[DeveloperErrorOut]:
+    """The server's failures of the last seven days, newest first."""
+    _require_developer(current_player)
+    since = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=7)
+    rows = (
+        db.query(ErrorEventRow)
+        .filter(ErrorEventRow.occurred_at >= since)
+        .order_by(ErrorEventRow.occurred_at.desc())
+        .limit(100)
+        .all()
+    )
+    return [
+        DeveloperErrorOut(
+            occurred_at=row.occurred_at,
+            method=row.method,
+            path=row.path,
+            page=row.page,
+            error_type=row.error_type,
+            message=row.message,
+            location=row.location,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/developer/activity", response_model=list[AuditEventOut])
+def developer_activity(
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> list[AuditEventOut]:
+    """The audit trail, newest first — see db.models.AuditEventRow."""
+    _require_developer(current_player)
+    rows = (
+        db.query(AuditEventRow)
+        .order_by(AuditEventRow.occurred_at.desc(), AuditEventRow.id.desc())
+        .limit(max(1, min(limit, 200)))
+        .all()
+    )
+    return [
+        AuditEventOut(
+            occurred_at=row.occurred_at,
+            action=row.action,
+            actor_name=row.actor_name,
+            club_name=row.club_name,
+            subject_name=row.subject_name,
+            amount=row.amount,
+            detail=row.detail,
+        )
+        for row in rows
+    ]

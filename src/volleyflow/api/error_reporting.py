@@ -13,19 +13,29 @@ away from starting again.
 What a crash leaves behind now is a log line on the server, which is
 where a crash report belongs, plus — locally only — the whole traceback
 in the response body, which is what a browser-driven check can read and
-a server console cannot.
+a server console cannot. Since 2026-10-22 it is also kept as a row the
+developer's overview lists (store_error_event), so a crash can be read
+in the app rather than only in Render's log.
 """
 
 import logging
 import os
 import traceback
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from volleyflow.api.dependencies import get_db
+from volleyflow.db.models import ErrorEventRow
+
 logger = logging.getLogger("volleyflow.errors")
+
+KEEP_ERRORS = timedelta(days=30)
 
 
 def _where(exc: BaseException) -> str:
@@ -60,6 +70,45 @@ def report_unhandled_error(path: str, exc: Exception) -> None:
     logger.error("Unhandled error on %s (%s)", path, _where(exc), exc_info=exc)
 
 
+def store_error_event(request: Request, exc: Exception) -> None:
+    """Keeps the crash as a row for the developer's overview, and drops
+    rows older than KEEP_ERRORS.
+
+    Through the app's own get_db, honouring an override, so a test app
+    writes to its test database. A fresh session in production, rolled
+    back first in case it is the request's own and the crash left it
+    mid-transaction. Never raises: failing to write the record down must
+    not turn one error into two.
+    """
+    provider = request.app.dependency_overrides.get(get_db, get_db)
+    sessions = provider()
+    try:
+        db = next(sessions)
+        db.rollback()
+        now = datetime.now(UTC).replace(tzinfo=None)
+        referer = request.headers.get("referer") or ""
+        page = urlsplit(referer).path.rsplit("/", 1)[-1] or None
+        db.add(
+            ErrorEventRow(
+                occurred_at=now,
+                method=request.method,
+                path=request.url.path,
+                page=page,
+                error_type=type(exc).__name__,
+                message=str(exc)[:500],
+                location=_where(exc),
+            )
+        )
+        db.query(ErrorEventRow).filter(
+            ErrorEventRow.occurred_at < now - KEEP_ERRORS
+        ).delete()
+        db.commit()
+    except Exception:
+        logger.exception("Could not store the error event")
+    finally:
+        sessions.close()
+
+
 class ErrorReportingMiddleware(BaseHTTPMiddleware):
     """Catches what FastAPI's own exception handling doesn't, and answers
     it, without losing CORS headers on the way out.
@@ -86,6 +135,14 @@ class ErrorReportingMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         except Exception as exc:
             report_unhandled_error(request.url.path, exc)
+            # Kept for the developer's overview where the app asks for it
+            # (main.py); a bare app — the tests' toy one — only logs. In a
+            # worker thread: when the database is what failed, every
+            # request is crashing at once, and a store waiting out its
+            # connection timeout on the event loop would stall them all.
+            store = getattr(request.app.state, "error_store", None)
+            if store is not None:
+                await run_in_threadpool(store, request, exc)
             # Locally, the reason travels back with the response. The
             # server's own console is the usual place to read a traceback
             # and it is exactly the place a browser-driven test can't

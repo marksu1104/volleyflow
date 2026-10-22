@@ -891,6 +891,40 @@ class DeveloperOverviewOut(BaseModel):
     newest_clubs: list[str]
     """Names only, newest first, so a club created minutes ago is
     recognisable without opening anybody's books."""
+    active_clubs: int = 0
+    """Clubs with a game on within 30 days either side of today — in
+    use, as against the test clubs that never got going."""
+    games_this_week: int = 0
+    """Games still on, Monday to Sunday of this week in Taiwan."""
+    signups_this_week: int = 0
+    """Drop-in signups made since Monday 00:00 in Taiwan, whatever
+    became of them since."""
+
+
+class DeveloperErrorOut(BaseModel):
+    """A request the server failed on — see db.models.ErrorEventRow."""
+
+    occurred_at: datetime
+    method: str
+    path: str
+    page: str | None
+    error_type: str
+    message: str
+    location: str
+
+
+class AuditEventOut(BaseModel):
+    """One entry in the audit trail — see db.models.AuditEventRow. The
+    screen turns `action` into a sentence; the names are as they were
+    at the time."""
+
+    occurred_at: datetime
+    action: str
+    actor_name: str
+    club_name: str | None
+    subject_name: str | None
+    amount: Decimal | None
+    detail: str | None
 
 
 class PlayerBalanceOut(BaseModel):

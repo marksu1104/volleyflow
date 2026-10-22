@@ -27,10 +27,12 @@ import scripts.restore_db as restore_db
 from volleyflow.db.engine import get_session
 from volleyflow.db.models import (
     AbsenceRow,
+    AuditEventRow,
     Base,
     ClubMemberRow,
     ClubRow,
     DropInRow,
+    ErrorEventRow,
     GameRow,
     LedgerEntryRow,
     PlayerRow,
@@ -378,6 +380,30 @@ def test_every_table_survives_a_round_trip_including_binary_data(
                 image=screenshot,
                 content_type="image/png",
                 created_at=datetime(2026, 9, 15, 1),
+            )
+        )
+        session.add(
+            ErrorEventRow(
+                occurred_at=datetime(2026, 10, 22, 1),
+                method="POST",
+                path="/absences",
+                page="member.html",
+                error_type="RuntimeError",
+                message="boom",
+                location="attendance.py:120 in record_absence",
+            )
+        )
+        session.add(
+            AuditEventRow(
+                occurred_at=datetime(2026, 10, 22, 2),
+                action="payment",
+                actor_id=1,
+                actor_name="管理員",
+                club_id=1,
+                club_name="測試",
+                subject_name="成員甲",
+                amount=Decimal("205"),
+                detail=None,
             )
         )
         session.commit()

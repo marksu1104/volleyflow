@@ -14,6 +14,7 @@ from volleyflow.api.dependencies import get_db
 from volleyflow.api.routes._attendance import (
     _get_game_or_404,
 )
+from volleyflow.api.routes._audit import _audit
 from volleyflow.api.routes._money import (
     _sync_season_fee_ledger,
 )
@@ -84,6 +85,13 @@ def cancel_game(
     db.flush()
     if payload.refunded:
         _sync_season_fee_ledger(db, season)
+    _audit(
+        db,
+        current_player,
+        "game_cancelled_refunded" if payload.refunded else "game_cancelled",
+        season.club_id,
+        detail=game.date.isoformat(),
+    )
     db.commit()
     db.refresh(game)
     # After the commit: a message cannot be taken back.
@@ -138,6 +146,14 @@ def set_game_air_conditioning(
     season.total_venue_cost += delta
     db.flush()
     _sync_season_fee_ledger(db, season)
+    _audit(
+        db,
+        current_player,
+        "ac_on" if payload.air_conditioned else "ac_off",
+        season.club_id,
+        amount=delta,
+        detail=game.date.isoformat(),
+    )
     db.commit()
     db.refresh(game)
     return GameOut(id=game.id, date=game.date, status=game.status)
@@ -257,6 +273,13 @@ def update_game(
         except ValueError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
+    _audit(
+        db,
+        current_player,
+        "game_updated",
+        season.club_id,
+        detail=game.date.isoformat(),
+    )
     db.commit()
     db.refresh(game)
     return GameOut(id=game.id, date=game.date, status=game.status)

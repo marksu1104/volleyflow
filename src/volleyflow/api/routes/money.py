@@ -18,6 +18,7 @@ from volleyflow.api.conversion import (
     player_from_row,
 )
 from volleyflow.api.dependencies import get_db
+from volleyflow.api.routes._audit import _audit
 from volleyflow.api.routes._money import _counts_up_to, _drop_in_share, _seasons_up_to
 from volleyflow.api.routes._people import (
     _get_club_or_404,
@@ -64,9 +65,10 @@ def record_payment(
     """
     _get_club_or_404(db, club_id)
     _require_organizer(db, club_id, current_player)
-    _get_player_or_404(db, player_id)
+    player = _get_player_or_404(db, player_id)
     _require_dealings_with_club(db, club_id, player_id)
     season_id = payload.season_id
+    night: GameRow | None = None
     if payload.game_id is not None:
         game = db.get(GameRow, payload.game_id)
         night_season = db.get(SeasonRow, game.season_id) if game is not None else None
@@ -75,6 +77,7 @@ def record_payment(
                 status.HTTP_404_NOT_FOUND, f"No game with id {payload.game_id}"
             )
         season_id = night_season.id
+        night = game
         # A drop-in fee is owed only by somebody who actually got a place
         # that night, so it is only taken from somebody on court then —
         # never a queued signup (asked 2026-10-16).
@@ -126,6 +129,15 @@ def record_payment(
         client_token=payload.client_token,
     )
     db.add(entry)
+    _audit(
+        db,
+        current_player,
+        "payment",
+        club_id,
+        subject_name=player.name,
+        amount=payload.amount,
+        detail=night.date.isoformat() if night is not None else None,
+    )
     try:
         db.commit()
     except IntegrityError:
@@ -414,6 +426,14 @@ def reverse_payment(
         reverses_entry_id=entry.id,
     )
     db.add(undo)
+    _audit(
+        db,
+        current_player,
+        "payment_undone",
+        entry.club_id,
+        subject_id=entry.player_id,
+        amount=entry.amount,
+    )
     try:
         db.commit()
     except IntegrityError:

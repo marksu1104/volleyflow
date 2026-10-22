@@ -19,6 +19,7 @@ from volleyflow.api.invites import club_id_from_invite_token, invite_token
 from volleyflow.api.routes._attendance import (
     _delete_season_rows,
 )
+from volleyflow.api.routes._audit import _audit
 from volleyflow.api.routes._money import _club_balances_up_to_now
 from volleyflow.api.routes._people import (
     _MY_GUESTS_LIMIT,
@@ -87,6 +88,7 @@ def create_club(
             joined_at=_now(),
         )
     )
+    _audit(db, current_player, "club_created", club.id)
     db.commit()
     db.refresh(club)
     return ClubOut(id=club.id, name=club.name)
@@ -538,6 +540,7 @@ def approve_member(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Not waiting to be approved")
     membership.status = "active"
     membership.wants_fixed_membership = payload.as_fixed
+    _audit(db, current_player, "member_approved", club_id, subject_id=player_id)
     db.commit()
     player = _get_player_or_404(db, player_id)
     return MemberOut(
@@ -749,6 +752,14 @@ def merge_players(
     # row's name plus the generated suffix.
     if re.fullmatch(rf"{re.escape(duplicate.name)} \(\d+\)", keep.name):
         keep.name = duplicate.name
+    _audit(
+        db,
+        current_player,
+        "players_merged",
+        club_id,
+        subject_name=keep.name,
+        detail=duplicate.name,
+    )
     db.commit()
     return MemberOut(
         id=keep.id,
@@ -889,6 +900,7 @@ def remove_club_member(
                 "This is the club's only organizer",
             )
 
+    _audit(db, current_player, "member_removed", club_id, subject_id=player_id)
     db.delete(membership)
     db.commit()
 
@@ -923,6 +935,7 @@ def delete_club(
     db.query(ClubMemberRow).filter(ClubMemberRow.club_id == club_id).delete(
         synchronize_session=False
     )
+    _audit(db, current_player, "club_deleted", club_id)
     club = db.get(ClubRow, club_id)
     if club is not None:
         db.delete(club)

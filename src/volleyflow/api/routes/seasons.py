@@ -32,6 +32,7 @@ from volleyflow.api.routes._attendance import (
     _retired_absence_game_ids,
     _within_change_deadline,
 )
+from volleyflow.api.routes._audit import _audit, _season_span
 from volleyflow.api.routes._money import (
     _fee_notice_plan,
     _gather_member_settlements,
@@ -147,6 +148,13 @@ def delete_season(
             "This season has payments recorded — it can't be deleted",
         )
 
+    _audit(
+        db,
+        current_player,
+        "season_deleted",
+        season.club_id,
+        detail=_season_span(db, season),
+    )
     _delete_season_rows(db, season)
     db.commit()
 
@@ -257,6 +265,14 @@ def start_season(
 
     db.flush()
     _sync_season_fee_ledger(db, season)
+    _audit(
+        db,
+        current_player,
+        "season_started",
+        season.club_id,
+        amount=season.total_venue_cost,
+        detail=_season_span(db, season),
+    )
 
     db.commit()
     for game in games:
@@ -325,6 +341,11 @@ def update_season(
     _require_organizer(db, season.club_id, current_player)
 
     updates = payload.model_dump(exclude_unset=True)
+    before = {
+        "total_venue_cost": season.total_venue_cost,
+        "ac_surcharge": season.ac_surcharge,
+        "capacity": season.capacity,
+    }
     # All three, not just the venue cost: capacity is the other half of
     # share_per_game's denominator, so moving any of them
     # would re-price a season whose ledger is already closed.
@@ -372,6 +393,23 @@ def update_season(
     # charged at the share the new capacity sets.
     if raised:
         _offer_freed_slots_to_the_queue(db, season)
+
+    # What re-prices the season goes on the record, each with its old
+    # value; times, venue and the deadline move no money.
+    for field, action in (
+        ("total_venue_cost", "venue_cost_changed"),
+        ("ac_surcharge", "ac_surcharge_changed"),
+        ("capacity", "capacity_changed"),
+    ):
+        if field in updates and updates[field] != before[field]:
+            _audit(
+                db,
+                current_player,
+                action,
+                season.club_id,
+                amount=getattr(season, field),
+                detail=str(before[field]),
+            )
 
     db.commit()
     db.refresh(season)
@@ -441,6 +479,13 @@ def set_air_conditioned_dates(
         game.air_conditioned = game.date in cooled
     db.flush()
     _sync_season_fee_ledger(db, season)
+    _audit(
+        db,
+        current_player,
+        "ac_forecast_corrected",
+        season.club_id,
+        detail=str(len(cooled)),
+    )
     db.commit()
 
 
@@ -697,6 +742,7 @@ def add_member(
         if displaced_ids
         else {}
     )
+    _audit(db, current_player, "roster_added", season.club_id, subject_name=player.name)
     db.commit()
     db.refresh(player)
     return SeasonMemberAddOut(
@@ -790,6 +836,7 @@ def remove_member(
     # by the deadline job (reminders.send_promotion_notices).
     _offer_freed_slots_to_the_queue(db, season)
     _sync_member_season_fee_ledger(db, season, player_id, is_member=False)
+    _audit(db, current_player, "roster_removed", season.club_id, subject_id=player_id)
     db.commit()
 
 
@@ -1249,6 +1296,13 @@ def settle_season(
         )
 
     season_row.settled_at = now
+    _audit(
+        db,
+        current_player,
+        "season_settled",
+        season_row.club_id,
+        detail=_season_span(db, season_row),
+    )
     db.commit()
 
     # Deliberately silent. What a member is owed or owes after this is
@@ -1343,6 +1397,13 @@ def send_fee_notice(
     for member in pending:
         if member.player_id in owing:
             member.fee_notice_sent_at = now
+    _audit(
+        db,
+        current_player,
+        "fee_notice_sent",
+        season_row.club_id,
+        detail=str(sum(1 for m in pending if m.player_id in owing)),
+    )
     db.commit()
 
     told = notify_fee_due(db, season_row, dues)
@@ -1442,6 +1503,13 @@ def unsettle_season(
         undone += 1
 
     season.settled_at = None
+    _audit(
+        db,
+        current_player,
+        "season_unsettled",
+        season.club_id,
+        detail=_season_span(db, season),
+    )
     try:
         db.commit()
     except IntegrityError:
