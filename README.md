@@ -531,5 +531,7 @@ quietly change what someone is charged.
 
 ## What's left
 
-- **A production restore drill.** The backup script has been rehearsed
-  against the dev branch, not production.
+- **The group-message agent.** Reading a free-form message from the LINE
+  group ("I'm out next Tuesday, and sign up my friend") and turning it
+  into calls to the existing API. The model would only interpret; every
+  amount would still come from the rules engine. Not started.
