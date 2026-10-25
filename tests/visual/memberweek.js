@@ -264,14 +264,9 @@ function inDays(days) {
       // because the earlier assertion only ever sees the paying case.
       estimate: (document.getElementById("lg-estimate") || {}).innerText || "",
       estimateShown: !(document.getElementById("lg-estimate") || {}).hidden,
-      // openLedger paints 載入中 when myLedger has not arrived and does
-      // not repaint when it does, so a panel opened too early stays on
-      // the spinner for ever. The row count cannot see that: the spinner
-      // is itself one div, so `entries > 0` passes while the sheet says
-      // nothing. This assertion lived in richmenulinks.js on the
-      // ?open=ledger path until 2026-09-22; that path was removed as
-      // dead, and this came with it rather than being lost — it was
-      // never guarding the parameter, it was guarding the panel.
+      // A panel opened before myLedger arrives must repaint when it
+      // does. Counting rows cannot see a stuck spinner (it is one div
+      // too), so the panel's text is read instead.
       body: (document.getElementById("lg-entries") || {}).innerText || "",
     }));
     report("自己的帳看得到季費", [

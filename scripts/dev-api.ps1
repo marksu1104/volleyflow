@@ -13,6 +13,11 @@
 # LINE".
 
 $env:VOLLEYFLOW_DEV_LOGIN = "1"
+# Placeholders for the two settings production holds real values for:
+# without them invite links answer 503 and reports.html says it is not
+# configured. Neither value means anything outside this machine.
+$env:DEVELOPER_LINE_USER_ID = "dev-nobody"
+$env:INVITE_TOKEN_SECRET = "dev-local-secret"
 
 . (Join-Path $PSScriptRoot "lan-address.ps1")
 $lan = Get-LanAddress
@@ -28,4 +33,7 @@ Write-Host ""
 # "localhost" is the phone. Paired with VOLLEYFLOW_DEV_LOGIN above this
 # does mean anyone on this wifi can be anyone in the *dev* database, so
 # it stays in this script and never in a deployment.
-uv run uvicorn volleyflow.api.main:app --reload --host 0.0.0.0 --port 8000
+#
+# No --reload: on Windows the file watcher has hung on the first reload.
+# Restart this script after changing Python code.
+uv run uvicorn volleyflow.api.main:app --host 0.0.0.0 --port 8000

@@ -252,29 +252,11 @@
     else renderNoSeason(); // now that allClubs/myClubs are known, name the club
   });
 
-  /* Where the LINE rich menu's buttons land.
-   *
-   * There used to be an `?open=` parameter here: one LIFF app opened
-   * this page, and `?open=ledger` / `?open=report` decided which of the
-   * three destinations to reach from it. That design is gone. Since
-   * 2026-09-18 each destination has a LIFF app of its own —
-   * member.html, ledger.html and report.html — because a LIFF app has
-   * exactly one endpoint, so one app could never open three pages
-   * directly while three apps can. It also halved the cold open:
-   * 問題回報 went 1484ms to 543ms, two document loads to one.
-   *
-   * The handler was removed on 2026-09-22 along with the three checks in
-   * tests/visual/richmenulinks.js that guarded it — the same cleanup
-   * rootredirect.js got at the time and this missed. Nothing had pointed
-   * at `?open=` for four days: the live menu's three columns are the
-   * three liff.line.me app links, and a check that guards a path nobody
-   * takes is coverage in name only.
-   *
-   * What is left is `?pick=1` on the 場次與報名 column, handled further
-   * down with `?invite=` and `?club=`: it asks which club to look at
-   * even when this device remembers one, because a menu tap is a fresh
-   * errand rather than a continuation. Stripped from the URL after use,
-   * so a reload does not ask again.
+  /* Where the LINE rich menu's buttons land. Each destination
+   * (member.html, ledger.html, report.html) is its own LIFF app, so no
+   * parameter chooses the page. `?pick=1` on the 場次與報名 column asks
+   * which club to look at even when this device remembers one, and is
+   * stripped from the URL after use so a reload does not ask again.
    */
 
   identityReady.then((identified) => {

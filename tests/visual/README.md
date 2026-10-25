@@ -29,6 +29,9 @@ right" from "the page is right".
 | `memberweek.js` | 請假 → 指定代打 → 收回 → 取消請假 → 我的帳務, as a member | after changing the hero card or the game sheet |
 | `waitlist.js` | a full game, a queued guest, an absence, the promotion, the money | after changing capacity, the queue or drop-in billing |
 | `organizerday.js` | 待辦 → 核准 → 指定代打 → 收季費 → 復原收款 | after changing the overview, approvals or payments |
+| `clubpicker.js` | which club a member is shown when the device remembers none, or one from the menu | after changing club selection |
+| `gameprice.js` | pricing one night at a different venue, through the game sheet | after changing per-game pricing |
+| `loadtime.js` | how long each page takes to show real content, cold and warm | after changing what a page loads |
 
 All of them need a Chromium; they use the Edge already installed on Windows.
 Every one but `check.js` also needs both local servers up
