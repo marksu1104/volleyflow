@@ -1153,7 +1153,7 @@
         : "與上一季相同";
       row("固定成員", `${picked.length} 人`, escapeHtml(note));
     } else {
-      row("固定成員", `${picked.length} 人`, picked.slice(0, 4).join("、"));
+      row("固定成員", `${picked.length} 人`, escapeHtml(picked.slice(0, 4).join("、")));
     }
 
     document.getElementById("confirm-diff").innerHTML = rows.join("");

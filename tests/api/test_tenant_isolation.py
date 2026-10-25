@@ -15,13 +15,17 @@ Written 2026-09-15, before the app was opened to clubs other than the
 developer's own.
 """
 
+import re
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from tests.api.factories import auth_headers, create_club, identify, start_season
 from volleyflow.api.invites import invite_token
+from volleyflow.api.main import app
 
 # Words that exist only inside club A. None may appear in anything an
 # outsider is sent back.
@@ -145,6 +149,13 @@ def _attempts(a: dict[str, Any], stranger_id: int) -> list[tuple[str, str, Any]]
                 "capacity": 5,
             },
         ),
+        ("POST", f"/clubs/{c}/guests", {"name": "外人帶的人"}),
+        ("PATCH", f"/games/{g}", {"location": "外人改的場地"}),
+        ("PUT", f"/seasons/{s}/air-conditioned-dates", {"dates": [FUTURE]}),
+        ("POST", f"/seasons/{s}/air-conditioned-dates/preview", {"dates": [FUTURE]}),
+        ("GET", f"/seasons/{s}/fee-notice", None),
+        ("POST", f"/seasons/{s}/fee-notice", {}),
+        ("POST", f"/seasons/{s}/unsettle", {}),
         ("DELETE", f"/seasons/{s}", None),
         ("DELETE", f"/clubs/{c}", None),
         # A forged token: an outsider has no link to give.
@@ -311,3 +322,52 @@ def test_somebody_waiting_to_be_let_in_can_neither_read_nor_change_it(
 
     assert not problems, "let through:\n  " + "\n  ".join(problems)
     assert _snapshot(client, a) == before
+
+
+# Routes that name no club's data, each with what guards it instead. A new
+# route belongs either here or in _attempts; the test below fails until it
+# is in one of them, so a route nobody thought to sweep cannot ship.
+NOT_CLUB_SCOPED = {
+    ("GET", "/health"): "no data at all",
+    ("POST", "/clubs"): "creates the caller's own club",
+    ("GET", "/clubs"): "lists the caller's own clubs",
+    ("GET", "/invites/X"): "an HMAC-signed token; answers with a club name only",
+    ("POST", "/players/identify"): "verifies the LINE ID token itself",
+    ("GET", "/players/me/line-reachable"): "the caller's own account",
+    ("POST", "/line/webhook"): "LINE's signature on the body",
+    ("POST", "/reports"): "anybody signed in may report a problem",
+    ("GET", "/reports"): "developer only",
+    ("POST", "/reports/read"): "developer only",
+    ("GET", "/reports/X/image"): "developer only",
+    ("GET", "/developer/clubs"): "developer only",
+    ("GET", "/developer/overview"): "developer only",
+    ("GET", "/developer/errors"): "developer only",
+    ("GET", "/developer/activity"): "developer only",
+}
+
+
+def _shape(path: str) -> str:
+    return re.sub(r"\{[^}]+\}|(?<=/)\d+(?=/|$)", "X", path.split("?")[0])
+
+
+def _api_routes() -> set[tuple[str, str]]:
+    def walk(routes: list[Any]) -> Iterator[APIRoute]:
+        for route in routes:
+            if isinstance(route, APIRoute):
+                yield route
+            elif hasattr(route, "original_router"):
+                yield from walk(route.original_router.routes)
+
+    return {(m, _shape(r.path)) for r in walk(app.routes) for m in r.methods}
+
+
+def test_every_route_is_swept_or_named_as_outside_any_club() -> None:
+    ids = dict.fromkeys(
+        ["club", "season", "game", "member", "absence", "drop_in", "entry", "payment"],
+        1,
+    )
+    swept = {(m, _shape(p)) for m, p, _ in _attempts(ids, stranger_id=2)}
+
+    unaccounted = _api_routes() - swept - set(NOT_CLUB_SCOPED)
+
+    assert not unaccounted, sorted(unaccounted)

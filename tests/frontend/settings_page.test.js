@@ -204,3 +204,22 @@ test("the 含冷氣 pill carries the snowflake", () => {
   assert.match(html, /<svg/);
   assert.match(html, /含冷氣 \+\$30/);
 });
+
+/* ---- names are text, wherever they are drawn ---- */
+
+test("a first season's summary draws a member's name as text, not markup", async () => {
+  // A member chooses their own name, and the organizer is the one who
+  // opens this summary: markup in a name would run in the organizer's
+  // session. Found 2026-10-26 — the next-season branch escaped, this one
+  // did not.
+  const api = wizard("0");
+  const name = '<img src=x onerror="alert(1)">';
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => [{ id: 1, name }] });
+  await api.loadClubRoster();
+
+  api.renderConfirm();
+
+  const html = api.elements["confirm-diff"].innerHTML;
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /&lt;img/);
+});
