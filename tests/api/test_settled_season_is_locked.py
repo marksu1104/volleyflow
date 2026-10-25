@@ -110,7 +110,7 @@ def test_a_settled_season_refuses_every_change(client: TestClient) -> None:
 
 def test_the_refusal_says_why(client: TestClient) -> None:
     # The frontend turns this into Chinese by matching on the phrase —
-    # see translateApiError in shared.js — so the wording is part of the
+    # see translateApiError in js/common/errors.js — so the wording is part of the
     # contract, not only a message.
     season = _season_with_everything(client)
     client.post(f"/seasons/{season['id']}/settle", json={})

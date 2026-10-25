@@ -376,7 +376,7 @@ function inDays(days) {
         held: held ? JSON.stringify(held) : "（currentSeason 裡沒有這個人）",
       };
     }, GUEST);
-    // The third source, and the only authoritative one. shared.js caches
+    // The third source, and the only authoritative one. js/common/ caches
     // every GET in localStorage under vf_cache: and draws the cached copy
     // before the network answers (getJsonSWR), so currentSeason can be a
     // stale copy rather than what the API just said. Asking the API

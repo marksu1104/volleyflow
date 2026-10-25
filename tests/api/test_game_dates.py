@@ -154,7 +154,7 @@ def test_clearing_a_nights_own_venue_puts_it_back_on_the_seasons(
 ) -> None:
     # Null is a real instruction here, not a missing field: "back to the
     # same venue as every other night". The screen then falls back to the
-    # season's own — see gameLocation in shared.js.
+    # season's own — see gameLocation in js/common/season.js.
     season = _season(client)
     game = season["games"][0]
     client.patch(f"/games/{game['id']}", json={"location": "第二球場"})

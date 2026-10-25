@@ -3,7 +3,7 @@
 #     .\scripts\dev-web.ps1
 #
 # The pages have to come from a web server rather than being opened as
-# files: shared.js is loaded with a <script src>, and a file:// page
+# files: js/common/ is loaded with a <script src>, and a file:// page
 # can't fetch the API. Any static server does — this uses the one
 # Python already ships with.
 

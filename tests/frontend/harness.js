@@ -1,8 +1,8 @@
 // Runs the frontend's own code under `node --test`.
 //
-// There is no browser here and no build step, so shared.js and the
-// pages' inline scripts are loaded as source into a function scope with
-// the handful of browser globals they touch stubbed out. That is enough
+// There is no browser here and no build step, so the shared scripts and a
+// page's own script are loaded as source into a function scope with the
+// handful of browser globals they touch stubbed out. That is enough
 // to exercise the parts worth guarding: money arithmetic, who is on the
 // attendance list, what the cache does when the network disagrees.
 //
@@ -144,15 +144,21 @@ function sourceOf(file) {
   return fs.readFileSync(path.join(FRONTEND, file), "utf8");
 }
 
-/** The inline <script> of a page, minus the ones that only load a file. */
-function inlineScript(page) {
-  const html = sourceOf(page);
-  const blocks = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)];
-  return blocks.map((m) => m[1]).join("\n");
+/** The scripts a page loads from this site, in the order it loads them. */
+function scriptsOf(page) {
+  return [...sourceOf(page).matchAll(/<script src="(js\/[^"]+)"><\/script>/g)].map((m) => m[1]);
 }
 
-/** Loads shared.js (optionally with a page's script after it) and hands
- * back every function they declare, so tests can call them directly. */
+/** A page's own script, js/pages/<page>.js. */
+function pageScript(page) {
+  return sourceOf(`js/pages/${page.replace(/\.html$/, ".js")}`);
+}
+
+/** Loads the shared scripts (optionally with a page's script after them)
+ * and hands back every function they declare at the top level, so tests
+ * can call them directly. The shared scripts and their order are read
+ * from the page itself, member.html when none is given, so a test loads
+ * exactly what a browser would. */
 function load(page, options = {}) {
   const knobs = installGlobals();
   // A page reads its query string while its script is being evaluated
@@ -160,30 +166,18 @@ function load(page, options = {}) {
   // before the script runs, not set afterwards.
   if (options.search) globalThis.location.search = options.search;
 
-  // Which functions are in scope to return depends on where they were
-  // written: shared.js declares its own at no indent, while a page's
-  // script sits inside a <script> block and declares them at two. A
-  // single rule over the concatenation would sweep up nested helpers
-  // (loadClubs inside initClubAndSeasonPickers) that aren't in scope.
-  const declared = (src, indent) => [
-    ...src.matchAll(
-      new RegExp(`^${indent}(?:async\\s+)?function\\s+([A-Za-z_$][\\w$]*)`, "gm")
-    ),
+  // Top-level functions only: nested helpers are indented and out of scope.
+  const declared = (src) => [
+    ...src.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm),
   ].map((m) => m[1]);
 
-  const shared = sourceOf("shared.js");
-  const parts = [shared];
-  const names = declared(shared, "");
-  if (page) {
-    const script = inlineScript(page);
-    parts.push(script);
-    names.push(...declared(script, " {2}"));
-  }
-  const source = parts.join("\n");
+  const files = scriptsOf(page || "member.html").filter((f) => f.startsWith("js/common/"));
+  if (page) files.push(`js/pages/${page.replace(/\.html$/, ".js")}`);
+  const source = files.map(sourceOf).join("\n");
   const factory = new Function(
-    `${source}\nreturn { ${names.join(", ")} };`
+    `${source}\nreturn { ${declared(source).join(", ")} };`
   );
   return { ...factory(), ...knobs };
 }
 
-module.exports = { load, inlineScript, installGlobals, makeElement, makeSelect, makeStore };
+module.exports = { load, pageScript, scriptsOf, sourceOf, installGlobals, makeElement, makeSelect, makeStore };

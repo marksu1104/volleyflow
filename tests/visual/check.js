@@ -195,11 +195,19 @@ check(`按鈕文字在最窄手機上留有餘裕（文字寬 ÷ 可用寬 < ${F
   // with setContent: that page's base URL is about:blank, so its
   // relative — and file:// — script tags never load.
   const scratch = path.join(FRONTEND, "__visual-check.html");
+  // The shared scripts, in the order member.html loads them.
+  const commonScripts = [
+    ...fs.readFileSync(path.join(FRONTEND, "member.html"), "utf-8").matchAll(
+      /<script src="js\/common\/[^"]+"><\/script>/g
+    ),
+  ]
+    .map((m) => m[0])
+    .join("\n");
   fs.writeFileSync(
     scratch,
-    `<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="shared.css">
+    `<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="css/shared.css">
      <div class="wrap" style="max-width:390px"><div id="out"></div></div>
-     <script src="shared.js"></script>`,
+     ${commonScripts}`,
     "utf-8"
   );
   try {

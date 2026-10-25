@@ -2,7 +2,7 @@
 // long as the phone does.
 //
 // LINE's LIFF reference: an ID token "is valid for one hour after it is
-// issued" — and nothing about the SDK replacing it. shared.js used to
+// issued" — and nothing about the SDK replacing it. js/common/ used to
 // assume it did ("liff.getIDToken() already handles refreshing it"), so a
 // page left open for an hour sent a token LINE refused, and every action
 // on it failed as 「操作失敗（LINE rejected this ID token）」. That is how

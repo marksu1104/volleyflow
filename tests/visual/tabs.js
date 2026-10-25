@@ -6,7 +6,7 @@
 // not the database — the club id lived in localStorage, which every tab
 // of a browser shares, so the second tab rewrote it and the first tab
 // went on fetching the *other* club's roster under this club's season.
-// See rememberedId in shared.js.
+// See rememberedId in js/common/clubs.js.
 
 const { chromium } = require("playwright");
 

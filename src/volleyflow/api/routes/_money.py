@@ -216,7 +216,7 @@ def _club_balances_up_to_now(
     db: Session, player_id: int, today: date
 ) -> dict[int, Decimal]:
     """This player's balance in each club, up to that club's season in
-    play — the same season every page opens on (shared.js
+    play — the same season every page opens on (js/common/
     defaultSeasonId): the one under way, else the next to start, else
     the last to finish. A season booked further ahead has already
     charged its fee, but it is not due yet, and the 繳費通知 for this
@@ -262,7 +262,7 @@ def _club_balances_up_to_now(
 
 
 def _season_in_play(spans: dict[int, tuple[date, date]], today: date) -> int | None:
-    """shared.js defaultSeasonId, for the server: the season under way
+    """js/common/clubs.js defaultSeasonId, for the server: the season under way
     (the one ending soonest, if they overlap), else the next to start,
     else the last to finish."""
     running = [s for s, (first, last) in spans.items() if first <= today <= last]

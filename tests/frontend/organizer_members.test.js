@@ -2,11 +2,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { inlineScript } = require("./harness.js");
+const { pageScript } = require("./harness.js");
 
 const pagePath = path.join(__dirname, "..", "..", "frontend", "organizer-members.html");
 const html = fs.readFileSync(pagePath, "utf8");
-const script = inlineScript("organizer-members.html");
+const script = pageScript("organizer-members.html");
 
 function between(start, end) {
   const from = script.indexOf(start);

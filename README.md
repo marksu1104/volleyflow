@@ -382,7 +382,7 @@ endpoint is listed there and can be called from the page.
 
 A page takes its API from whatever host served it, so long as that host
 is this machine or a private network address; anywhere else is
-production (`apiBase()` in `shared.js`). Every page used to have the
+production (`apiBase()` in `js/common/api.js`). Every page used to have the
 production URL written into it, which meant local work silently edited
 the real club's books — there is a test that fails if one does it again.
 
@@ -470,7 +470,7 @@ cannot be opened by accident:
 |---|---|
 | `VOLLEYFLOW_DEV_LOGIN=1` must be set | the server's environment; production doesn't set it |
 | the token must look like `dev:<name>` | `api/auth.py` — nothing LINE issues looks like that |
-| the page must be served from this machine or the local network | `shared.js`; the deployed site never offers it |
+| the page must be served from this machine or the local network | `js/common/`; the deployed site never offers it |
 
 These identities are stored with a `dev:` prefix on `line_user_id`, so
 they can never collide with a real LINE account or attach themselves to

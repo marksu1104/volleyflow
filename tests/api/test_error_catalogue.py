@@ -1,7 +1,7 @@
 """No route can refuse a person in English without somebody noticing.
 
 The frontend turns API refusals into Chinese by matching fixed phrases
-(``translateApiError`` in ``shared.js``), and ``error_messages.test.js``
+(``translateApiError`` in ``js/common/errors.js``), and ``error_messages.test.js``
 checks that every phrase *in its own list* translates. Nothing checked
 that the list still covered the API, so a raise site added later simply
 reached the screen in English — six of them had, by 2026-09-25, including

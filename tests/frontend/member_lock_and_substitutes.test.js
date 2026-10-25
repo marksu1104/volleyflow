@@ -10,7 +10,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { load, makeElement } = require("./harness.js");
 
-// renderGameDetail lives in shared.js; member.html is simply the page that
+// renderGameDetail lives in js/common/game-sheet.js; member.html is simply the page that
 // loads cleanly in the harness.
 const { renderGameDetail } = load("member.html");
 

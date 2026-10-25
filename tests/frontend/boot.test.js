@@ -9,7 +9,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { load, inlineScript, makeElement } = require("./harness.js");
+const { load, pageScript, makeElement } = require("./harness.js");
 
 test("a rejected token says to open it in LINE", () => {
   const { signInFailureHtml } = load();
@@ -167,10 +167,9 @@ test("a non-member isn't blocked by this rule — the invite screen has them", (
   assert.equal(viewingOnlyReason(undefined, false), null);
 });
 
-// Only shared.js and shared.css carried a version, so a cached HTML file
-// served with a fresh script was a normal state — and any change living
-// in the markup was invisible until the page happened to expire. Twice
-// reported as "I can't see the thing you said you built".
+// The scripts carry a version and the HTML does not, so a cached page
+// served with fresh scripts is a normal state, and a change living in the
+// markup would stay invisible until the page expired.
 test("a page whose markup is older than its script reloads itself", () => {
   const { assertFreshBuild } = load();
   const replaced = [];
@@ -178,7 +177,7 @@ test("a page whose markup is older than its script reloads itself", () => {
   globalThis.document.querySelector = (sel) =>
     sel.includes("meta")
       ? { getAttribute: () => "aaaaaaaa" }
-      : { getAttribute: () => "shared.js?v=bbbbbbbb" };
+      : { getAttribute: () => "js/common/format.js?v=bbbbbbbb" };
 
   assertFreshBuild();
 
@@ -193,7 +192,7 @@ test("a page already on the current build is left alone", () => {
   globalThis.document.querySelector = (sel) =>
     sel.includes("meta")
       ? { getAttribute: () => "aaaaaaaa" }
-      : { getAttribute: () => "shared.js?v=aaaaaaaa" };
+      : { getAttribute: () => "js/common/format.js?v=aaaaaaaa" };
 
   assertFreshBuild();
 
@@ -209,7 +208,7 @@ test("a mismatch that survives the reload doesn't loop forever", () => {
   globalThis.document.querySelector = (sel) =>
     sel.includes("meta")
       ? { getAttribute: () => "aaaaaaaa" }
-      : { getAttribute: () => "shared.js?v=bbbbbbbb" };
+      : { getAttribute: () => "js/common/format.js?v=bbbbbbbb" };
 
   assertFreshBuild();
   assertFreshBuild();
@@ -350,7 +349,7 @@ test("no page's script writes the production URL into itself", () => {
   const offenders = fs
     .readdirSync(frontend)
     .filter((f) => f.endsWith(".html"))
-    .filter((f) => inlineScript(f).includes("onrender.com"));
+    .filter((f) => pageScript(f).includes("onrender.com"));
 
   assert.deepEqual(offenders, [], "these must use apiBase() instead");
 });

@@ -7,7 +7,7 @@ heights, a tab handler swallowing every control in the sheet, and a
 screen that flipped a change back for half a second before flipping it
 forward again — and each was found only by looking.
 
-These render the real `shared.js` and `shared.css` in a real browser and
+These render the real `frontend/js/` and `frontend/css/` in a real browser and
 assert on what can be measured, which is what separates "the markup looks
 right" from "the page is right".
 

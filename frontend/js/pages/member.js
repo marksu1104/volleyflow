@@ -1,0 +1,1919 @@
+// localhost -> the local API, anywhere else -> production. See apiBase.
+const API_BASE = apiBase();
+const LIFF_ID = "2011156233-6CouG6VI";
+let currentSeasonId = null;
+let currentSeason = null;
+let selectedGameId = null;
+let myPlayerId = null;
+let allClubs = [];
+let myClubs = [];
+/** True while 要看哪一隊 is on screen.
+ *
+ * Everything keyed to "the current club" has to stay quiet until one is
+ * chosen. Without this, a club id left in localStorage by an earlier
+ * visit makes renderManageButton unhide 會員／管理 and renderClubChip
+ * print that club's name in the top bar — while the page is still
+ * asking which club to look at. Reported 2026-09-22; the 「有時候」 in
+ * that report is exactly whether storage happened to hold a club the
+ * reader organises. */
+let pickingClub = false;
+// Whether myClubs came back from the server on this load, as opposed
+// to being the empty list this page starts with. The pickers are told,
+// because "no clubs" is only worth acting on when the server said so.
+let myClubsAreCurrent = false;
+let clubMembers = [];
+// People this viewer has brought before — the quick picks in the
+// substitute and signup sheets. See fetchMyGuests.
+let myGuests = [];
+// Set once an ?invite= token has been looked at, whether or not it
+// resolved to a real club — either way the page owes the visitor an
+// answer before the ordinary pickers run. See renderInviteScreen.
+let pendingInviteToken = null;
+// Only set when the token above actually resolved. Holds the page on
+// the invite instead of letting the picker pick a club they *are* in.
+let pendingInviteClubId = null;
+let pendingInviteClubName = null;
+// False until we know whether there's a season and who's on it. Guards
+// renderIntentAsk; see the comment there.
+let seasonLoaded = false;
+
+// A club's "連結加入" link carries ?invite=<token> — LIFF forwards
+// query params from the liff.line.me URL through to this page, so
+// opening a shared link picks the right club without the visitor
+// having to find it in a list themselves.
+//
+// The token stands in for the club's numeric id (see
+// src/volleyflow/api/invites.py): trying small integers in that
+// position used to be enough to read any club's name and join it, so
+// the id in a shared link is no longer guessable. Resolving it needs a
+// round trip, unlike the plain id this replaced — done here, before
+// initLiffIdentity, so it doesn't race initClubAndSeasonPickers reading
+// localStorage below the way putting it inside identity resolution
+// would. GET /invites/{token} needs no caller identity for exactly
+// this reason: a visitor with no LIFF session yet still needs to see
+// whose invite this is.
+//
+// Stripped from the URL right away so a later reload or club switch
+// doesn't keep snapping back here. Said before any request goes out,
+// so the very first paint is "載入中" rather than a bare page that
+// looks like it failed.
+showPageLoading(document.getElementById("hero-wrap"));
+
+const inviteResolved = (async () => {
+  const params = new URLSearchParams(location.search);
+  const token = params.get("invite");
+  if (!token) return;
+  // Only this param — not the whole query string, which is also where
+  // ?as= lives locally (see devIdentityName). Dropping the lot here
+  // used to strip that too, so opening an invite link with ?as= on it
+  // silently fell through to a real LINE login instead of the dev
+  // identity being asked for.
+  params.delete("invite");
+  const rest = params.toString();
+  history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : ""));
+  pendingInviteToken = token;
+  try {
+    const res = await fetch(`${API_BASE}/invites/${encodeURIComponent(token)}`);
+    if (!res.ok) return; // renderInviteScreen shows "找不到這個球隊"
+    const invite = await res.json();
+    pendingInviteClubId = String(invite.club_id);
+    pendingInviteClubName = invite.club_name;
+    rememberId(CLUB_STORAGE_KEY, pendingInviteClubId);
+  } catch (e) {
+    // Same outcome as an invalid token — nothing to join, nothing lost.
+  }
+})();
+
+const identityReady = (async function initIdentity() {
+  const identityEl = document.getElementById("identity");
+  const identified = await initLiffIdentity(API_BASE, LIFF_ID);
+  if (!identified) {
+    // Nothing on this page is readable without a verified identity any
+    // more — the roster and the games belong to a club, and a club is
+    // only visible to its members.
+    identityEl.textContent = "";
+    document.getElementById("name-row").hidden = true;
+    return null;
+  }
+  myPlayerId = identified.id;
+  document.getElementById("name-row").hidden = true;
+  document.getElementById("player-name").value = identified.name;
+  paintSelfAvatar(document.getElementById("avatar-btn"), identified);
+  identityEl.textContent = "";
+  await refreshMyClubs();
+  renderClubChip();
+  renderManageButton();
+  // Fetched now, alongside the season rather than after it — but not
+  // painted yet. Starting it late made the chip the last thing to
+  // appear on a finished page; painting it the moment it lands made it
+  // the *first*, which reads just as much like the page is still
+  // loading. It goes up with everything else, in render() below.
+  loadMyLedger();
+  // renderIntentAsk deliberately not called here: it needs to know
+  // whether you're already on this season's roster, and no season has
+  // loaded yet. Asking now both races the spinner (the question
+  // appearing over a still-loading page) and asks people who are
+  // already fixed members. It runs from loadSeason/renderNoSeason
+  // instead, once that's actually known.
+  return identified;
+})();
+
+document.getElementById("player-name").addEventListener("change", () => {
+  if (currentSeasonId) loadSeason(currentSeasonId);
+  else renderNoSeason(); // now that allClubs/myClubs are known, name the club
+});
+
+/* Where the LINE rich menu's buttons land. Each destination
+ * (member.html, ledger.html, report.html) is its own LIFF app, so no
+ * parameter chooses the page. `?pick=1` on the 場次與報名 column asks
+ * which club to look at even when this device remembers one, and is
+ * stripped from the URL after use so a reload does not ask again.
+ */
+
+identityReady.then((identified) => {
+  if (!identified) {
+    stopLoadingEscalation();
+    document.getElementById("hero-wrap").innerHTML = signInFailureHtml(identified);
+    return;
+  }
+  if (pendingInviteToken) {
+    renderInviteScreen();
+    return;
+  }
+  // Asked to join and not let in yet: that club is all there is to show.
+  const active = myClubs.filter((c) => c.status !== "pending");
+  const current = myClubs.find((c) => String(c.id) === String(currentClubId()));
+  if ((current && current.status === "pending") || (!active.length && myClubs.length)) {
+    if (!current || current.status !== "pending") {
+      rememberId(CLUB_STORAGE_KEY, String(myClubs[0].id));
+    }
+    renderPendingScreen();
+    return;
+  }
+  /* Choose the club before being shown one — but only when there is a
+   * choice to make.
+   *
+   * One club goes straight through: a tap that only ever has one
+   * answer is friction, not a choice. So does arriving with a club
+   * already named — ?club= is set by the money page's 前往這個球隊
+   * button, and asking again immediately after somebody chose there
+   * would be absurd. Stripped from the URL the same way ?invite= and
+   * ?open= are, so a reload does not keep re-applying it. */
+  const clubParams = new URLSearchParams(location.search);
+  const namedClub = clubParams.get("club");
+  // The rich menu's 「場次與報名」 entry is deliberately a choice when
+  // someone belongs to several clubs. A remembered club is normally a
+  // useful default, but a menu tap is an explicit request to choose.
+  // An explicit ?club= remains more specific and therefore wins.
+  const forceClubPicker = clubParams.get("pick") === "1";
+  clubParams.delete("pick");
+  if (namedClub) {
+    clubParams.delete("club");
+    const rest = clubParams.toString();
+    history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : ""));
+    rememberId(CLUB_STORAGE_KEY, namedClub);
+  } else if (forceClubPicker) {
+    // `pick` is an instruction for this one arrival, not persistent
+    // navigation state. Keeping it would show the chooser again on a
+    // refresh after the person had already made a selection.
+    const rest = clubParams.toString();
+    history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : ""));
+  }
+  /* A club already chosen on this device is an answer, not a guess, so
+   * asking again on every reload is friction rather than a choice —
+   * reported 2026-09-19 as 「每次重整就一定要重選一次隊伍」. The picker
+   * still owns the first visit, which is what change C was for; after
+   * that the app bar's club button opens the same list, so remembering
+   * here cannot strand anybody inside one club.
+   *
+   * Checked against `active` rather than trusted outright: a
+   * remembered club they have since left would otherwise send them
+   * straight to a screen they can no longer read. */
+  const remembered = currentClubId();
+  const remembersOneOfThese = active.some(
+    (c) => String(c.id) === String(remembered)
+  );
+  if (
+    !namedClub &&
+    (forceClubPicker || !remembersOneOfThese) &&
+    active.length > 1
+  ) {
+    renderClubPicker(active);
+    return;
+  }
+  startPickers();
+});
+
+/** An invite link for a club you're not in yet: the whole screen until
+ * it's answered, and answering is asking to join as one or the other. */
+function renderInviteScreen() {
+  stopLoadingEscalation();
+  document.getElementById("season-picker").hidden = true;
+  const wrap = document.getElementById("hero-wrap");
+  if (!pendingInviteClubId) {
+    wrap.innerHTML = emptyStateHtml(
+      "找不到這個球隊",
+      "這個邀請連結可能已經失效，或球隊已經被刪除。請向管理員確認。",
+      { label: "回到我的球隊", onclick: "forgetInvite()" }
+    );
+    return;
+  }
+  wrap.innerHTML = `
+    <div class="empty-state" style="text-align:left">
+      <h3>加入「${escapeHtml(pendingInviteClubName)}」？</h3>
+      <p>選一個送出申請。管理員核准之後，就能看到場次、請假和帳務。</p>
+      <div class="btn-row" style="margin-top:12px">
+        <button type="button" class="btn btn-primary" onclick="joinFromPrompt(true, this)">固定成員</button>
+        <button type="button" class="btn btn-quiet" onclick="joinFromPrompt(false, this)">臨打成員</button>
+      </div>
+    </div>
+  `;
+}
+
+/** Asked to join, not let in yet. Nothing in the club is readable until
+ * then, so this is the whole screen rather than a page of refusals. */
+function renderPendingScreen() {
+  stopLoadingEscalation();
+  const club = myClubs.find((c) => String(c.id) === String(currentClubId()));
+  document.getElementById("season-picker").hidden = true;
+  document.getElementById("hero-wrap").innerHTML =
+    emptyStateHtml(
+      `已送出申請：${club ? club.name : ""}`,
+      "管理員核准之後，這裡就會出現本季的場次。可以先關掉，之後從同一個連結再打開。",
+      { label: "重新整理", onclick: "location.reload()" }
+    ) +
+    /* The moment to ask. Someone who has just committed to a club and
+     * been told to wait has nothing else competing for their
+     * attention, and this screen disappears the moment they are
+     * approved — after which there is no prompt anywhere, which is
+     * why profile.html carries a permanent one too.
+     *
+     * It matters more than it looks: LINE refuses to push to anyone
+     * who has not added the Official Account, so an organizer who
+     * skipped it silently never receives the short-roster alert
+     * (docs/backlog.md §1). The LIFF consent screen offers to add it,
+     * but that offer is skippable.
+     *
+     * Deliberately not liff.getFriendship(): that is a LIFF API whose
+     * behaviour cannot be verified outside the LINE app, and guessing
+     * at those cost this project two outages on 2026-09-18. A plain
+     * link is honest — somebody who has already added it just opens
+     * the account and closes it again. */
+    `<div class="empty-state" style="margin-top:10px">
+      <p>通知只會發給已加入官方帳號的人。</p>
+      <a class="btn btn-quiet" href="${OFFICIAL_ACCOUNT_URL}">加入官方帳號</a>
+    </div>`;
+}
+
+/** The invite went nowhere. Drop it and boot normally, rather than
+ * leaving them looking at a club that doesn't exist with the app
+ * apparently broken. */
+function forgetInvite() {
+  forgetId(CLUB_STORAGE_KEY);
+  location.href = location.pathname;
+}
+
+/** Which club to look at, for somebody who belongs to several.
+ *
+ * The rows go up immediately: the club list already carries the name,
+ * the role and the balance, so nothing here waits on the network. Each
+ * club's next game needs two reads of its own, so those go out after
+ * the rows are on screen and fill in behind a spinner rather than
+ * holding the whole screen blank — a gap reads as a page that finished
+ * and found nothing.
+ */
+function renderClubPicker(clubs) {
+  stopLoadingEscalation();
+  // Set before anything paints, and read by renderManageButton and
+  // renderClubChip rather than acted on here: both of them run *again*
+  // after this screen is drawn (startPickers' onSeasonChange calls
+  // them), so hiding their elements from here would be undone a moment
+  // later and the fix would look right while doing nothing.
+  pickingClub = true;
+  // Repainted here, and this is the whole point: initIdentity already
+  // ran both of these — before this screen was decided on, while the
+  // flag was still false — and this branch returns without calling
+  // startPickers, so nothing else would ever run them again. Setting
+  // the flag alone changed nothing at all; the first attempt at this
+  // fix failed for exactly that reason, with both symptoms unmoved.
+  renderClubChip();
+  renderManageButton();
+  document.getElementById("season-picker").hidden = true;
+  document.getElementById("cal-label").hidden = true;
+  document.getElementById("month-cal").hidden = true;
+  const wrap = document.getElementById("hero-wrap");
+  wrap.innerHTML =
+    '<p class="section-label" style="margin-top:0">選擇球隊</p>' +
+    clubs
+      .map(
+        (c) => `
+        <button type="button" class="club-row" data-pick-club="${c.id}">
+          <i class="club-dot">${escapeHtml(firstGrapheme(c.name))}</i>
+          <span class="cr-name">
+            <!-- The name gets its own element so it can be truncated
+                 on its own. As a bare text node beside a block child
+                 it shared a box with the sub-line, and text-overflow
+                 has nothing to act on there. -->
+            <span class="cr-title">${escapeHtml(c.name)}</span>
+            <!-- The spinner inline rather than blockLoadingHtml():
+                 that returns a <div>, and a div inside this span is
+                 invalid nesting. It needs .spinner's display:inline-block
+                 to have any size at all — see shared.css. -->
+            <span class="cr-sub" id="pick-when-${c.id}"><i class="spinner sm"></i> 讀取中…</span>
+          </span>
+          ${c.role === "organizer" ? '<span class="role-tag">管理員</span>' : ""}
+          ${balanceBadgeHtml(c.balance)}
+        </button>`
+      )
+      .join("");
+
+  wrap.querySelectorAll("[data-pick-club]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      rememberId(CLUB_STORAGE_KEY, btn.dataset.pickClub);
+      // Cleared before startPickers, not after: its onSeasonChange
+      // callback is what repaints the nav and the chip, and it has to
+      // find the flag already down or the club just chosen stays
+      // invisible in the top bar.
+      pickingClub = false;
+      startPickers();
+    });
+  });
+
+  clubs.forEach((c) => fillClubNextGame(c.id));
+}
+
+/** One club's next game, read after the picker is already drawn.
+ *
+ * Two reads per club and only for the clubs on screen: the season list
+ * (newest first, so [0] is the one in play) and that season's games.
+ * There is no endpoint that answers "next game" directly — a season
+ * summary carries first and last date but not the next one.
+ *
+ * Says 已請假 or 已報名 only when the season's own records support it.
+ * A wrong answer about whether somebody is playing is worse than no
+ * answer, so anything else is left blank.
+ */
+async function fillClubNextGame(clubId) {
+  const el = document.getElementById(`pick-when-${clubId}`);
+  if (!el) return;
+  try {
+    const headers = authHeader();
+    const seasons = await (
+      await fetch(`${API_BASE}/clubs/${clubId}/seasons`, { headers })
+    ).json();
+    if (!Array.isArray(seasons) || !seasons.length) {
+      el.textContent = "尚未排定場次";
+      return;
+    }
+    const season = await (
+      await fetch(`${API_BASE}/seasons/${seasons[0].id}`, { headers })
+    ).json();
+
+    // Local date, not toISOString(): that converts to UTC and can name
+    // yesterday for anyone east of Greenwich, which is everybody here.
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const next = (season.games || []).find(
+      (g) => g.date >= today && g.status !== "cancelled"
+    );
+    if (!next) {
+      el.textContent = "本季已結束";
+      return;
+    }
+
+    const me = playerName();
+    const away = (next.absences || []).some((a) => a.player_name === me);
+    const playing =
+      (next.confirmed_drop_ins || []).some((d) => d.player_name === me) ||
+      (season.members || []).some((m) => m.name === me);
+    const mark = away ? "・已請假" : playing ? "・已報名" : "";
+    el.textContent = describeGameWhen(season, next) + mark;
+  } catch (e) {
+    // The name and the balance are already correct and useful on their
+    // own; a club whose games will not load keeps its row.
+    el.textContent = "";
+  }
+}
+
+function startPickers() {
+initClubAndSeasonPickers(
+  API_BASE,
+  (function () {
+    // initClubAndSeasonPickers wants real <select> elements — a hidden
+    // one here still drives its remembered-choice/localStorage logic,
+    // while the visible UI is the club-chip button and its sheet below.
+    const el = document.createElement("select");
+    el.hidden = true;
+    document.body.appendChild(el);
+    return el;
+  })(),
+  document.getElementById("season-picker"),
+  "vf_season",
+  (id) => {
+    stopLoadingEscalation();
+    renderClubChip();
+    renderManageButton();
+    if (id) loadSeason(id);
+    else renderNoSeason();
+  },
+  (e) => showPageError(document.getElementById("hero-wrap"), e.message),
+  null,
+  // refreshMyClubs has already read the same clubs, from the one
+  // endpoint that also says whether each membership has answered the
+  // fixed-member question. Handed over rather than fetched again —
+  // see initClubAndSeasonPickers.
+  { list: myClubs.filter((c) => c.status !== "pending"), fresh: myClubsAreCurrent }
+);
+}
+
+/** No season to show — either this player is in no club at all, or the
+ * club they're looking at hasn't started one. Both are normal states on
+ * a fresh install, and both need to say what happens next rather than
+ * leaving empty cards on screen. */
+function renderNoSeason() {
+  currentSeason = null;
+  seasonLoaded = true;
+  document.getElementById("cal-label").hidden = true;
+  document.getElementById("month-cal").hidden = true;
+  document.getElementById("month-cal").innerHTML = "";
+  document.getElementById("balance-chip").hidden = true;
+  document.getElementById("season-picker").hidden = true;
+
+  const clubId = currentClubId();
+  const club = allClubs.find((c) => String(c.id) === String(clubId));
+  const mine = myClubs.find((c) => String(c.id) === String(clubId));
+
+  let html;
+  if (!club) {
+    html = emptyStateHtml(
+      "尚未加入任何球隊",
+      "可由左上角的球隊按鈕建立球隊，或使用管理員提供的連結加入。"
+    );
+  } else if (mine && mine.role === "organizer") {
+    html = emptyStateHtml(
+      `「${club.name}」尚未開季`,
+      "先建立第一季：輸入場地費、場次日期和固定成員，系統會自動算出每個人的季費。",
+      { label: "建立第一季", href: "organizer-settings.html" }
+    );
+  } else {
+    html = emptyStateHtml(
+      `「${club.name}」尚未開季`,
+      "管理員開季之後，這裡就會出現本季的場次、你的請假狀態和帳務。"
+    );
+  }
+  document.getElementById("hero-wrap").innerHTML = html;
+  document.getElementById("hero-wrap").onclick = null;
+}
+
+/** GET /clubs is scoped to the caller now, so "every club" and "my
+ * clubs" are the same list — it just also carries my role in each.
+ * The one club that can be relevant without being mine is the target
+ * of an invite link, resolved from its token by `inviteResolved`
+ * above purely so the join prompt has a name to show. */
+async function refreshMyClubs() {
+  if (!myPlayerId) {
+    myClubs = [];
+    allClubs = [];
+    myClubsAreCurrent = false;
+    return;
+  }
+  // Everything on this page waits behind this one request — the
+  // pickers can't start until we know which clubs exist. Through
+  // getJsonSWR it answers from the last known list immediately, and
+  // corrects itself a moment later. The pickers are then handed this
+  // list rather than reading GET /clubs for themselves.
+  try {
+    await getJsonSWR(
+      `${API_BASE}/players/${myPlayerId}/clubs`,
+      (clubs) => {
+        myClubs = clubs;
+        allClubs = myClubs.slice();
+      },
+      { headers: authHeader() }
+    );
+    // Resolved, so the server answered (getJsonSWR only falls back to
+    // the cached copy silently, and that copy is the last thing the
+    // server did say). An empty list is then something to act on —
+    // forgetting a club that no longer exists — rather than a guess.
+    myClubsAreCurrent = true;
+  } catch (e) {
+    myClubs = [];
+    allClubs = [];
+    myClubsAreCurrent = false;
+  }
+
+  // Only a club the invite token names, and only if it isn't already
+  // mine, counts as an invite to answer. Already being a member means
+  // this is somebody opening their own club's link again — the
+  // ordinary picker already lands there through the remembered club in
+  // localStorage, and there's nothing left to ask. Not resolving at
+  // all (a bad or expired token) leaves pendingInviteClubId unset,
+  // which renderInviteScreen reads as "找不到這個球隊".
+  await inviteResolved;
+  if (pendingInviteClubId && myClubs.some((c) => String(c.id) === String(pendingInviteClubId))) {
+    pendingInviteClubId = null;
+    // Already in it: open the club, not an invite screen that could only say 找不到.
+    pendingInviteToken = null;
+  }
+  // The one club that can be listed without being mine: the invite this
+  // load is holding. `allClubs` was always exactly `myClubs.slice()`
+  // above, which meant the club sheet's own "邀請連結・尚未加入" label
+  // (see renderClubRows) could never actually be drawn — there was
+  // never a row it applied to. Found 2026-09-15 by tests/visual/join.js
+  // opening the club sheet mid-invite and finding nothing to tap.
+  if (pendingInviteClubId) {
+    allClubs.push({ id: Number(pendingInviteClubId), name: pendingInviteClubName });
+  }
+}
+
+/** The way into 球隊管理. It lives in the top bar rather than in the
+ * club sheet because an organizer needs it constantly and shouldn't
+ * have to remember it's two taps deep — and it's simply absent for
+ * everyone else, which is also how they learn the app has nothing
+ * hidden from them. */
+function renderManageButton() {
+  const clubId = currentClubId();
+  const mine = myClubs.find((c) => String(c.id) === String(clubId));
+  // A remembered club is not a chosen one. See pickingClub: this reads
+  // currentClubId(), so without the guard an id left over from an
+  // earlier visit decides the nav while 要看哪一隊 is still on screen.
+  const organizes = !pickingClub && !!(mine && mine.role === "organizer");
+  document.getElementById("context-switch").hidden = !organizes;
+  // People waiting to be let in: a count on the way in, and the way in leads to them.
+  const waiting = organizes ? mine.pending_count || 0 : 0;
+  const badge = document.getElementById("manage-badge");
+  badge.hidden = waiting === 0;
+  badge.textContent = String(waiting);
+  document.getElementById("manage-link").href = waiting ? "organizer-members.html" : "organizer.html";
+}
+
+function renderClubChip() {
+  const clubId = currentClubId();
+  // Same reasoning as renderManageButton: while 要看哪一隊 is up, the
+  // top bar must not already answer the question the page is asking.
+  const club = pickingClub
+    ? null
+    : allClubs.find((c) => String(c.id) === String(clubId));
+  document.getElementById("club-chip-name").textContent = club ? club.name : "選擇球隊";
+  document.getElementById("club-dot").textContent = club ? firstGrapheme(club.name) : "-";
+}
+
+
+/** Why this viewer may look but not act, or null if they may act.
+ *
+ * Returns the reason rather than a boolean because the two cases need
+ * different words, and showing the wrong one is most of what made
+ * this confusing: "waiting for the organizer" said to somebody who
+ * simply hasn't answered a question yet is nonsense.
+ */
+function viewingOnlyReason(membership, onRoster) {
+  if (!membership) return null; // not in this club at all
+  // The organizer runs the club — they add people to the roster, so
+  // they can never be the one waiting for it. Their own membership
+  // row has never had wants_fixed_membership set at all (create_club
+  // doesn't ask), which is how an earlier version of this rule locked
+  // the organizer out of their own club entirely.
+  if (membership.role === "organizer") return null;
+  // Already on the roster: they *are* a fixed member, whatever the
+  // column says. Everyone added before the question existed has a
+  // null here, and blocking them was the same bug seen from the
+  // members' side.
+  if (onRoster) return null;
+  // The one real case: they said they're a fixed member, and the
+  // organizer hasn't put them on the roster yet. Signing up as a
+  // drop-in would contradict what they just said, and taking leave
+  // from a roster they're not on means nothing.
+  if (membership.wants_fixed_membership === true) {
+    return "等待管理員把你加入本季名單，在那之前只能查看";
+  }
+  // An unanswered question is deliberately *not* a block. Signing up
+  // as a drop-in is a legitimate thing to do whether or not you
+  // intend to become a fixed member, and the cost of getting this
+  // wrong is asymmetric: someone signing up a moment early is
+  // harmless, locking a real member out of the app is not. The
+  // question still gets asked, just without holding anything hostage.
+  return null;
+}
+
+function currentViewingOnlyReason() {
+  const mine = myClubs.find((c) => String(c.id) === String(currentClubId()));
+  const onRoster = !!(
+    currentSeason && currentSeason.members.some((m) => m.name === playerName())
+  );
+  return viewingOnlyReason(mine, onRoster);
+}
+
+async function joinFromPrompt(wantsFixed, btn) {
+  const done = btn ? markBusy(btn) : () => {};
+  try {
+    await postJson(API_BASE, `/clubs/${currentClubId()}/join`, {
+      invite: pendingInviteToken,
+      wants_fixed_membership: wantsFixed,
+    });
+  } catch (e) {
+    // A second tap, or a second phone: the request is already in, which is the point.
+    if (!/^Already asked to join/.test(e.rawMessage || "")) {
+      done();
+      toast("申請沒有送出：" + e.message);
+      return;
+    }
+  }
+  pendingInviteClubId = null;
+  pendingInviteToken = null;
+  await refreshMyClubs();
+  renderClubChip();
+  renderPendingScreen();
+  done();
+}
+
+function openClubSheet() {
+  renderClubRows();
+  document.getElementById("club-sheet-backdrop").hidden = false;
+}
+function closeClubSheet() {
+  document.getElementById("club-sheet-backdrop").hidden = true;
+}
+document.getElementById("club-chip").addEventListener("click", openClubSheet);
+
+function renderClubRows() {
+  const clubId = currentClubId();
+  const rows = allClubs.map((c) => {
+    const mine = myClubs.find((m) => String(m.id) === String(c.id));
+    const roleTag = mine && mine.role === "organizer" ? '<span class="role-tag">管理員</span>' : "";
+    const manageLink = mine && mine.role === "organizer"
+      ? `<button type="button" class="club-row-manage" data-manage="${c.id}">管理 →</button>`
+      : "";
+    return `
+      <button type="button" class="club-row${String(c.id) === String(clubId) ? " on" : ""}" data-pick-club="${c.id}">
+        <i class="club-dot">${escapeHtml(firstGrapheme(c.name))}</i>
+        <span class="cr-name">${escapeHtml(c.name)}${
+          !mine
+            ? '<span class="cr-sub">邀請連結・尚未加入</span>'
+            : mine.status === "pending"
+              ? '<span class="cr-sub">等待管理員核准</span>'
+              : ""
+        }</span>
+        ${roleTag}${manageLink}
+      </button>
+    `;
+  });
+  document.getElementById("club-rows").innerHTML =
+    rows.join("") || '<div class="empty">尚未加入任何球隊</div>';
+}
+
+document.getElementById("club-rows").addEventListener("click", (e) => {
+  const manage = e.target.closest("[data-manage]");
+  if (manage) {
+    rememberId(CLUB_STORAGE_KEY, manage.dataset.manage);
+    location.href = "organizer.html";
+    return;
+  }
+  const row = e.target.closest("[data-pick-club]");
+  if (row) {
+    const id = row.dataset.pickClub;
+    rememberId(CLUB_STORAGE_KEY, id);
+    closeClubSheet();
+    // A club that isn't mine yet can only be the invite from this
+    // load. Go back through ?invite= so it lands on the join screen
+    // again with the link's token in hand — joining needs it. This used
+    // to write ?club=<id>, which nothing on the page ever read.
+    const mine = myClubs.some((c) => String(c.id) === String(id));
+    location.href =
+      mine || !pendingInviteToken
+        ? location.pathname
+        : `${location.pathname}?invite=${encodeURIComponent(pendingInviteToken)}`;
+  }
+});
+
+function promptJoinClub() {
+  toast(
+    "請向管理員索取「連結加入」的網址，用 LINE 打開即可自動加入該球隊。"
+  );
+}
+
+async function createClub() {
+  const name = prompt("請輸入球隊名稱");
+  if (!name || !name.trim()) return;
+  if (name.trim().length > CLUB_NAME_MAX) {
+    toast(`球隊名稱最多 ${CLUB_NAME_MAX} 個字`);
+    return;
+  }
+  try {
+    const club = await postJson(API_BASE, "/clubs", { name: name.trim() });
+    rememberId(CLUB_STORAGE_KEY, String(club.id));
+    location.reload();
+  } catch (e) {
+    toast("建立失敗：" + e.message);
+  }
+}
+
+document.getElementById("avatar-btn").addEventListener("click", () => {
+  location.href = "profile.html";
+});
+
+[
+  ["club-sheet-backdrop", closeClubSheet],
+  ["game-sheet-backdrop", closeGameSheet],
+].forEach(([id, close]) => {
+  const backdrop = document.getElementById(id);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) close();
+  });
+});
+document.querySelectorAll("[data-close-sheet]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.closeSheet === "club") closeClubSheet();
+    else if (btn.dataset.closeSheet === "signup") closeSignup();
+    else if (btn.dataset.closeSheet === "ledger") closeLedger();
+    else closeGameSheet();
+  });
+});
+
+const seasonLoad = staleGuard();
+
+async function loadSeason(seasonId) {
+  // The season picker fires onSeasonChange once from cache and once
+  // from the network, so two of these overlap on most page loads, and
+  // an absence recorded in between could be painted away by the older
+  // one landing last. See staleGuard.
+  const ticket = seasonLoad.take();
+  // What the screen knew when this read set off. If it has moved on by
+  // the time the answer lands, the answer is older than the screen and
+  // painting it would undo a tap — see localRevision in js/common/api.js.
+  const askedAt = localRevision();
+  currentSeasonId = seasonId;
+  const errorEl = document.getElementById("error");
+  errorEl.textContent = "";
+  try {
+    // Paints from the last-seen copy first, then corrects itself — see
+    // getJsonSWR. render() runs once or twice; it rebuilds everything
+    // it touches, so running twice is just a redraw.
+    await getJsonSWR(`${API_BASE}/seasons/${seasonId}`, (season) => render(season), {
+      headers: authHeader(),
+    });
+  } catch (e) {
+    if (seasonLoad.current(ticket)) errorEl.textContent = "連不上伺服器：" + e.message;
+  }
+
+  function render(season) {
+    if (!seasonLoad.current(ticket)) return;
+    // Somebody has changed something since this read went out, so it
+    // describes a season older than the one on screen. Dropping it is
+    // safe: every change queues a refresh of its own behind itself, so
+    // a newer answer is already on its way. Restricted to the season
+    // being shown, so switching season still paints on the first read.
+    if (currentSeason && currentSeason.id === season.id && localRevision() !== askedAt) {
+      return;
+    }
+    // Nothing has changed since the last paint — which is the normal
+    // case right after an optimistic update that the server agreed
+    // with. Redrawing identical data is invisible work that isn't
+    // invisible: it costs a frame and reads as a stutter.
+    if (currentSeason && JSON.stringify(season) === JSON.stringify(currentSeason)) {
+      seasonLoaded = true;
+      return;
+    }
+    const isNewSeason = !currentSeason || currentSeason.id !== season.id;
+    currentSeason = season;
+    seasonLoaded = true;
+    if (isNewSeason || !season.games.some((g) => g.id === selectedGameId)) {
+      const upcoming = season.games.find((g) => !describeDate(g.date).isPast) || season.games[season.games.length - 1];
+      selectedGameId = upcoming ? upcoming.id : null;
+    }
+    document.getElementById("season-picker").hidden = false;
+    document.getElementById("cal-label").hidden = false;
+    document.getElementById("month-cal").hidden = false;
+    renderHero(season);
+    renderCalendar();
+    renderSelectedGameDetail();
+    paintBalance();
+    // Independent of the season document, so it runs alongside the
+    // paint above rather than blocking it — and only repaints if it
+    // brought something new. It used to repaint unconditionally, so
+    // every tap drew the sheet, waited out a round trip, and drew the
+    // identical sheet again: the flicker reported as 瞬間跳針.
+    // (paintBalance was also called twice here, once before this and
+    // once after, for the same reason and with the same effect.)
+    refreshMyGuestsQuietly();
+    fetchClubMembers(API_BASE, currentClubId()).then((m) => {
+      if (JSON.stringify(m) === JSON.stringify(clubMembers)) return;
+      clubMembers = m;
+      renderSelectedGameDetail();
+    });
+  }
+}
+
+/** The "people you've brought before" quick picks, re-read in the
+ * background. Signing somebody up is the only thing that can add to
+ * this list, and the signup path no longer re-reads the season — which
+ * is where this used to be picked up. Repaints only on a real
+ * difference: drawing the identical sheet again is the flicker
+ * reported as 瞬間跳針. */
+function refreshMyGuestsQuietly() {
+  if (!currentClubId()) return;
+  fetchMyGuests(API_BASE, currentClubId())
+    .then((g) => {
+      if (JSON.stringify(g) === JSON.stringify(myGuests)) return;
+      myGuests = g;
+      renderSelectedGameDetail();
+    })
+    .catch(() => {});
+}
+
+function playerName() {
+  return document.getElementById("player-name").value.trim();
+}
+
+function selectGame(gameId) {
+  selectedGameId = gameId;
+  renderSelectedGameDetail();
+  // Deliberately does *not* open the roster sheet any more. Tapping a
+  // date now means "show me that game" — the card above the calendar
+  // switches to it and its buttons come with it, so taking leave or
+  // signing up for any date is two taps and no modal. The full
+  // 18-name roster is behind 名單, which is the rarer thing to want.
+  renderHero(currentSeason);
+  renderCalendar();
+  // Say that something changed. Two dates with the same headcount
+  // differ only in the date line, which is easy to miss on a phone.
+  const card = document.querySelector("#hero-wrap .hero");
+  if (card) {
+    card.classList.remove("card-swap");
+    void card.offsetWidth; // restart the animation rather than no-op
+    card.classList.add("card-swap");
+  }
+}
+
+function renderHero(season) {
+  const wrap = document.getElementById("hero-wrap");
+  const game =
+    season.games.find((g) => g.id === selectedGameId) ||
+    season.games.find((g) => !describeDate(g.date).isPast) ||
+    season.games[season.games.length - 1];
+  if (!game) {
+    wrap.innerHTML = '<div class="empty">本季尚無場次</div>';
+    return;
+  }
+  selectedGameId = game.id;
+  const deadlinePill = season.change_deadline_hours != null
+    ? `<span class="meta-pill">更動截止 <strong>開賽前 ${season.change_deadline_hours} 小時</strong></span>`
+    : "";
+  const mine = myActions(season, game);
+  // Everything about this date lives in this one card — including the
+  // way into the full roster. Floating those controls underneath made
+  // them read as page-level buttons that happened to be nearby.
+  wrap.innerHTML = renderGameHero(season, game, {
+    metaPills: [acPill(season, game), deadlinePill],
+    statusHtml: mine.status,
+    actionsHtml: mine.actions,
+    moreHtml: `<button type="button" class="hero-more" onclick="openGameSheet()">
+        <span>名單（${expectedAttendance(season, game)} 人）</span><span class="chev">›</span>
+      </button>`,
+  });
+  wrap.dataset.heroGameId = game.id;
+  wrap.onclick = null;
+}
+
+/** Which colour that day's dot gets. Ordered by what you most need to
+ * know at a glance: your own absence first, then whether the game can
+ * actually go ahead. */
+function calendarState(game) {
+  const name = playerName();
+  if (game.absences.some((a) => a.player_name === name)) return "away";
+  const playing = expectedAttendance(currentSeason, game);
+  if (playing >= currentSeason.capacity) return "full";
+  if (playing < currentSeason.minimum_roster) return "short";
+  return "";
+}
+
+function renderCalendar() {
+  if (!currentSeason) return;
+  renderMonthCalendar(
+    document.getElementById("month-cal"),
+    currentSeason.games,
+    selectGame,
+    { stateOf: calendarState, selectedId: selectedGameId, viewKey: currentSeason.id }
+  );
+}
+
+function renderSelectedGameDetail() {
+  const el = document.getElementById("game-detail");
+  const game = currentSeason && currentSeason.games.find((g) => g.id === selectedGameId);
+  if (!currentSeason || !game) {
+    el.innerHTML = '<div class="empty">本季尚無場次</div>';
+    return;
+  }
+  const deadlinePill = currentSeason.change_deadline_hours != null
+    ? `<span class="meta-pill">更動截止 <strong>開賽前 ${currentSeason.change_deadline_hours} 小時</strong></span>`
+    : "";
+  renderGameDetail(el, currentSeason, game, {
+    asMember: true,
+    heroMetaPills: [acPill(currentSeason, game), deadlinePill],
+    clubMembers,
+    myGuests,
+    viewerName: playerName(),
+    statusHtml: myActions(currentSeason, game).status,
+    actionsHtml: myActions(currentSeason, game).actions,
+    onAssignSubstitute: (absenceId, name, gender, target) =>
+      assignSubstitute(absenceId, name, gender, target),
+    // The viewer's own row only: this screen is for their own
+    // attendance, and the hero card's 請假 does the same thing.
+    onRecordAbsence: (name, btn) => recordAbsence(selectedGameId, btn),
+    canRecordAbsence: (m) => m.name === playerName(),
+    onRecordAbsenceWithSubstitute: (name, subName, gender, target) =>
+      recordAbsenceWithSubstitute(selectedGameId, subName, gender, target),
+    onCancelAbsence: (absenceId, btn) => cancelAbsence(absenceId, btn),
+    onLeaveWaitlist: (entryId, btn) => leaveWaitlist(entryId, btn),
+    onCancelSubstitute: (dropInId, btn) => cancelDropIn(dropInId, btn),
+    onRemoveDropIn: (dropInId, btn) => cancelDropIn(dropInId, btn),
+    canAssignSubstitute: (absence) => absence.player_name === playerName(),
+    // A member may undo their own signup and the guests they brought,
+    // and nobody else's. This is the member screen: it is not the
+    // place to take somebody else off the list, whatever role the
+    // viewer happens to hold elsewhere in the club. The server
+    // enforces the same rule — see _require_self_or_organizer.
+    canRemoveDropIn: (d) => d.signed_up_by_me === true,
+    canLeaveWaitlist: (w) => w.signed_up_by_me === true,
+  });
+}
+
+/** Opens the roster sheet with the substitute form for this absence
+ * already expanded, so 指定代打 on the card lands you where the
+ * picker actually is instead of on a list to hunt through. */
+function openSubstitutePicker(absenceId) {
+  openGameSheet();
+  const detail = document.getElementById("game-detail");
+  // The form lives among the absences, so the sheet has to be showing
+  // that group before it can be scrolled to — otherwise 指定代打 on
+  // the card opened a sheet that looked like it had ignored the tap.
+  showGameDetailTab(detail, "absent");
+  const form = detail.querySelector(`[data-sub-form="${absenceId}"]`);
+  if (form) {
+    form.hidden = false;
+    form.scrollIntoView({ block: "center" });
+  }
+}
+
+function openGameSheet() { document.getElementById("game-sheet-backdrop").hidden = false; }
+function closeGameSheet() { document.getElementById("game-sheet-backdrop").hidden = true; }
+
+/** Ends the same two-stage roster movement that started on the tap.
+ * Completion repaints first; the caller shows the success message in
+ * that same frame. A stale response cannot complete a newer tap. */
+function settleRosterChange(token, succeeded) {
+  const detail = document.getElementById("game-detail");
+  const changed = succeeded
+    ? completeGameDetailChange(detail, token)
+    : clearGameDetailChange(detail, token);
+  if (changed) repaintGame();
+}
+
+async function assignSubstitute(absenceId, name, gender, target) {
+  // The server decides who is displaced, so the button shows the wait.
+  // Once that answer arrives, however, the response already contains
+  // enough to move the rows; a second full-season read must not hold
+  // the finished action open.
+  return whileBusy(target, async () => {
+  let changeToken = null;
+  try {
+    // Noted before the call: the server answers with an id, and once
+    // the page reloads that person is off the roster and unnameable.
+    const game = currentSeason.games.find((g) => g.id === selectedGameId) || {};
+    const playingBefore = game.confirmed_drop_ins || [];
+    const absence = (game.absences || []).find((a) => a.id === absenceId);
+    changeToken = markGameDetailChange(
+      document.getElementById("game-detail"),
+      "absent",
+      absence ? [absence.player_name] : []
+    );
+    repaintGame();
+    const result = await postJson(API_BASE, `/absences/${absenceId}/substitute`, { player_name: name, gender }, "PUT");
+    const bumped = playingBefore.find((d) => d.player_id === result.displaced_player_id);
+    applySubstituteLocally(currentSeason, selectedGameId, absenceId, result, { name, gender });
+    settleRosterChange(changeToken, true);
+    // Somebody stepping back out is not a detail to hide: the queue had
+    // already filled this slot, and they are owed an explanation.
+    toast(
+      bumped ? `已指定 ${name} 代打，${bumped.player_name} 回到候補` : `已指定 ${name} 代打`,
+      "good"
+    );
+    refreshSeasonQuietly();
+  } catch (e) {
+    settleRosterChange(changeToken, false);
+    toast("指定代打失敗：" + e.message);
+  }
+  });
+}
+
+/** The hero card's 指定代打 while still playing: the substitute
+ * picker for the viewer's own slot, which takes leave and names them
+ * in one step. It lives in the game sheet, so that opens first. */
+function pickSubstituteAndLeave(gameId) {
+  if (selectedGameId !== gameId) selectGame(gameId);
+  openGameSheet();
+  openAbsenceWithSubstitute(document.getElementById("game-detail"), playerName());
+}
+
+/** 請假並指定代打 in one request — see POST /absences's `substitute`.
+ * Waits on the server, like assignSubstitute: whether the name is
+ * accepted is not something to guess at. */
+async function recordAbsenceWithSubstitute(gameId, subName, gender, target) {
+  const name = playerName();
+  return whileBusy(target, async () => {
+  let changeToken = null;
+  try {
+    changeToken = markGameDetailChange(
+      document.getElementById("game-detail"),
+      "absent",
+      [name]
+    );
+    repaintGame();
+    const result = await postJson(API_BASE, "/absences", {
+      player_name: name,
+      game_id: gameId,
+      substitute: { player_name: subName, gender },
+    });
+    applyAbsenceWithSubstituteLocally(currentSeason, gameId, name, result, {
+      name: subName,
+      gender,
+    });
+    settleRosterChange(changeToken, true);
+    toast(`已完成請假，由 ${subName} 代打`, "good");
+    refreshSeasonQuietly();
+  } catch (e) {
+    settleRosterChange(changeToken, false);
+    toast("請假並指定代打失敗：" + e.message);
+  }
+  });
+}
+
+async function cancelAbsence(absenceId, btn) {
+  const name = playerName();
+  const gameId = selectedGameId;
+  const before = currentSeason.games.find((g) => g.id === gameId);
+  const beforeAbsence = before && before.absences.find((a) => a.id === absenceId);
+  const releasedName = beforeAbsence && (beforeAbsence.covered_by || beforeAbsence.filled_by);
+  let changeToken = null;
+  const result = await optimistically(
+    (season) => {
+      for (const game of season.games) {
+        const released = releasedName
+          ? game.confirmed_drop_ins.find((d) => d.player_name === releasedName)
+          : null;
+        if (released) {
+          game.confirmed_drop_ins = game.confirmed_drop_ins.filter((d) => d !== released);
+          game.waitlist_entries.unshift({
+            id: -1,
+            player_id: released.player_id,
+            player_name: released.player_name,
+            gender: released.gender || null,
+            signed_up_by_me: released.signed_up_by_me === true,
+          });
+        }
+        game.absences = game.absences.filter(
+          (a) => a.id !== absenceId && !(a.id === -1 && a.player_name === name)
+        );
+      }
+      changeToken = markGameDetailChange(
+        document.getElementById("game-detail"),
+        "attending",
+        [name]
+      );
+    },
+    async () => {
+      // Resolved here, not at tap time. A tap that lands while 請假 is
+      // still in the air has no id yet — the old code gave up at that
+      // point and did nothing at all, which is what "按太快就跳錯誤，
+      // 而且不會變成取消請假" was. Waiting on the pending id costs
+      // nothing on screen, which has already shown the cancellation.
+      let id = absenceId;
+      if (!(id > 0)) id = await pendingAbsenceId[absenceKey(gameId, name)];
+      if (!(id > 0)) throw new Error("這筆請假尚未建立成功");
+      delete pendingAbsenceId[absenceKey(gameId, name)];
+      return postJson(API_BASE, `/absences/${id}/cancel`, {});
+    },
+    "取消請假失敗："
+  );
+  settleRosterChange(changeToken, !!result);
+  if (result) {
+    toast(
+      result.released_player_id && releasedName
+        ? `已取消請假；${releasedName} 已回到候補`
+        : "已取消請假",
+      "good"
+    );
+  }
+  // Only when somebody was actually released back to the queue — see
+  // needsRefreshAfter.
+  if (
+    needsRefreshAfter(result) ||
+    Boolean(releasedName) !== Boolean(result && result.released_player_id)
+  ) refreshSeasonQuietly();
+}
+
+/** Re-reads the season without blocking whatever the person does next.
+ * The screen is already right; this only catches what the optimistic
+ * update couldn't know — a waitlist promotion, somebody else's change.
+ *
+ * Queued behind every pending write and collapsed to one, or it
+ * overtakes a tap that hasn't been sent yet and paints it away. See
+ * coalescedRefresh. */
+const refreshSeasonQuietly = coalescedRefresh(() => loadSeason(currentSeasonId));
+
+/** What this viewer can do about this game, as a status line and a row
+ * of equal-weight buttons.
+ *
+ * Returned as two pieces rather than one blob because they sit in
+ * different places in the card: where you stand goes above the rule,
+ * what you can do about it goes below, and every button in that row is
+ * the same size whatever state you're in. The old version emitted a
+ * full-width danger button, a small left-aligned pill and a
+ * full-width outline button in a stack, which read as three unrelated
+ * controls.
+ */
+function myActions(season, game) {
+  const name = playerName();
+  const blocked = currentViewingOnlyReason();
+  if (blocked) {
+    return { status: `<div class="hero-status">${escapeHtml(blocked)}</div>`, actions: "" };
+  }
+  // Checked before the deadline, because it outranks it: the deadline
+  // is about one game and the organizer is exempt from it, while a
+  // settled season is closed to everybody for good. The server refuses
+  // all of it too (_require_season_open) — this is so the buttons are
+  // not on screen to be pressed in the first place. Offering an action
+  // and then explaining why it failed is a worse app than not
+  // offering it.
+  if (season.settled_at) {
+    return {
+      status: '<div class="hero-status">本季已結算，名單已確定</div>',
+      actions: "",
+    };
+  }
+  // past_deadline, not just locked: locked is never true for the
+  // organizer, and this is their own attendance screen like anybody's.
+  if (game.locked || game.past_deadline) {
+    return {
+      status: '<div class="hero-status">已過更動期限，本場無法再變更</div>',
+      actions: "",
+    };
+  }
+  if (!name) return { status: "", actions: "" };
+
+  const isMember = season.members.some((m) => m.name === name);
+  const myAbsence = game.absences.find((a) => a.player_name === name);
+  const myDropIn = game.confirmed_drop_ins.find((d) => d.player_name === name);
+  const myWaitIndex = game.waitlist_entries.findIndex((d) => d.player_name === name);
+  const playing = (isMember && !myAbsence) || !!myDropIn;
+  const full = isGameFull(season, game);
+
+  // Honest about what the button does: if you're already on the sheet,
+  // the signup panel is for the people you're bringing, not for you.
+  // One label, whether you are on the list already or not: the sheet
+  // is where you say who it is for. "＋ 代人報名候補" said the same
+  // thing twice and neither half plainly.
+  const bring = `<button type="button" class="hact${playing ? " quiet" : ""}" onclick="openSignup(${game.id})">${
+    full ? "＋ 報名候補" : "＋ 報名"
+  }</button>`;
+
+  if (isMember && myAbsence) {
+    if (myAbsence.covered_by) {
+      // The substitute has to go before the absence can: the server
+      // refuses to cancel leave someone is covering.
+      const covering = game.confirmed_drop_ins.find((d) => d.covering === name);
+      return {
+        status: `<div class="hero-status absent">已請假・由 ${escapeHtml(myAbsence.covered_by)} 代打</div>`,
+        actions:
+          (covering
+            ? `<button type="button" class="hact danger" onclick="cancelDropIn(${covering.id}, this)">取消代打</button>`
+            : "") + bring,
+      };
+    }
+    // Naming who covers for you is the thing you most want right
+    // after taking leave, and it used to live two taps deep inside
+    // 名單 — so it read as having been removed. It is also a
+    // different act from signing someone up: a 代打 takes *your*
+    // slot, a 報名 queues for whatever slot is free.
+    return {
+      status: '<div class="hero-status absent">本場已請假</div>',
+      actions:
+        `<button type="button" class="hact" onclick="openSubstitutePicker(${myAbsence.id})">指定代打</button>` +
+        `<button type="button" class="hact danger" onclick="cancelAbsence(${myAbsence.id}, this)">取消請假</button>` +
+        bring,
+    };
+  }
+  if (isMember) {
+    return {
+      status: "",
+      actions:
+        `<button type="button" class="hact danger" onclick="recordAbsence(${game.id}, this)">請假</button>` +
+        // Naming a substitute is taking leave, so it sits beside 請假
+        // rather than after it (proposal round 2, 2026-10-20).
+        `<button type="button" class="hact" onclick="pickSubstituteAndLeave(${game.id})">指定代打</button>` +
+        bring,
+    };
+  }
+  if (myDropIn) {
+    return {
+      status: '<div class="hero-status confirmed">本場已報名</div>',
+      actions:
+        `<button type="button" class="hact danger" onclick="cancelDropIn(${myDropIn.id}, this)">取消報名</button>` +
+        bring,
+    };
+  }
+  if (myWaitIndex >= 0) {
+    return {
+      status: `<div class="hero-status waiting">候補中・第 ${myWaitIndex + 1} 順位</div>`,
+      actions:
+        `<button type="button" class="hact danger" onclick="leaveWaitlist(${game.waitlist_entries[myWaitIndex].id}, this)">取消候補</button>` +
+        bring,
+    };
+  }
+  return { status: "", actions: bring };
+}
+
+
+
+/** Why this game costs more than the one beside it. Only on the games
+ * it applies to — a night with no air conditioning needs no
+ * explanation, its price is just the price. */
+// acPill and isGameFull now live in js/common/season.js — the organizer's sheet
+// shows the same game and has to say the same thing about it.
+
+/* ---- the signup sheet ----
+ * Its own sheet, not a form under the game, because a game's roster
+ * runs to 18 names and anything placed after it is effectively
+ * hidden. Everything the decision needs is on one screen: how full
+ * the game is, who you're bringing, and what it costs. */
+let suGame = null;
+let suPeople = [];
+
+function openSignup(gameId) {
+  suGame = currentSeason.games.find((g) => g.id === gameId);
+  if (!suGame) return;
+  // First row is you, pre-filled — the common case is "me plus one",
+  // and nobody should have to type their own name.
+  const alreadyIn =
+    suGame.confirmed_drop_ins.some((d) => d.player_name === playerName()) ||
+    suGame.waitlist_entries.some((w) => w.player_name === playerName()) ||
+    currentSeason.members.some((m) => m.name === playerName());
+  // Already playing: the list starts empty and you add whoever you are
+  // bringing. It used to start with one blank row, which the rebuilt
+  // sheet drew as a nameless entry sitting there as if somebody were
+  // signed up.
+  suPeople = alreadyIn
+    ? []
+    : [{ name: playerName(), gender: null, playerId: myPlayerId, self: true }];
+  document.getElementById("su-when").textContent = describeGameWhen(currentSeason, suGame);
+  renderSignup();
+  document.getElementById("signup-backdrop").hidden = false;
+}
+
+function describeGameWhen(season, game) {
+  const d = describeDate(game.date);
+  // This night's own time and venue when it has them — see
+  // gameStartTime in js/common/season.js.
+  const startsAt = gameStartTime(season, game);
+  const where = gameLocation(season, game);
+  const time = startsAt ? " " + startsAt.slice(0, 5) : "";
+  return `${d.month}/${d.day}（${d.weekday.slice(-1)}）${time}${where ? " · " + where : ""}`;
+}
+
+function closeSignup() { document.getElementById("signup-backdrop").hidden = true; }
+
+/** Who is already spoken for on this game — nobody may be added twice.
+ * Members on the roster who haven't taken leave count too. */
+function alreadyOnThisGame() {
+  return new Set(
+    currentSeason.members
+      .filter((m) => !suGame.absences.some((a) => a.player_name === m.name))
+      .map((m) => m.name)
+      .concat(suGame.confirmed_drop_ins.map((d) => d.player_name))
+      .concat(suGame.waitlist_entries.map((w) => w.player_name))
+      .concat(suPeople.map((p) => p.name))
+  );
+}
+
+/** One shared panel, opened on demand — not a list repeated under
+ * every row. Signing up three people used to draw the whole "people
+ * you've brought before" list three times on one phone screen. */
+async function addSignupPerson() {
+  const taken = alreadyOnThisGame();
+  const picked = await choosePerson(document.getElementById("su-picker"));
+  if (!picked) return;
+  if (taken.has(picked.name)) {
+    toast(`${picked.name} 已在本場名單上`);
+    return;
+  }
+  suPeople.push({ name: picked.name, gender: picked.gender, playerId: picked.id });
+  renderSignup();
+}
+
+function renderSignup() {
+  const playing = expectedAttendance(currentSeason, suGame);
+  const slots = Math.max(0, currentSeason.capacity - playing);
+  const confirmed = Math.min(suPeople.length, slots);
+  const waiting = suPeople.length - confirmed;
+  const share = Number(suGame.share ?? currentSeason.share_per_game);
+
+  // The panel is rebuilt each time so its candidate list excludes
+  // whoever has just been added.
+  const taken = alreadyOnThisGame();
+  renderPersonPicker(document.getElementById("su-picker"), {
+    title: "新增報名對象",
+    hint: "選過去報名過的人，可沿用同一筆紀錄與帳務。",
+    candidates: myGuests
+      .filter((g) => !taken.has(g.name))
+      .map((g) => ({ id: g.id, name: g.name, gender: g.gender, note: `報名過 ${g.times} 次` })),
+  });
+
+  document.getElementById("su-now").textContent = playing + confirmed;
+  document.getElementById("su-cap").textContent = currentSeason.capacity;
+  document.getElementById("su-note").textContent =
+    waiting > 0 ? `${waiting} 位排候補` : `${slots - confirmed} 位空位`;
+  const pct = (n) => (n / currentSeason.capacity) * 100 + "%";
+  document.getElementById("su-bar-now").style.width = pct(playing);
+  document.getElementById("su-bar-add").style.width = pct(confirmed);
+  document.getElementById("su-bar-over").style.width = pct(waiting);
+
+  document.getElementById("su-who").innerHTML = suPeople.length
+    ? suPeople
+        .map((p, i) => {
+          const wait = playing + i >= currentSeason.capacity;
+          return `
+            <div class="su-row${wait ? " wait" : ""}">
+              <span class="n">${i + 1}</span>
+              <span class="su-name">${escapeHtml(p.name)}${p.self ? "（你）" : ""}</span>
+              ${genderTag(p.gender)}
+              ${wait ? '<span class="su-wait-tag">候補</span>' : ""}
+              ${p.self ? "" : `<button type="button" class="su-drop" data-drop="${i}" aria-label="移除">✕</button>`}
+            </div>`;
+        })
+        .join("")
+    : '<div class="empty" style="padding:14px 0">尚未加入任何人</div>';
+
+  const amount = document.getElementById("su-amt");
+  const label = document.getElementById("su-total-label");
+  const breakdown = document.getElementById("su-breakdown");
+  // One grammar in every state: 合計, a figure, and a breakdown under
+  // it. Reported as 「我在我自己球隊的報名介面跟別人球隊的報名介面長的不
+  // 一樣，一個會算錢、一個寫候補多少人」 — and it was not mainly about
+  // the game being full. openSignup starts this list empty for anyone
+  // already playing (your own club, where you are a fixed member) and
+  // pre-filled with you for anyone who is not (somebody else's club),
+  // so the two sheets opened in different states; the total bar then
+  // swapped its label, the meaning of its figure, its type size and
+  // its colour between them, which is what made one read as a
+  // different screen rather than the same one further along.
+  //
+  // So this slot is always money. The queue is said twice above it
+  // already — 「N 位排候補」 on the capacity line, and a 候補 tag on each
+  // queued row — so it belongs in the breakdown, never in place of the
+  // total.
+  label.textContent = "合計";
+  if (suPeople.length === 0) {
+    // Nobody chosen yet, so there is no figure to show. "$0" is a
+    // price, and it reads as "this costs nothing" — the opposite of
+    // true on a game that charges a share per person.
+    amount.textContent = "—";
+    breakdown.textContent = "先新增報名對象";
+  } else if (confirmed === 0 && waiting > 0) {
+    // Everybody is queued, so nothing is owed now. Still not "$0",
+    // for the same reason as above.
+    amount.textContent = "—";
+    breakdown.textContent = `候補 ${waiting} 位・遞補上才收，每位 $${share}`;
+  } else {
+    amount.textContent = "$" + confirmed * share;
+    breakdown.textContent = waiting
+      ? `${confirmed} 位 × $${share}；候補 ${waiting} 位遞補上才收`
+      : `${confirmed} 位 × $${share}`;
+  }
+  const go = document.getElementById("su-go");
+  go.textContent = confirmed === 0 ? "加入候補" : "確認報名";
+  go.disabled = suPeople.length === 0;
+}
+
+document.getElementById("su-add").addEventListener("click", addSignupPerson);
+
+document.getElementById("su-who").addEventListener("click", (e) => {
+  const drop = e.target.closest("[data-drop]");
+  if (!drop) return;
+  suPeople.splice(Number(drop.dataset.drop), 1);
+  renderSignup();
+});
+
+/** Signing up, drawn before the network rather than after it.
+ *
+ * This used to send the write, wait for it, and then reload the whole
+ * season before anything moved — two round trips of a sheet closing
+ * onto an unchanged list, reported as 「報名候補後名單沒有立即反應，
+ * 更新很慢」. Everything needed to draw the answer is already on
+ * screen: renderSignup has just told the person which of them get a
+ * slot and which go on the queue, using the same capacity arithmetic
+ * the server uses, in the same list order the server spends capacity
+ * in.
+ *
+ * So the guess is drawn immediately and checked against the answer.
+ * If the server agreed — the ordinary case — the rows only gain their
+ * real ids and nothing is re-read. If it disagreed, somebody else
+ * moved in between and only then is the season re-read. */
+document.getElementById("su-go").addEventListener("click", async () => {
+  if (!suPeople.length) return toast("請先新增報名對象");
+  for (const p of suPeople) {
+    if (!p.playerId && !p.gender) return toast(`請幫「${p.name}」選性別`);
+  }
+  const gameId = suGame.id;
+  const people = suPeople.map((p) => ({
+    player_name: p.name.trim(),
+    gender: p.gender,
+    player_id: p.playerId,
+  }));
+  // Closed first: the tap is finished and the sheet has nothing left
+  // to show. Leaving it up until the write returned was most of what
+  // made this feel slow.
+  closeSignup();
+
+  let guessHeld = true;
+  let confirmedNames = [];
+  let queuedNames = [];
+  let changeToken = null;
+  const result = await optimistically(
+    (season) => {
+      const game = season.games.find((g) => g.id === gameId);
+      if (!game) return;
+      let free = Math.max(0, season.capacity - expectedAttendance(season, game));
+      confirmedNames = [];
+      queuedNames = [];
+      for (const p of people) {
+        if (free > 0) {
+          game.confirmed_drop_ins.push({
+            id: -1,
+            player_id: p.player_id || -1,
+            player_name: p.player_name,
+            gender: p.gender || null,
+            covering: null,
+            // Guessed by the same rule the server applies: null when
+            // you signed yourself up, your own name otherwise. The
+            // roster's 「X 報名」 note was missing until a full reload
+            // without this — the row drawn here is a frontend-built
+            // object, and the reconcile below writes back only the
+            // real ids, never this field.
+            brought_by_name: p.player_name === playerName() ? null : playerName(),
+            signed_up_by_me: true,
+          });
+          confirmedNames.push(p.player_name);
+          free -= 1;
+        } else {
+          game.waitlist_entries.push({
+            id: -1,
+            player_name: p.player_name,
+            gender: p.gender || null,
+            brought_by_name: p.player_name === playerName() ? null : playerName(),
+            signed_up_by_me: true,
+          });
+          queuedNames.push(p.player_name);
+        }
+      }
+      changeToken = markGameDetailChange(
+        document.getElementById("game-detail"),
+        queuedNames.length ? "queued" : "attending",
+        queuedNames.length ? queuedNames : confirmedNames
+      );
+    },
+    () => postJson(API_BASE, `/games/${gameId}/drop-ins`, { people }),
+    "報名沒有送出：",
+    (batch, season) => {
+      const game = season.games.find((g) => g.id === gameId);
+      if (!game) return;
+      const results = (batch && batch.results) || [];
+      const placedHere = game.confirmed_drop_ins.filter((d) => d.id === -1);
+      const queuedHere = game.waitlist_entries.filter((w) => w.id === -1);
+      const confirmed = results.filter((r) => r.status === "confirmed");
+      const queued = results.filter((r) => r.status === "waitlisted");
+      // A displacement moves somebody this screen can't name, so that
+      // is a re-read whatever else matched.
+      guessHeld =
+        placedHere.length === confirmed.length &&
+        queuedHere.length === queued.length &&
+        !results.some((r) => r.displaced_player_id);
+      if (!guessHeld) return;
+      placedHere.forEach((row, i) => {
+        row.id = confirmed[i].id;
+        row.player_id = confirmed[i].player_id;
+      });
+      queuedHere.forEach((row, i) => {
+        row.id = queued[i].id;
+      });
+    }
+  );
+  settleRosterChange(changeToken, !!result);
+  if (result) {
+    const confirmedCount = result.results.filter((item) => item.status === "confirmed").length;
+    const queuedCount = result.results.filter((item) => item.status === "waitlisted").length;
+    const message =
+      confirmedCount && queuedCount
+        ? `報名完成：${confirmedCount} 位出席，${queuedCount} 位候補`
+        : queuedCount
+          ? queuedCount === 1
+            ? "已加入候補名單"
+            : `${queuedCount} 位已加入候補名單`
+          : confirmedCount === 1
+            ? "報名成功，已加入出席名單"
+            : `報名成功，${confirmedCount} 位已加入出席名單`;
+    toast(message, "good");
+  }
+  // A signup can settle somebody else's absence, and the guess above
+  // cannot know it. The server pairs unarranged drop-ins to unfilled
+  // absences in FIFO order (settlement.covered_absences), so the fee
+  // this person just took on may be the thing that refunds a member
+  // who is away — and that shows up only as `filled_by` on the
+  // *absence*, which the reconcile above never writes. It patches the
+  // new rows' ids and nothing else, because which absence the server
+  // picked is not knowable from here.
+  //
+  // So the estimate sat at $0 until a full reload, and the card went
+  // on saying nobody had filled the slot. Reported 2026-09-23:
+  // 「請假完馬上報名別人臨打，預估帳務要重整頁面才發現」.
+  //
+  // Re-read only when there is an unfilled absence to settle — the
+  // ordinary signup, on a game nobody is away from, keeps the fast
+  // path it was written for. Deliberately not "always re-read": that
+  // would undo the whole point of the guess and put a round trip back
+  // on every signup.
+  //
+  // Deciding it here rather than reproducing the FIFO pairing locally
+  // is the same rule as renderRefundEstimate: the server owns that
+  // decision, and a second implementation of it is how two screens
+  // start disagreeing about money.
+  const signedGame = currentSeason && currentSeason.games.find((g) => g.id === gameId);
+  const mayHaveSettledAnAbsence =
+    !!signedGame && (signedGame.absences || []).some((a) => !a.filled_by);
+  if (!result || !guessHeld || mayHaveSettledAnAbsence) refreshSeasonQuietly();
+  else refreshMyGuestsQuietly();
+});
+
+/** Your money, in the row that already names the season — a section
+ * of its own at the bottom cost about 80px, which was most of the
+ * reason a phone had to scroll to reach the calendar.
+ *
+ * Two lines, because "已結清" on its own says nothing. The label is
+ * deliberately not 「本季」: get_player_ledger spans every season in
+ * the club (a refund can be carried forward), so the
+ * old 本季餘額 card was labelling a cross-season figure wrongly.
+ *
+ * Keyed off the viewer's own player id rather than the season roster:
+ * a drop-in has a balance too, and looking them up in season.members
+ * meant the one group who pays cash on the day could never see what
+ * they owed.
+ *
+ * Read through getJsonSWR so it paints from the last known figure
+ * immediately. It used to run last, after the season and the roster,
+ * and its own request on top of those — several seconds of the chip
+ * simply not being there, on a page that was otherwise finished.
+ */
+let myLedger = null;
+let ledgerReady = null;
+
+/** Fetches the ledger without touching the screen. Separate from the
+ * paint so the chip can go up in the same frame as the card and the
+ * calendar — see the call in initIdentity. */
+function loadMyLedger() {
+  if (!myPlayerId || !currentClubId()) return Promise.resolve();
+  ledgerReady = getJsonSWR(
+    `${API_BASE}/clubs/${currentClubId()}/players/${myPlayerId}/ledger`,
+    (ledger) => {
+      myLedger = ledger;
+      // Only repaint here if the page has already drawn once; the
+      // first paint comes from render().
+      if (seasonLoaded) paintBalance();
+    },
+    { headers: authHeader() }
+  ).catch(() => {});
+  return ledgerReady;
+}
+
+function paintBalance() {
+  const chip = document.getElementById("balance-chip");
+  if (!myLedger) {
+    chip.hidden = true;
+    return;
+  }
+  // Up to the season on screen — never a season booked for later.
+  const n = ledgerUpTo(myLedger, currentSeason).total;
+  chip.innerHTML = `
+    <span class="bc-label">我的帳務</span>
+    <span class="bc-value">${
+      n === 0 ? "已結清" : n > 0 ? `餘額 +$${n}` : `應繳 $${Math.abs(n)}`
+    }<span class="bc-chev">›</span></span>`;
+  chip.className = "balance-chip " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
+  chip.hidden = false;
+}
+
+/** What your money looks like right now, not a journal of every entry.
+ *
+ * The first version listed raw ledger rows newest-first — 季費 −$3055,
+ * 收付款 +$3055, 臨打費 −$235 — which is the accountant's view and
+ * answers a question nobody asked. What a member wants to know is how
+ * many games they signed up for, how many they took leave from, and
+ * therefore what they owe or are owed.
+ *
+ * So the counts come from the season (what actually happened to you)
+ * and the amounts come from the ledger (what it cost). Anything on the
+ * ledger these lines don't account for shows as 其他 rather than being
+ * silently dropped — the lines have to add up to the headline, or the
+ * screen is lying about money.
+ */
+function openLedger() {
+  document.getElementById("ledger-backdrop").hidden = false;
+  const wrap = document.getElementById("lg-entries");
+  const total = document.getElementById("lg-total");
+  const club = allClubs.find((c) => String(c.id) === String(currentClubId()));
+  document.getElementById("lg-sub").textContent = club ? club.name : "";
+
+  if (!myLedger) {
+    total.className = "lg-total";
+    total.textContent = "";
+    wrap.innerHTML = '<div class="empty">載入中…</div>';
+    return;
+  }
+
+  // Up to the season on screen — never a season booked for later.
+  const n = ledgerUpTo(myLedger, currentSeason).total;
+  total.className = "lg-total " + (n === 0 ? "even" : n > 0 ? "owed" : "owe");
+  total.innerHTML =
+    `<span>${n === 0 ? "目前已結清" : n > 0 ? "應退給你" : "你應繳"}</span>` +
+    `<strong>$${Math.abs(n)}</strong>`;
+
+  wrap.innerHTML = summaryRows(myLedger, currentSeason, playerName())
+    .map(
+      (r) => `
+        <div class="lg-row">
+          <span class="lg-what">${escapeHtml(r.label)}${
+            r.detail ? `<span class="lg-detail">${escapeHtml(r.detail)}</span>` : ""
+          }</span>
+          <span class="lg-amt ${r.amount >= 0 ? "plus" : "minus"}">${
+            r.amount >= 0 ? "+" : "−"
+          }$${Math.abs(r.amount)}</span>
+        </div>`
+    )
+    .join("");
+
+  renderRefundEstimate();
+}
+
+/** What this season would refund if it settled right now.
+ *
+ * A member's absence is refunded only when somebody actually fills the
+ * slot (CLAUDE.md 2.4), and that money lands on the ledger at
+ * settlement — so mid-season the breakdown above shows the season fee
+ * charged in full and says nothing about what is coming back. A member
+ * who took two nights off and had both covered is owed money that no
+ * screen mentions.
+ *
+ * Computed here rather than asked for: the server has already decided
+ * which absences refund, and says so in `filled_by` — "having a name
+ * here is what makes the share come back", per AbsenceDetailOut. So
+ * this adds up the shares of games where this member is away and
+ * somebody is standing in. It deliberately does not re-run the FIFO
+ * pairing from settlement.covered_absences: that is the server's
+ * decision, and a second implementation of it is how two screens start
+ * disagreeing about money.
+ *
+ * Read fresh from currentSeason on every open, never cached. Arranging
+ * or cancelling a substitute writes filled_by locally before the server
+ * answers (see optimisticRunner), and a cached figure would contradict
+ * the card the reader just tapped.
+ *
+ * Never added to the headline. That figure is ledger.balance — money
+ * that exists — and summaryRows reconciles its rows against it. An
+ * estimate folded in would invent an 其他 row worth exactly the
+ * estimate; the sheet would be lying about money.
+ */
+function renderRefundEstimate() {
+  const box = document.getElementById("lg-estimate");
+  const me = playerName();
+  if (!currentSeason || !me) {
+    box.hidden = true;
+    return;
+  }
+  // A refunded-and-cancelled game costs nobody anything, so there is
+  // nothing to give back for it — same exclusion settle_member makes.
+  const covered = (currentSeason.games || []).filter(
+    (g) =>
+      g.status !== "cancelled_refunded" &&
+      (g.absences || []).some((a) => a.player_name === me && a.filled_by)
+  );
+  const amount = covered.reduce((sum, g) => sum + Number(g.share || 0), 0);
+  box.hidden = false;
+  box.innerHTML =
+    '<span class="est-what">預估退費' +
+    `<span class="est-note">${
+      amount > 0
+        ? `${covered.length} 場請假有人遞補，結算後才入帳。補的人取消就會取消退費。`
+        : "請假且有人遞補才退費，結算後入帳。"
+    }</span></span>` +
+    `<span class="est-amt${amount > 0 ? "" : " none"}">${
+      amount > 0 ? `+$${amount}` : "$0"
+    }</span>`;
+}
+
+// summaryRows moved to js/common/season.js on 2026-09-18: the all-clubs money
+// page needs the same breakdown, and a second copy of it is how two
+// screens start disagreeing about what somebody owes.
+
+function closeLedger() { document.getElementById("ledger-backdrop").hidden = true; }
+/**
+ * Applies the change to what's on screen straight away, then sends it.
+ * A round trip to a sleepy free-tier backend is long enough that a tap
+ * with no visible result reads as "nothing happened" and gets tapped
+ * again. The server is still the authority: on failure we put the
+ * screen back and say why, and every success re-reads it anyway.
+ */
+/** Everything that shows the selected game's state. The calendar
+ * belongs here too: taking leave changes that day's dot, and leaving
+ * it out let the card say 已請假 while the calendar still showed the
+ * day as ordinary until the server answered. */
+function repaintGame() {
+  renderHero(currentSeason);
+  renderCalendar();
+  renderSelectedGameDetail();
+}
+
+// Shared with the organizer's screen — see optimisticRunner. The
+// refresh afterwards is deliberately not awaited here: the screen is
+// already correct, and holding the action open across a second round
+// trip is what made a finished tap feel unfinished.
+const optimistically = optimisticRunner({
+  getState: () => currentSeason,
+  setState: (s) => {
+    currentSeason = s;
+  },
+  repaint: () => repaintGame(),
+});
+
+/** The real absence id, once the server has issued one, keyed by game
+ * and player. Tapping 取消請假 before 請假 has come back used to
+ * silently do nothing (`if (absenceId < 0) return`), which is exactly
+ * the "按太快就沒反應" report. Now the cancel waits on this instead. */
+const pendingAbsenceId = {};
+
+function absenceKey(gameId, name) {
+  return `${gameId}:${name}`;
+}
+
+async function recordAbsence(gameId, btn) {
+  const name = playerName();
+  const key = absenceKey(gameId, name);
+  let promotedName = null;
+  let changeToken = null;
+  let announceId;
+  pendingAbsenceId[key] = new Promise((resolve) => {
+    announceId = resolve;
+  });
+  const result = await optimistically(
+    (season) => {
+      const game = season.games.find((g) => g.id === gameId);
+      const promoted = game.waitlist_entries.shift() || null;
+      promotedName = promoted ? promoted.player_name : null;
+      if (promoted) {
+        game.confirmed_drop_ins.push({
+          id: -1,
+          player_id: promoted.player_id || -1,
+          player_name: promoted.player_name,
+          gender: promoted.gender || null,
+          covering: null,
+          signed_up_by_me: promoted.signed_up_by_me === true,
+        });
+      }
+      // A placeholder id: the row it draws is replaced by the real one
+      // as soon as the refresh comes back.
+      game.absences.push({
+        id: -1,
+        player_name: name,
+        covered_by: null,
+        filled_by: promotedName,
+      });
+      changeToken = markGameDetailChange(
+        document.getElementById("game-detail"),
+        "absent",
+        [name]
+      );
+    },
+    async () => {
+      const created = await postJson(API_BASE, "/absences", {
+        player_name: name,
+        game_id: gameId,
+      });
+      announceId(created.id);
+      return created;
+    },
+    "請假失敗：",
+    (created, season) => {
+      // A promotion off the waitlist changes people we can't invent
+      // here, so leave the placeholder in place and let the refresh
+      // find the difference and redraw.
+      if (created.promoted_from_waitlist) return;
+      for (const game of season.games) {
+        for (const a of game.absences) if (a.id === -1) a.id = created.id;
+      }
+    }
+  );
+  if (!result) {
+    announceId(null); // it failed; unblock anything waiting on the id
+    delete pendingAbsenceId[key];
+  }
+  settleRosterChange(changeToken, !!result);
+  if (result) {
+    toast(
+      result.promoted_from_waitlist && promotedName
+        ? `已完成請假；${promotedName} 已由候補遞補`
+        : "已完成請假",
+      "good"
+    );
+  }
+  // Only when somebody was actually promoted off the queue — see
+  // needsRefreshAfter. Otherwise the screen already matches the server
+  // and the second round trip is pure waiting.
+  if (
+    needsRefreshAfter(result) ||
+    Boolean(promotedName) !== Boolean(result && result.promoted_from_waitlist)
+  ) refreshSeasonQuietly();
+}
+
+
+/** A queue place is a different row in a different table from a
+ * confirmed signup, and the two id sequences overlap. Sending a
+ * waitlist id to /drop-ins/{id}/cancel — which this used to do —
+ * either 404s or cancels an unrelated person's signup. */
+async function leaveWaitlist(entryId, btn) {
+  if (entryId < 0) return;
+  let changeToken = null;
+  const result = await optimistically(
+    (season) => {
+      for (const game of season.games) {
+        game.waitlist_entries = game.waitlist_entries.filter((w) => w.id !== entryId);
+      }
+      changeToken = markGameDetailChange(
+        document.getElementById("game-detail"),
+        "queued",
+        []
+      );
+    },
+    () => postJson(API_BASE, `/waitlist/${entryId}/cancel`, {}),
+    "取消候補失敗："
+  );
+  settleRosterChange(changeToken, !!result);
+  if (result) toast("已取消候補", "good");
+}
+
+async function cancelDropIn(dropInId, btn) {
+  if (dropInId < 0) return;  // still saving; the real id isn't known yet
+  const game = currentSeason.games.find((item) =>
+    item.confirmed_drop_ins.some((dropIn) => dropIn.id === dropInId)
+  );
+  const leaving = game && game.confirmed_drop_ins.find((dropIn) => dropIn.id === dropInId);
+  let promotedName = null;
+  let changeToken = null;
+  const result = await optimistically(
+    (season) => {
+      removeDropInLocally(season, dropInId);
+      changeToken = markGameDetailChange(
+        document.getElementById("game-detail"),
+        "attending",
+        []
+      );
+    },
+    () => postJson(API_BASE, `/drop-ins/${dropInId}/cancel`, {}),
+    "取消失敗：",
+    (answer, season) => {
+      promotedName = applyAutomaticPromotionLocally(
+        season,
+        game && game.id,
+        answer.promoted_from_waitlist,
+        leaving
+      );
+      if (promotedName) {
+        changeToken = markGameDetailChange(
+          document.getElementById("game-detail"),
+          "attending",
+          [promotedName],
+          changeToken
+        );
+      }
+    }
+  );
+  settleRosterChange(changeToken, !!result);
+  if (result) {
+    toast(
+      promotedName
+        ? `已取消${leaving && leaving.covering ? "代打" : "報名"}；${promotedName} 已遞補`
+        : result.promoted_from_waitlist
+          ? `已取消${leaving && leaving.covering ? "代打" : "報名"}；候補名單已遞補`
+          : `已取消${leaving && leaving.covering ? "代打" : "報名"}`,
+      "good"
+    );
+  }
+  // Cancelling a signup offers the freed slot to the queue, and the
+  // answer says whether anyone took it — see needsRefreshAfter.
+  if (needsRefreshAfter(result)) refreshSeasonQuietly();
+}

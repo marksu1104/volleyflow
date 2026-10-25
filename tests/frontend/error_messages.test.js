@@ -2,7 +2,7 @@
 // the project's language policy); translateApiError is the one place that
 // puts the reader-facing reason in Chinese, so every toast(prefix +
 // e.message) call site gets it for free rather than needing forty raise
-// sites individually rewritten. See its own doc comment in shared.js for
+// sites individually rewritten. See its own doc comment in js/common/ for
 // why this is a curated table rather than backend error codes.
 
 const test = require("node:test");

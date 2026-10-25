@@ -27,27 +27,24 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
-      # shared.js and shared.css are referenced at a URL that never
-      # changes, so a browser that already has them has no reason to ask
-      # again — and LINE's in-app webview holds onto them hard enough
-      # that deployed fixes kept appearing not to have shipped. Stamping
-      # the commit onto the URL makes every deploy a new file to fetch.
-      # Done here rather than in the source so the checked-in HTML stays
-      # readable and nothing has to be remembered by hand.
-      - name: Version the shared assets
+      # The scripts and the stylesheet are referenced at URLs that never
+      # change, so a browser that already has them has no reason to ask
+      # again, and LINE's in-app webview holds onto them hard enough that
+      # deployed fixes kept appearing not to have shipped. Stamping the
+      # commit onto every js/ and css/ URL makes each deploy a new file to
+      # fetch. Done here rather than in the source so the checked-in HTML
+      # stays readable.
+      - name: Version the scripts and stylesheet
         run: |
           cd frontend
           sha="${GITHUB_SHA::8}"
-          sed -i "s|src=\"shared.js\"|src=\"shared.js?v=$sha\"|g" *.html
-          sed -i "s|href=\"shared.css\"|href=\"shared.css?v=$sha\"|g" *.html
-          # Stamp the build onto the page itself. Only shared.js and
-          # shared.css carried a version, so a cached HTML file served
-          # with a fresh shared.js was a normal outcome — and any change
-          # living in the markup (a new form field, a new section) simply
-          # never appeared. shared.js compares these two and reloads once
-          # when they disagree; see assertFreshBuild.
+          sed -i -E 's#(src="js/[^"?]+\.js)"#\1?v='"$sha"'"#g; s#(href="css/[^"?]+\.css)"#\1?v='"$sha"'"#g' *.html
+          # Stamp the build onto the page itself too: a cached HTML file
+          # served with fresh scripts would otherwise never show a change
+          # that lives in the markup. assertFreshBuild (js/common/api.js)
+          # compares the two and reloads once when they disagree.
           sed -i '/<head>/a <meta name="vf-build" content="'"$sha"'">' *.html
-          grep -o 'shared\.\(js\|css\)?v=[0-9a-f]*' member.html | sort -u
+          grep -o '\(js\|css\)/[^"]*?v=[0-9a-f]*' member.html | sort -u
 
       - uses: actions/upload-pages-artifact@v3
         with:
