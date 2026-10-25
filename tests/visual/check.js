@@ -245,23 +245,12 @@ check(`按鈕文字在最窄手機上留有餘裕（文字寬 ÷ 可用寬 < ${F
       tabs.push({ key, visible: !panel.hidden, height: round(panel.getBoundingClientRect().height) });
       for (const r of panel.querySelectorAll(".att-row")) {
         rows.push({ tab: key, cls: r.className, h: round(r.getBoundingClientRect().height) });
-        // Text cut off *inside* a row. Neither 每一列都一樣高 nor
-        // 沒有元素超出畫面 can see this: a flex child shrinks to fit, so
-        // the row keeps its height and nothing passes the screen edge —
-        // the characters are simply clipped. Found 2026-09-23 by eye on
-        // a screenshot, with both of those checks green, while 周恆 報名
-        // was rendering as half a glyph wedged against 移除. The inline
-        // .att-note reports clientWidth 0, so measure the box that does
-        // the clipping rather than the note itself.
-        // The 「X 報名」 tag is meant to be quiet: no pill, no side
-        // padding, faint text. `.att-row.dropin .att-note` is (0,3,0) and
-        // beat the unqualified `.att-note.by` (0,2,0), so on a 臨打 row it
-        // kept the green pill background while still taking the zero side
-        // padding — the text sat flush against the pill and was reported
-        // as 「文字超框」 (2026-09-24, from a screenshot). Nothing else here
-        // could see it: the text never overflows its box, so the clipping
-        // check above stays green. Losing only *some* declarations is what
-        // makes a cascade bug look like a sizing bug.
+        // Text clipped inside a row, which neither the equal-height check
+        // nor the overflow check can see: a flex child shrinks and clips
+        // its text without changing the row. The inline .att-note reports
+        // clientWidth 0, so the box doing the clipping is measured. The
+        // 「X 報名」 tag must also lose its pill background on a 臨打 row,
+        // which needs the qualified selector (specificity (0,3,0)).
         for (const n of r.querySelectorAll(".att-note.by")) {
           const cs = getComputedStyle(n);
           byTags.push({ tab: key, bg: cs.backgroundColor, padLeft: cs.paddingLeft });
@@ -372,12 +361,8 @@ check(`按鈕文字在最窄手機上留有餘裕（文字寬 ÷ 可用寬 < ${F
     };
   });
 
-    // The calendar, paged across a year. Its cells used to take their
-    // width from an aspect ratio rather than from the column they sat
-    // in, so seven of them came to 355px inside a 332px grid and
-    // Saturday hung off the card — except in a month opening on a
-    // Sunday, where everything fitted and shrank instead. Paging
-    // between the two reshaped it: 「切換月份可能會變形」, 2026-09-16.
+    // The calendar paged across a year: cells must keep their size
+    // whichever weekday a month starts on.
     measured.calendar = await page.evaluate(() => {
       const games = Array.from({ length: 13 }, (_, i) => {
         const d = new Date(2026, 8, 1 + i * 7);

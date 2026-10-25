@@ -1,13 +1,11 @@
-"""Taking a drop-in's fee one night at a time, from whoever actually played.
+"""Taking a drop-in's fee one night at a time, from whoever actually
+played.
 
-Reported 2026-10-16 from real use, three problems on the same screen:
-
-* 已收 on one night of 當天臨打 marked every other night paid too — the
-  row showed and collected the person's whole season of drop-in fees;
-* a fee could not be marked received at all for somebody who had since
-  been taken out of the club (「○○不是隊伍裡的人」);
-* and, asked alongside: a fee is only ever taken from somebody who got a
-  place that night, never from a queued signup.
+* 已收 on one night of 當天臨打 marks only that night paid;
+* a fee can be marked received for somebody since taken out of the
+  club;
+* a fee is only ever taken from somebody who got a place that night,
+  never from a queued signup.
 """
 
 from datetime import datetime, timedelta

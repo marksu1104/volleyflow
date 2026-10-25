@@ -43,10 +43,7 @@ it catches at this size.
 
 ## Why `feedback.js` is separate from `smoke.js`
 
-`smoke.js` waits 900ms and asks whether anything happened. That was
-enough to catch a control wired to nothing, and useless against the
-complaint that actually kept coming back — 「反應很慢」, 「按了沒反應」.
-A control may wait in silence for about 200ms, which is roughly how long
-it takes a person to notice; past that it owes them either the change
-itself, a spinner on the control, or the page's 儲存中 marker. That is a
-different question with a different answer, so it is a different file.
+`smoke.js` waits 900ms and asks whether anything happened, which catches
+a control wired to nothing. `feedback.js` asks whether the response is
+immediate: within about 200ms a control owes either the change itself, a
+spinner on the control, or the page's 儲存中 marker.

@@ -95,15 +95,10 @@ async function hammer(page, selectors, rounds) {
   const soloState = await solo.page.evaluate(INVARIANTS);
   report("一個人狂點請假／取消請假", soloState.problems.concat(solo.errors));
 
-  // 2. The exact sequence reported as 「按了成功結果又切回去又切回來」:
-  // take leave, then change your mind before the first change has
-  // finished saving. Measured on the real page before the fix, the screen
-  // was right at 316ms, wrong from 1257ms, and right again at 2017ms —
-  // the refresh after the first write had overtaken the second write and
-  // come back describing a roster from before it.
-  //
-  // Asserted by watching rather than by sampling the end: the end was
-  // always correct. What was wrong was the half-second in the middle.
+  // 2. Take leave, then change your mind before the first change has
+  // finished saving. The end state was always correct; the bug was a
+  // refresh overtaking the second write and showing the old roster for a
+  // moment, so this watches the whole time rather than sampling the end.
   const flipper = await open(browser, "member.html", "周恆");
   const takeLeave = `(() => {
     const b = [...document.querySelectorAll("#hero-wrap .hact")]

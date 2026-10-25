@@ -1,19 +1,13 @@
 // Presses every clickable thing and measures how long until the screen
-// admits it was pressed.
-//
-// smoke.js already asks whether a control does anything at all. This asks
-// the harder question, the one reported as 「按了沒反應」and 「反應很慢」:
-// does it answer *immediately*? A control may only wait on the network in
-// silence for as long as it takes a person to notice — about 200ms — and
-// after that it owes them one of three things:
+// shows it was pressed. smoke.js asks whether a control does anything;
+// this asks whether it answers within about 200ms with one of:
 //
 //   * the change, drawn straight away (an optimistic action), or
 //   * a busy state on the control itself (markBusy), or
-//   * the page's 儲存中 marker (beginPendingWrite), for a change that is
-//     already on screen and whose button no longer exists to mark.
+//   * the page's 儲存中 marker (beginPendingWrite), for a change already on screen.
 //
-// A control that sends no request and changes nothing was in the state it
-// sets already — that is a correct no-op, not a finding.
+// A control that sends nothing and changes nothing was already in the
+// state it sets, which is correct.
 //
 //     .\scripts\dev-api.ps1      (in one window)
 //     .\scripts\dev-web.ps1      (in another)

@@ -1,23 +1,10 @@
-// How long each page takes to put something real on screen.
+// How long each page takes to show real content, cold and warm.
+// getJsonSWR paints the last answer from localStorage before the network
+// replies, so a second visit should be almost instant; cold runs use a
+// fresh browser context, warm runs reuse it.
 //
-// Reported twice, about two different pages: 「代辦事項那個資訊卡會進入網頁
-// 後過很久才載入出現」 and 「個人資料頁面的我的球隊，每次都會進入網頁後過很久
-// 才載入出現」, followed by 「我希望你要去檢查每個物件功能都不要出現這樣的問題
-// ⋯⋯不能慢」. One page at a time is how this gets missed, so every page is
-// measured here and the slow ones have to answer for themselves.
-//
-// Cold vs warm is the whole point of the measurement, not a detail.
-// getJsonSWR keeps the last answer in localStorage and paints it before
-// the network replies, so a page wired through it shows content almost
-// immediately on a second visit while a page using a bare fetch() shows
-// nothing until the server answers — and the two are indistinguishable
-// if you only ever measure one of them. Cold runs in a brand-new browser
-// context with empty storage; warm reuses it, so the cache is primed by
-// the cold run that just happened.
-//
-// Budgets rather than a printout: a check that only prints numbers stops
-// being read. These are deliberately loose — they are here to catch a
-// page falling off a cliff, not to police tens of milliseconds.
+// Budgets rather than a printout, deliberately loose: they catch a page
+// falling off a cliff, not tens of milliseconds.
 
 const { chromium } = require("playwright");
 

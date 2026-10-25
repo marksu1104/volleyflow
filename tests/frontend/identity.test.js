@@ -1,15 +1,7 @@
-// A LINE ID token lasts an hour, and a page left open on a phone lasts as
-// long as the phone does.
-//
-// LINE's LIFF reference: an ID token "is valid for one hour after it is
-// issued" — and nothing about the SDK replacing it. js/common/ used to
-// assume it did ("liff.getIDToken() already handles refreshing it"), so a
-// page left open for an hour sent a token LINE refused, and every action
-// on it failed as 「操作失敗（LINE rejected this ID token）」. That is how
-// creating a club failed on the production site on 2026-09-15.
-//
-// None of the other checks could see it: every one of them signs in with
-// a local `dev:` token, and a dev token never expires.
+// A LINE ID token lasts an hour, and LINE's SDK does not renew it, so a
+// page left open on a phone must notice an expired token and restart the
+// session. The other checks sign in with a local `dev:` token, which
+// never expires, so only these can see it.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");

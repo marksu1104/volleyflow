@@ -1,17 +1,8 @@
-// Reads must never undo a change the person has already made.
-//
-// The bug these guard against is 「按了成功結果又切回去又切回來」, and it
-// was in the plumbing rather than in any one screen: refreshing after a
-// change fired a GET straight away, which overtook the *next* change
-// still waiting its turn in the write queue. The answer came back
-// describing the roster as it was before that tap, the renderer trusted
-// it, and the tap was painted away — then the following refresh put it
-// back. Measured on a real page: correct at 316ms, wrong from 1257ms,
-// right again at 2017ms.
-//
-// Two rules fix it and both are tested here: a refresh goes through the
-// same queue as the writes, and a renderer refuses an answer that set off
-// before the latest local change.
+// Reads must never undo a change the person has already made. A refresh
+// fired at once could overtake the next change still in the write queue
+// and paint the earlier roster back. Two rules prevent it, both tested
+// here: a refresh goes through the same queue as the writes, and a
+// renderer refuses an answer that left before the latest local change.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");

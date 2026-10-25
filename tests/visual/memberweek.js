@@ -121,18 +121,9 @@ function inDays(days) {
       ...(awayNames.includes(MEMBER) ? [] : [`伺服器上的請假名單是 ${awayNames.join("、") || "空的"}`]),
     ]);
 
-    // 請假了，但還沒有人遞補 — 所以還是不退費。
-    //
-    // This is the state that makes the rule visible, and the only one in
-    // the walk that does: an absence exists and nothing fills it. Neither
-    // of the other two panel checks can see it — later on the absence has
-    // a stand-in (so the figure is right either way), and at the end the
-    // absence has been withdrawn (so there is nothing to count at all).
-    // Without this step, dropping the `filled_by` condition from the
-    // estimate changes nothing anywhere and the rule goes unguarded.
-    //
-    // CLAUDE.md 2.4: 「A member's Absence is refunded one game's share
-    // *only if* a DropIn actually covers it」.
+    // 請假了，但還沒有人遞補，所以還是不退費. The only step where an absence exists and
+    // nothing fills it, which is what guards the rule that an absence is
+    // refunded only if somebody fills the slot.
     await page.waitForSelector("#balance-chip:not([hidden])", { timeout: 20000 });
     await page.click("#balance-chip");
     await page.waitForSelector("#ledger-backdrop:not([hidden])", { timeout: 15000 });
@@ -256,12 +247,9 @@ function inDays(days) {
       open: !document.getElementById("ledger-backdrop").hidden,
       total: (document.getElementById("lg-total") || {}).innerText || "",
       entries: document.querySelectorAll("#lg-entries .set-row, #lg-entries .m-row, #lg-entries > div").length,
-      // The zero case, reached only here: by now the stand-in has been
-      // cancelled and the leave withdrawn, so nothing is refundable. The
-      // block still shows, saying $0 and why — an absence nobody filled
-      // is not refunded (CLAUDE.md 2.4), and "I took the night off, why
-      // is nothing coming back" is the question this answers. Checked
-      // because the earlier assertion only ever sees the paying case.
+      // The zero case: the stand-in was cancelled and the leave
+      // withdrawn, so nothing is refundable and the block says $0 and
+      // why.
       estimate: (document.getElementById("lg-estimate") || {}).innerText || "",
       estimateShown: !(document.getElementById("lg-estimate") || {}).hidden,
       // A panel opened before myLedger arrives must repaint when it
@@ -282,23 +270,12 @@ function inDays(days) {
       ...errors,
     ]);
 
-    // 報名臨打之後，預估退費要立刻變 — 不必重整。
-    //
-    // Reported 2026-09-23: 「請假完馬上報名別人臨打，預估帳務要重整頁面
-    // 才發現」. The signup path draws its guess and, when the server
-    // agrees, only writes the new rows' real ids back — it never touches
-    // filled_by on the absence that signup just covered, because the
-    // frontend cannot know which absence the server's FIFO picked. So
-    // currentSeason keeps filled_by: null and the estimate stays at $0
-    // until a full reload.
-    //
-    // Placed last on purpose. Done mid-walk it would leave an extra
-    // drop-in on the game, and the later 指定代打 would take the FIFO
-    // pairing away from it (an arranged substitute wins), changing the
-    // premise of every assertion after it.
-    //
-    // Driven from the screen, not the API: posting a drop-in directly
-    // never runs the optimistic path, so it cannot see this bug at all.
+    // 報名臨打之後，預估退費要立刻變，不必重整. The signup's optimistic path cannot know
+    // which absence the server's FIFO matched, so it must re-read when
+    // there is an unfilled absence. Last in the walk, so the extra
+    // drop-in does not change the premise of earlier steps. Driven
+    // through the screen, since posting to the API skips the optimistic
+    // path.
     await page.click("#ledger-backdrop .gsheet-close");
     await page.waitForSelector("#ledger-backdrop", { state: "hidden", timeout: 10000 });
     await page.click('#hero-wrap button[onclick^="recordAbsence"]');
@@ -334,20 +311,9 @@ function inDays(days) {
         : [`有人補上了，預估應該是 $${share}，畫面寫的是「${afterSignup.replace(/\s+/g, " ")}」`]),
     ]);
 
-    // 幫別人報的臨打，名單上要看得出是誰報的。
-    //
-    // Reported 2026-09-23: 「有些幫忙報名的臨打我覺得要註記一下是誰報名
-    // 的」. GUEST was signed up by MEMBER through the sheet above, so the
-    // row must name MEMBER — brought_by_player_id is set only when it
-    // wasn't the person themselves, which is why 「有些」 is right: a
-    // signup you made for yourself carries no such note.
-    //
-    // The note replaces 臨打 rather than joining it: three tags on one
-    // row clipped a long guest name on 2026-09-23, and nobody signs up
-    // a member, so the bringer's name already says "drop-in". 代打 is
-    // still kept apart — rosterRow shows 代 X in preference, because a
-    // stranger who signed themselves up must never read as somebody's
-    // arranged substitute.
+    // 幫別人報的臨打，名單上要看得出是誰報的. GUEST was signed up by MEMBER, so the row
+    // names MEMBER; a signup made for oneself carries no note. The note
+    // replaces 臨打, and 代 X still wins over it.
     await page.click("#ledger-backdrop .gsheet-close");
     await page.waitForSelector("#ledger-backdrop", { state: "hidden", timeout: 10000 });
     await page.click("#hero-wrap .hero-more");
