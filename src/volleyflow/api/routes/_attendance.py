@@ -150,19 +150,6 @@ def _has_open_slot(db: Session, game: GameRow, season: SeasonRow) -> bool:
     return _expected_on_court(db, game, season) < season.capacity
 
 
-def _is_signed_up(db: Session, game: GameRow, player_id: int) -> bool:
-    """Whether this player already holds a confirmed slot at this game."""
-    return (
-        db.query(DropInRow)
-        .filter(
-            DropInRow.game_id == game.id,
-            DropInRow.player_id == player_id,
-            DropInRow.playing(),
-        )
-        .first()
-    ) is not None
-
-
 def _games_with_no_room(
     db: Session, season: SeasonRow, *, member_count: int | None = None
 ) -> list[GameRow]:
