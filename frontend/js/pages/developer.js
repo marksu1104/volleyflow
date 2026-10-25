@@ -12,9 +12,9 @@ const KPIS = [
   ["unread_reports", "未讀回報", true],
 ];
 
-/** Every count the page has ever shown, kept under 其他統計 so moving
- * to the four figures above lost none of them. Counts only, and no
- * money — see routes/developer.py. */
+/** The other counts, under 其他統計. Counts only, no money; see
+ * routes/developer.py.
+ */
 const GROUPS = [
   {
     title: "球隊與人",
@@ -89,7 +89,9 @@ function spanLabel(span) {
   return last ? `${shortDate(first)}–${shortDate(last)}` : shortDate(first);
 }
 
-/** "seasons.py:2173 in add_member" → "seasons.py 第 2173 行・add_member". */
+/** "season_roster.py:120 in add_member" → "season_roster.py 第 120
+ * 行・add_member".
+ */
 function locationLabel(where) {
   const m = /^(.+):(\d+) in (.+)$/.exec(where || "");
   return m ? `${m[1]} 第 ${m[2]} 行・${m[3]}` : where || "";
@@ -213,17 +215,17 @@ function activityHtml(events, expanded) {
   return shown.map(activityRowHtml).join("");
 }
 
-/** A club that never got going: nothing ever charged or paid in it.
- * A club in use always has something on its books — joining a season
- * with games charges the fee — while a club with a season and nobody
- * on it, or people and no season, has none. */
+/** A club that never got going: nothing ever charged or paid in it
+ * (joining a season with games charges a fee, so a club in use always has
+ * entries).
+ */
 function isEmptyClub(c) {
   return !c.last_activity;
 }
 
-/** The clubs to list. A search looks through every club, the ones
- * folded away included — looking for a club by name has to find it.
- * Without one, clubs in use come first, most recent first. */
+/** The clubs to list. A search covers every club, folded ones included;
+ * without one, clubs in use come first, most recent first.
+ */
 function visibleClubs(clubs, query, showEmpty) {
   const q = (query || "").trim().toLowerCase();
   const matches = (c) =>

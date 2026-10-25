@@ -1,37 +1,20 @@
-// localhost -> the local API, anywhere else -> production. See apiBase.
+// The local API on a development machine, production elsewhere; see
+// apiBase.
 const API_BASE = apiBase();
-/* This page's own LIFF app, not the one member.html uses.
- *
- * A LIFF app has exactly one endpoint URL, so one app cannot open
- * three different pages directly. Trying to fake that with a single
- * app — pointing its endpoint at the folder root and letting a
- * redirect page sort out liff.state — took the menu down twice on
- * 2026-09-18: first an infinite login loop, then a page-not-found.
- * The handshake belongs to the SDK and breaks if anything navigates
- * before liff.init() has run.
- *
- * Three apps, one per destination, is how LINE intends this. Each
- * page initialises its own and lands in a single document load, with
- * no liff.state and nothing to race. See docs/dev-log.md. */
+/* This page's own LIFF app. A LIFF app has one endpoint, so each rich
+ * menu destination (member.html, ledger.html, report.html) has its own
+ * and loads in a single document, with no liff.state redirect to race the
+ * SDK's handshake.
+ */
 const LIFF_ID = "2011156233-LiXoOfF4";
 
-/* A page of its own, rather than a block at the bottom of 個人資料.
- *
- * Reporting something broken is not a profile setting, and it was
- * sitting under the name field, the gender picker and the club list —
- * so anyone wanting to report a problem had to scroll past three
- * things they did not come for. It is also the third button on the
- * LINE rich menu, and a menu entry needs somewhere of its own to land:
- * pointing it at 個人資料 would have opened a page about the reader
- * rather than about the problem.
- *
- * The submit endpoint is unchanged — POST /reports, same payload — so
- * nothing the developer reads on reports.html had to move with it.
+/* Reporting a problem has its own page, which is also where the rich
+ * menu's third button lands.
  */
 
-/** Where "返回" goes. A reader normally arrives from 個人資料, but from
- * the rich menu they arrive from nowhere at all, and history.back()
- * would then leave the app entirely. Falls back to the app's home. */
+/** Where 返回 goes: back if there is history, otherwise the app's home
+ * rather than out of the app.
+ */
 function goBack() {
   if (document.referrer && document.referrer.includes(location.host)) {
     history.back();
@@ -42,12 +25,8 @@ function goBack() {
 
 let screenshot = null;
 
-/**
- * Shrinks the picture before it goes anywhere. A phone screenshot is
- * several megabytes, and the person sending it is by definition having
- * a bad time with this app already — quite possibly on the same weak
- * connection that caused whatever they're reporting. 1280px of JPEG is
- * more than enough to read a UI bug from.
+/** Shrinks the screenshot to 1280px JPEG before sending: phone screenshots
+ * are several megabytes, and the sender may be on a weak connection.
  */
 document.getElementById("report-shot").addEventListener("change", (e) => {
   const file = e.target.files && e.target.files[0];
@@ -93,10 +72,8 @@ async function sendReport() {
     await whileBusy(btn, async () => {
       await postJson(API_BASE, "/reports", {
         message: text,
-        // Sent rather than asked for: "it broke" is only actionable
-        // with the where, and nobody types a user agent by hand. The
-        // page recorded is where the reader *came from*, not this one —
-        // this page is never the thing that broke.
+        // Sent automatically: where it happened (the page they came from)
+        // and the browser.
         page: reportedPage(),
         user_agent: navigator.userAgent,
         club_id: currentClubId() ? Number(currentClubId()) : null,
@@ -117,13 +94,8 @@ async function sendReport() {
   }
 }
 
-/** The screen the reader was on before they came here.
- *
- * The old form lived on 個人資料 and recorded its own filename, which
- * was already only half useful. Now that reporting has a page of its
- * own, recording "report.html" would be useless every single time — so
- * the referrer is used, and this page's name is the honest fallback
- * when there isn't one (arriving from the LINE menu, for instance).
+/** The screen the reader came from (the referrer), or this page's name
+ * when there is none.
  */
 function reportedPage() {
   try {
@@ -131,7 +103,7 @@ function reportedPage() {
       return new URL(document.referrer).pathname.split("/").pop() || "report.html";
     }
   } catch (e) {
-    // A malformed referrer is not worth failing a bug report over.
+    // A malformed referrer must not fail the report.
   }
   return "report.html";
 }
@@ -142,8 +114,7 @@ function reportedPage() {
   const identified = await initLiffIdentity(API_BASE, LIFF_ID);
   stopLoadingEscalation();
   if (!identified) {
-    // Reports carry who sent them, so this needs a verified identity
-    // like every other write in the app.
+    // Reports carry who sent them, so this needs a verified identity.
     state.innerHTML = signInFailureHtml(identified);
     return;
   }

@@ -1,4 +1,5 @@
-// localhost -> the local API, anywhere else -> production. See apiBase.
+// The local API on a development machine, production elsewhere; see
+// apiBase.
 const API_BASE = apiBase();
 // The club is chosen from the top bar, as on the member page.
 mountClubChip(document.getElementById("club-chip"), document.getElementById("club-picker"));
@@ -6,15 +7,13 @@ const LIFF_ID = "2011156233-6CouG6VI";
 let currentSeason = null;
 let selectedGameId = null;
 let clubMembers = [];
-// People this viewer has brought before — the quick picks in the
-// substitute and signup sheets. See fetchMyGuests.
+// People this viewer has brought before, for the quick picks; see
+// fetchMyGuests.
 let myGuests = [];
 let myName = "";
 
-// Every organizer-only action here (settle, edit season settings,
-// manage members) is enforced server-side against this identity —
-// this just resolves it once so postJson's authHeader() has a LIFF
-// session to read from.
+// Resolves the caller once; the server enforces the organizer role on
+// every action.
 const identityReady = (async function initIdentity() {
   const identified = await initLiffIdentity(API_BASE, LIFF_ID);
   if (identified) {
@@ -29,9 +28,8 @@ document.getElementById("avatar-btn").addEventListener("click", () => {
 
 showPageLoading(document.getElementById("hero-wrap"));
 
-// Every club-scoped read carries the caller's token now, so nothing may
-// fetch before LIFF identity has resolved — otherwise authHeader() is
-// empty and the server correctly says 401.
+// Every read carries the caller's token, so nothing is fetched before
+// identity resolves.
 identityReady.then((identified) => {
   if (!identified) {
     stopLoadingEscalation();
@@ -52,9 +50,7 @@ identityReady.then((identified) => {
       else renderNoSeason();
     },
     (e) => showPageError(document.getElementById("hero-wrap"), e.message),
-    // Only the clubs this person organizes (plus, for the developer,
-    // every other club) — see managesClub. A club they merely belong to
-    // used to appear here and open a management screen they cannot use.
+    // Only clubs this person organizes; see managesClub.
     managesClub
   );
 });
@@ -80,7 +76,7 @@ const dashboardLoad = staleGuard();
 
 async function loadDashboard(seasonId) {
   const ticket = dashboardLoad.take();
-  // See localRevision: what the screen knew when this read set off.
+  // What the screen knew when this read left; see localRevision.
   const askedAt = localRevision();
   const errorEl = document.getElementById("error");
   errorEl.textContent = "";
@@ -95,21 +91,17 @@ async function loadDashboard(seasonId) {
 
   function render(season) {
     if (!dashboardLoad.current(ticket)) return;
-    // Older than what is on screen — somebody changed something after
-    // this read set off, so painting it would undo their tap. A newer
-    // read is always already queued behind the change. See
-    // localRevision in js/common/api.js.
+    // Older than the screen: painting it would undo a tap. A newer read
+    // is already queued.
     if (currentSeason && currentSeason.id === season.id && localRevision() !== askedAt) {
       return;
     }
-    // Same reasoning as the member page: every action here ends in a
-    // reload, and redrawing data that hasn't changed costs a frame and
-    // reads as a stutter a second after the tap already worked.
+    // Skip identical data: redrawing it costs a visible frame.
     if (currentSeason && JSON.stringify(season) === JSON.stringify(currentSeason)) return;
     const isNewSeason = !currentSeason || currentSeason.id !== season.id;
     currentSeason = season;
-    // Keep whatever game was selected across a reload — only reset to
-    // the next upcoming game when switching seasons, or on first load.
+    // Keep the selected game across reloads; reset only for a new season
+    // or the first load.
     if (isNewSeason || !season.games.some((g) => g.id === selectedGameId)) {
       const upcoming = season.games.find((g) => !describeDate(g.date).isPast) || season.games[season.games.length - 1];
       selectedGameId = upcoming ? upcoming.id : null;
@@ -123,12 +115,8 @@ async function loadDashboard(seasonId) {
     renderHero(season);
     renderCalendar();
     renderSelectedGameDetail();
-    // Only the substitute picker needs the club roster, so it loads
-    // alongside the paint instead of delaying it — and only repaints
-    // if it actually brought something new. It used to repaint every
-    // time, so every tap drew the sheet, waited out a round trip, and
-    // drew the identical sheet again: the visible flicker reported as
-    // 瞬間跳針.
+    // Loads alongside the paint and repaints only if it found something
+    // new.
     fetchMyGuests(API_BASE, currentClubId()).then((g) => {
       if (JSON.stringify(g) === JSON.stringify(myGuests)) return;
       myGuests = g;
@@ -144,10 +132,9 @@ async function loadDashboard(seasonId) {
 }
 
 let todos = [];
-/** False until the two reads behind 待辦 have answered once. Without
- * it, "still looking" and "nothing to do" are the same empty array —
- * which is why this line used to appear out of nowhere, well after the
- * card above it. */
+/** False until the reads behind 待辦 have answered once, so "still looking"
+ * differs from "nothing to do".
+ */
 let todosLoaded = false;
 
 async function loadTodos() {
@@ -157,15 +144,9 @@ async function loadTodos() {
     fetch(`${API_BASE}${path}`, { headers: authHeader() })
       .then((r) => (r.ok ? r.json() : fallback))
       .catch(() => fallback);
-  // Says "still looking" before the three reads go out. They only
-  // start once the season has landed, and then take a round trip of
-  // their own, so this line is always behind the card above it —
-  // saying so beats leaving a gap that fills itself seconds later.
+  // Show "still looking" while the three reads are out.
   renderTodos();
-  // The friendship check is the one read whose failure has to say
-  // something different from its answer, so it gets `null` rather
-  // than the others' empty array: `[].reachable` is undefined, which
-  // would land on "could not ask" by luck instead of on purpose.
+  // A failed friendship check is null (unknown), not an empty answer.
   const [requests, balances, reach] = await Promise.all([
     ask(`/clubs/${clubId}/join-requests`),
     ask(`/clubs/${clubId}/balances?season_id=${currentSeason.id}`),
@@ -177,10 +158,8 @@ async function loadTodos() {
     balances,
     reach ? reach.reachable : null
   );
-  // Same list, same pixels: repainting an unchanged row is the flicker.
-  // The flag has to clear first, though — on the first answer the list
-  // can legitimately be identical to the empty one it started with,
-  // and skipping the repaint would strand the spinner forever.
+  // Skip repainting an unchanged list, except on the first answer, which
+  // must clear the spinner.
   const wasLoading = !todosLoaded;
   todosLoaded = true;
   if (!wasLoading && JSON.stringify(next) === JSON.stringify(todos)) return;
@@ -190,9 +169,8 @@ async function loadTodos() {
 
 function renderTodos() {
   const line = document.getElementById("todo-line");
-  // Three states, not two. The line keeps its place from the first
-  // paint so nothing below it moves when the answer arrives; it is
-  // only the words inside that change.
+  // Loading, nothing to do, or the list; the line keeps its place so
+  // nothing below moves.
   if (!todosLoaded) {
     line.hidden = false;
     line.disabled = true;
@@ -245,16 +223,7 @@ document.getElementById("todo-backdrop").addEventListener("click", (e) => {
   if (e.target.id === "todo-backdrop") closeTodos();
 });
 
-/** This season's terms, as one line.
- *
- * It used to be three figure tiles — 場地費總額, 每人每場, 最低人數 —
- * sitting above a line of arrangements. Every one of those numbers is
- * also on the settings page, where it can actually be *changed*;
- * here it could only be read. So it spent three tiles' worth of
- * height, on the screen an organizer opens most often, restating
- * something they cannot act on. Collapsed on 2026-09-17: the facts
- * stay, the height goes, and 已結算 is still a state so it still
- * reads as one.
+/** This season's terms as one line; they are changed on the settings page.
  */
 function renderMeta(season) {
   const el = document.getElementById("season-meta");
@@ -262,11 +231,8 @@ function renderMeta(season) {
   const parts = [
     `${season.games.length} 場`,
     `${season.members.length} 人`,
-    // share_per_game is the figure for a game with the AC off; a cooled
-    // night costs ac_surcharge/capacity more. Unqualified it reads as
-    // the price of every game. Seasons that don't price air
-    // conditioning keep the plain number — the qualifier would only be
-    // something to puzzle over there.
+    // share_per_game is the price without air conditioning, so say so
+    // when the season charges for it.
     `每人每場 $${season.share_per_game}${Number(season.ac_surcharge) > 0 ? "（未含冷氣）" : ""}`,
     season.game_start_time && season.game_end_time
       ? `${escapeHtml(season.game_start_time.slice(0, 5))}–${escapeHtml(season.game_end_time.slice(0, 5))}`
@@ -295,9 +261,8 @@ function renderHero(season) {
     ? `<span class="meta-pill" style="color:var(--warn)">低於最低門檻 <strong>${season.minimum_roster}</strong></span>`
     : `<span class="meta-pill">最低門檻 <strong>${season.minimum_roster}</strong> 人</span>`;
   const cancelled = game.status !== "scheduled";
-  // Same card as the member page, so the two halves of the app read as
-  // one app — the difference is what the buttons do, not how a game
-  // looks. 名單 is where the organizer actually works, so it leads.
+  // The same card as the member page; 名單 leads because it is where the
+  // organizer works.
   wrap.innerHTML = renderGameHero(season, game, {
     metaPills: [shortPill],
     statusHtml: cancelled
@@ -312,17 +277,9 @@ function renderHero(season) {
   wrap.onclick = null;
 }
 
-/** Whether the air conditioning ran is a forecast when the season is
- * booked and a fact on the evening, so this is the one thing about a
- * game the organizer is expected to correct afterwards. It moves what
- * the club owes the venue and re-prices every member's share, so it
- * says so before doing it. */
-/** The state, not the action. A button would say what you can do; this
- * says what the game currently is, which is the thing worth being able
- * to check at a glance — the organizer opens this card for the roster
- * anyway, so a wrong setting catches the eye without needing a
- * separate "did you confirm?" flag. Absent entirely when the club
- * doesn't pay for air conditioning. */
+/** The air conditioning's state as a switch, so a wrong setting catches
+ * the eye. Absent when the club does not pay for it.
+ */
 function acSwitch(season, game) {
   if (!(Number(season.ac_surcharge) > 0)) return "";
   const on = game.air_conditioned;
@@ -340,14 +297,15 @@ function acSwitch(season, game) {
     </div>`;
 }
 
+/** Records whether the air conditioning ran on the night. It changes what
+ * the club owes the venue and every member's share, so it asks first.
+ */
 async function toggleAirConditioning(gameId, on) {
   if (on === currentSeason.games.find((g) => g.id === gameId).air_conditioned) return;
   const each = acExtraEach(currentSeason, currentSeason.games.find((g) => g.id === gameId));
-  // Both figures, because they answer different questions: the club's
-  // bill moves by the whole surcharge, each member's share by their
-  // slice of it. Correcting a date the season was set up with is a
-  // different act that must *not* move the total — that lives in
-  // 設定頁 · 冷氣場次.
+  // Both figures: the club's bill moves by the whole surcharge, each
+  // member's share by their part. Correcting the forecast without moving
+  // the total is on 設定 · 冷氣場次.
   const surcharge = Number(currentSeason.ac_surcharge) || 0;
   const wording = on
     ? `確定將本場改為開冷氣？\n場地費總額將增加 $${surcharge}，每位成員本場增加 $${each}。`
@@ -381,8 +339,7 @@ function renderCalendar() {
 
 function selectGame(gameId) {
   selectedGameId = gameId;
-  // Switches the card above the calendar rather than opening a modal —
-  // the organizer scans dates far more often than they open a roster.
+  // Switches the card above the calendar rather than opening a sheet.
   renderHero(currentSeason);
   renderCalendar();
   renderSelectedGameDetail();
@@ -402,13 +359,9 @@ function renderSelectedGameDetail() {
     return;
   }
   renderGameDetail(el, currentSeason, game, {
-    // The card behind this sheet already shows the game in full.
+    // The card behind this sheet already shows the game.
     compactHead: true,
-    // The same pills the member sees on the same game. They were
-    // missing here, so opening one game from the two pages showed two
-    // different sets of facts about it — the price and whether the air
-    // conditioning is on are exactly what gets asked about on the
-    // night, and the organizer is the one being asked.
+    // The same pills the member sees on this game.
     heroMetaPills: [acPill(currentSeason, game)],
     statusHtml: game.status === "scheduled"
       ? ""
@@ -420,29 +373,23 @@ function renderSelectedGameDetail() {
     onAssignSubstitute: (absenceId, name, gender, target) =>
       assignSubstitute(absenceId, name, gender, target),
     onLeaveWaitlist: (entryId, btn) => leaveWaitlistFor(entryId, btn),
-    // All three arguments: the third says who steps out to make room,
-    // and an arrow that forwarded only two silently dropped it — the
-    // swap picker then reported "nobody to swap out" about the very
-    // person just tapped.
+    // All three arguments: the third is who steps out to make room.
     onPromoteFromWaitlist: (entryId, target, replacingDropInId) =>
       promoteFromWaitlist(entryId, target, replacingDropInId),
     onCancelSubstitute: (dropInId, btn) => cancelSubstitute(dropInId, btn),
-    // The organizer arranges all of this for other people: half the
-    // club tells them in person or in the group chat, and members with
-    // no LINE account can't do any of it themselves.
+    // The organizer does all of this for others, including members
+    // without a LINE account.
     onRecordAbsence: (playerName, btn) => recordAbsenceFor(playerName, btn),
     onRecordAbsenceWithSubstitute: (playerName, name, gender, target) =>
       recordAbsenceWithSubstituteFor(playerName, name, gender, target),
     onCancelAbsence: (absenceId, btn) => cancelAbsenceFor(absenceId, btn),
     onRemoveDropIn: (dropInId, btn) => cancelSubstitute(dropInId, btn),
-    // The management screen manages everybody's — that is what it is
-    // for, and the club role is checked server-side on the way in.
-    // The member screen deliberately does not do this; see
-    // member.html's canRemoveDropIn.
+    // The management screen manages everybody's signups; the server
+    // checks the role.
     canRemoveDropIn: () => true,
     onAddDropIn: (name, gender, btn) => addDropIn(name, gender, btn),
-    // No canAssignSubstitute restriction — the organizer can arrange
-    // a substitute for anyone's absence, not just their own.
+    // No canAssignSubstitute: the organizer may arrange anyone's
+    // substitute.
   });
 }
 
@@ -458,8 +405,7 @@ const gameSheetBackdrop = document.getElementById("game-sheet-backdrop");
 gameSheetBackdrop.addEventListener("click", (e) => {
   if (e.target === gameSheetBackdrop) closeGameSheet();
 });
-// This page has more than one bottom sheet. Scoping the close button to
-// the game sheet prevents the first sheet's ✕ from stealing this handler.
+// Scoped to the game sheet: this page has more than one sheet.
 gameSheetBackdrop.querySelector(".gsheet-close").addEventListener("click", closeGameSheet);
 
 function repaintRosterChange() {
@@ -480,8 +426,7 @@ async function assignSubstitute(absenceId, name, gender, target) {
   return whileBusy(target, async () => {
   let changeToken = null;
   try {
-    // See member.html: the id has to be turned into a name before the
-    // reload takes that person off the roster.
+    // Turn the id into a name before the reload removes them.
     const game = currentSeason.games.find((g) => g.id === selectedGameId) || {};
     const playingBefore = game.confirmed_drop_ins || [];
     const absence = (game.absences || []).find((a) => a.id === absenceId);
@@ -512,9 +457,9 @@ async function assignSubstitute(absenceId, name, gender, target) {
   });
 }
 
-/** 請假並指定代打 for somebody else, in one request — see
- * POST /absences's `substitute`. Not optimistic, like assignSubstitute:
- * whether the name is accepted is the server's to say. */
+/** 請假並指定代打 for somebody else, in one request. Waits for the server, which
+ * decides whether the name is accepted.
+ */
 async function recordAbsenceWithSubstituteFor(playerName, name, gender, target) {
   const gameId = selectedGameId;
   return whileBusy(target, async () => {
@@ -545,11 +490,8 @@ async function recordAbsenceWithSubstituteFor(playerName, name, gender, target) 
   });
 }
 
-// Every change on this screen used to wait out a write and a reload
-// before anything moved — two round trips of nothing happening, which
-// is the 卡頓 reported from real use. The screen changes on the tap
-// now; the request queues behind whatever is already going, and the
-// refresh afterwards is not waited for. See optimisticRunner.
+// Changes show on the tap; requests queue and the refresh is not awaited.
+// See optimisticRunner.
 const optimistically = optimisticRunner({
   getState: () => currentSeason,
   setState: (s) => {
@@ -558,17 +500,16 @@ const optimistically = optimisticRunner({
   repaint: () => repaintRosterChange(),
 });
 
-/** Queued behind every pending write and collapsed to one — see
- * coalescedRefresh. Fired straight away it overtakes a tap that has not
- * been sent yet and paints it away, which is 「按了成功結果又切回去又切
- * 回來」. */
+/** Queued behind pending writes and collapsed to one; see
+ * coalescedRefresh.
+ */
 const refreshQuietly = coalescedRefresh(() => {
   if (currentSeason) return loadDashboard(currentSeason.id);
 });
 
-/** Real absence ids, keyed by game and player — see member.html. The
- * organizer marks other people absent, so the same "tapped 取消請假
- * before 請假 came back" race applies here. */
+/** Real absence ids by game and player, so 取消請假 before 請假 returns waits
+ * for it.
+ */
 const pendingAbsenceId = {};
 const absenceKey = (gameId, name) => `${gameId}:${name}`;
 
@@ -637,8 +578,7 @@ async function recordAbsenceFor(playerName, btn) {
       "good"
     );
   }
-  // Only when somebody was promoted off the queue — see
-  // needsRefreshAfter. Otherwise the screen already matches the server.
+  // Only when somebody was promoted; see needsRefreshAfter.
   if (
     needsRefreshAfter(result) ||
     Boolean(promotedName) !== Boolean(result && result.promoted_from_waitlist)
@@ -696,8 +636,7 @@ async function cancelAbsenceFor(absenceId, btn) {
       "good"
     );
   }
-  // Only when somebody was actually released back to the queue — see
-  // needsRefreshAfter.
+  // Only when somebody went back to the queue; see needsRefreshAfter.
   if (
     needsRefreshAfter(result) ||
     Boolean(releasedName) !== Boolean(result && result.released_player_id)
@@ -720,11 +659,7 @@ async function addDropIn(name, gender, btn) {
           gender: gender || null,
           covering: null,
           linked: false,
-          // Same rule the server applies (attendance.py): null when you
-          // signed yourself up, your own name otherwise. Without it the
-          // roster tag was missing until a full reload — member.html got
-          // this on 2026-09-23 and this copy was left behind, which is
-          // what 「正式網站沒看到幫別人報名的標籤」 was on 2026-09-28.
+          // Same rule as the server: null when signing yourself up.
           brought_by_name: name === myName ? null : myName,
         });
       } else {
@@ -748,9 +683,7 @@ async function addDropIn(name, gender, btn) {
         player_name: name,
         game_id: gameId,
       });
-      // A drop-in is often someone with no account, so their gender —
-      // which the roster's male/female count needs — has to be set for
-      // them, and only right after they exist.
+      // Set a new drop-in's gender for the roster's male/female count.
       if (gender && created.player_id) {
         await postJson(API_BASE, `/players/${created.player_id}/gender`, { gender }, "PUT")
           .catch(() => {});
@@ -785,9 +718,7 @@ async function addDropIn(name, gender, btn) {
   if (!result || result.status !== predictedStatus) refreshQuietly();
 }
 
-/** Removing someone from the queue. Its own endpoint because a queue
- * place is a different table from a confirmed signup and the two id
- * sequences overlap — see routes.leave_waitlist. */
+/** Removes someone from the queue (POST /waitlist/{id}/cancel). */
 async function leaveWaitlistFor(entryId, btn) {
   if (entryId < 0) return;
   const game = currentSeason.games.find((item) =>
@@ -813,17 +744,10 @@ async function leaveWaitlistFor(entryId, btn) {
   if (result) toast(`已將 ${leaving ? leaving.player_name : "這位成員"} 移出候補`, "good");
 }
 
-/** Putting a queued person on the court, in the order you decide
- * rather than the order they arrived — the first in line is often the
- * one who can't make it tonight.
- *
- * When the game is full the server refuses rather than overfilling
- * (the capacity cap is a rule — decided 2026-09-10), so the only way
- * in is to name who comes out. Asking here and sending both in one
- * request is deliberate: cancelling first would let the automatic
- * first-in-line rule take the slot before this person could, and each
- * of those promotions is a real charge and refund on somebody's
- * ledger. */
+/** Puts a queued person on court, in the order the organizer decides. On a
+ * full game, who comes off is named and both happen in one request, so
+ * the automatic promotion cannot take the slot in between.
+ */
 async function promoteFromWaitlist(entryId, target, replacingDropInId) {
   const game = currentSeason.games.find((g) => g.id === selectedGameId);
   const entry = game.waitlist_entries.find((w) => w.id === entryId);
@@ -839,9 +763,7 @@ async function promoteFromWaitlist(entryId, target, replacingDropInId) {
   let changeToken = null;
   const result = await optimistically(
     (season) => {
-      // The response ids arrive below. Move with placeholders now so
-      // a deliberate swap reads as one action, not one row vanishing
-      // and another appearing after a reload.
+      // Move with placeholders now; the real ids arrive below.
       promoteWaitlistLocally(
         season,
         game.id,
@@ -890,8 +812,7 @@ async function cancelSubstitute(dropInId, btn) {
   let promotedName = null;
   let changeToken = null;
   const result = await optimistically(
-    // Clears the absence row that named them too — see
-    // removeDropInLocally.
+    // Clears the absence that named them too; see removeDropInLocally.
     (season) => {
       removeDropInLocally(season, dropInId);
       changeToken = markGameDetailChange(
@@ -930,8 +851,7 @@ async function cancelSubstitute(dropInId, btn) {
       "good"
     );
   }
-  // The freed slot is offered to the queue, and the answer says
-  // whether anyone took it — see needsRefreshAfter.
+  // The freed slot is offered to the queue; see needsRefreshAfter.
   if (needsRefreshAfter(result)) refreshQuietly();
 }
 

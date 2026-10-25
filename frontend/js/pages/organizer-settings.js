@@ -1,12 +1,12 @@
-// localhost -> the local API, anywhere else -> production. See apiBase.
+// The local API on a development machine, production elsewhere; see
+// apiBase.
 const API_BASE = apiBase();
 // The club is chosen from the top bar, as on the member page.
 mountClubChip(document.getElementById("club-chip"), document.getElementById("club-picker"));
 const LIFF_ID = "2011156233-6CouG6VI";
 
-/* ---- 本季／場次／球隊 ---- */
-// Remembered for this visit only, so coming back from 帳務 lands on the
-// tab that was open. A convenience: the page works without it.
+/* 本季／場次／球隊 tabs */
+// Remembered for this visit, so returning from 帳務 opens the same tab.
 let setTab = "season";
 try {
   const saved = sessionStorage.getItem("vf_set_tab");
@@ -56,17 +56,17 @@ function factIcon(name) {
   return `<span class="st-ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${FACT_ICONS[name]}</svg></span>`;
 }
 
-/** Today in the browser's own calendar, which is Taiwan's for everyone
- * using this app — not toISOString, which is UTC and called this
- * morning's games "yesterday's" until 08:00. */
+/** Today in the browser's calendar (Taiwan's for this app's users);
+ * toISOString would give UTC's.
+ */
 function todayKey() {
   return dateKey(new Date());
 }
 
-/** The season's games as one even grid, seven to a row — the 場次
- * card, the 修改預定 sheet and the wizard's dates step all draw it, so
- * the three look and work the same. `items` are {iso, on, past, off};
- * `attr` names the data attribute a tappable cell carries. */
+/** The season's games as an even grid, seven to a row, shared by the 場次
+ * card, the 修改預定 sheet and the wizard. `items` are {iso, on, past, off};
+ * `attr` names the data attribute a tappable cell carries.
+ */
 function dayGridHtml(items, o = {}) {
   if (!items.length) return '<p class="st-note" style="margin:0">尚無場次，請先產生場次。</p>';
   const legend = o.legend === false
@@ -105,9 +105,8 @@ document.getElementById("avatar-btn").addEventListener("click", () => {
 showPageLoading(document.getElementById("page-state"));
 document.getElementById("settings-form").hidden = true;
 
-// Every club-scoped read carries the caller's token now, so nothing may
-// fetch before LIFF identity has resolved — otherwise authHeader() is
-// empty and the server correctly says 401.
+// Every read carries the caller's token, so nothing is fetched before
+// identity resolves.
 identityReady.then((identified) => {
   if (!identified) {
     stopLoadingEscalation();
@@ -124,51 +123,40 @@ identityReady.then((identified) => {
     if (!id) document.getElementById("page-state").innerHTML = "";
     const hasClub = !!currentClubId();
     document.getElementById("no-club-note").hidden = hasClub;
-    // The tabs need a club; 本季 and 場次 also need a season, and stay
-    // inside #settings-form, which loadSettings reveals.
+    // The tabs need a club; 本季 and 場次 also need a season and stay inside
+    // #settings-form, which loadSettings reveals.
     document.getElementById("set-tabs").hidden = !hasClub;
     clubChosen = hasClub;
     showSetTab(setTab);
     if (hasClub) fillClubName();
     setWizardOpen((hasClub && !id) || creatingNextSeason);
-    // Deliberately not revealed here: loadSettings shows it once the
-    // season is in hand. Showing it now put an entirely blank form on
-    // screen — every field empty — for as long as the fetch took,
-    // which reads as broken rather than as loading.
-    // "尚無任何季別" in a picker is noise when creating the first season
-    // is the only thing you can do here.
+    // Revealed by loadSettings once the season arrives, not as an empty
+    // form. No picker when creating the first season is the only option.
       document.getElementById("season-picker-field").hidden = !id;
       document.getElementById("season-picker").hidden = !id;
       if (id) loadSettings(id);
     },
     (e) => showPageError(document.getElementById("page-state"), e.message),
-    // Only the clubs this person organizes (plus, for the developer,
-    // every other club) — see managesClub. A club they merely belong to
-    // used to appear here and open a management screen they cannot use.
+    // Only clubs this person organizes; see managesClub.
     managesClub
   );
 });
 
-// --- 開新一季 wizard -------------------------------------------------
-//
-// Three steps rather than one long form, because the three decisions
-// are independent and each one's effect on the money is only legible
-// once the previous is settled: cost -> dates -> members, with 每人每場
-// recomputed live at each stage. Dates are generated from "every
-// <weekday>, starting <date>, for <n> weeks" and then edited by
-// deleting the ones you're not playing — the schedule is regular with
-// exceptions, so generate-then-prune beats typing 13 dates by hand.
+// 開新一季 wizard: cost, then dates, then members, with each night's price
+// recomputed at every step. Dates are generated ("every <weekday> from
+// <date> for <n> weeks") and then pruned.
 
 let wizardDates = [];
 let extraNames = [];
 let pickedIds = new Set();
 const wizardAcDates = new Set();
-// Set while 開新一季 is open: who to tick in step 3, and a flag that keeps a late repaint from hiding the wizard.
+// Set while 開新一季 is open: who to tick in step 3; also keeps a late
+// repaint from hiding the wizard.
 let nextSeasonMemberIds = null;
 let creatingNextSeason = false;
 let clubRoster = [];
-// player_id -> what this club owes them (positive) or they owe it
-// (negative). Shown beside each name while picking the roster.
+// player_id -> what the club owes them (positive) or they owe it, shown
+// beside each name while picking the roster.
 let rosterBalances = new Map();
 
 document.getElementById("create-season-form").addEventListener("click", (e) => {
@@ -176,12 +164,9 @@ document.getElementById("create-season-form").addEventListener("click", (e) => {
   if (go) showWizardStep(Number(go.dataset.go));
 });
 
-/** Hours and minutes as two selects, because a native time input
- * prints whatever clock the phone is set to - 下午 06:30 on a Chinese
- * phone, whatever the page asks for. lang= does not move it (measured
- * on 2026-09-17: en-GB and zh-TW-u-hc-h23 both still said 下午). A
- * booking is written 18:30 on the venue's receipt, so the app says
- * 18:30 too. */
+/** Hours and minutes as two selects: a native time input shows the phone's
+ * own clock format (下午 06:30), and the venue writes 18:30.
+ */
 function fillTimeSelects(prefix) {
   const hours = ['<option value="">--</option>'];
   for (let h = 0; h < 24; h += 1) {
@@ -197,7 +182,7 @@ function fillTimeSelects(prefix) {
   document.getElementById(prefix + "-m").innerHTML = minutes.join("");
 }
 
-// g-start / g-end are the single game's own, on the edit sheet.
+// g-start / g-end belong to one game's edit sheet.
 for (const prefix of ["c-start", "c-end", "f-start", "f-end", "g-start", "g-end"]) {
   fillTimeSelects(prefix);
 }
@@ -212,9 +197,8 @@ function readTimeValue(prefix) {
 function writeTimeValue(prefix, value) {
   const [hour, minute] = (value || "").slice(0, 5).split(":");
   document.getElementById(prefix + "-h").value = hour || "";
-  // A minute off the five-minute grid - a season booked before this
-  // existed - would select nothing and silently become :00, so the
-  // nearest option is chosen instead.
+  // A minute off the five-minute grid selects the nearest option rather
+  // than becoming :00.
   const select = document.getElementById(prefix + "-m");
   const wanted = minute || "00";
   select.value = [...select.options].some((o) => o.value === wanted)
@@ -222,14 +206,9 @@ function writeTimeValue(prefix, value) {
     : String((Math.round(Number(wanted) / 5) * 5) % 60).padStart(2, "0");
 }
 
-/** Open or shut the wizard's own screen.
- *
- * It covers the club and season pickers deliberately: with those
- * still showing, four steps of a *new* season read as edits to the
- * old one. The page behind it stops scrolling for the same reason.
- *
- * The close button is only there when there is something to go back
- * to — a club with no season at all has nothing behind this screen.
+/** Opens or closes the wizard's screen. It covers the club and season
+ * pickers, so a new season is not mistaken for edits to the old one. The
+ * close button appears only when there is a season to go back to.
  */
 function setWizardOpen(open) {
   document.getElementById("wizard-backdrop").hidden = !open;
@@ -250,8 +229,7 @@ function showWizardStep(step) {
     dot.querySelector("i").textContent = n < step ? "✓" : String(n);
   }
   if (step === 2 && wizardDates.length === 0) {
-    // Default the generator to the next occurrence of the chosen
-    // weekday, so "產生場次" is one tap away from being right.
+    // Default to the next occurrence of the chosen weekday.
     const start = document.getElementById("g-start");
     if (!start.value) start.value = new Date().toISOString().slice(0, 10);
   }
@@ -287,23 +265,13 @@ function startNextSeason() {
     set("g-start", dateKey(next));
     set("g-weeks", String(dates.length));
     generateDates();
-    // Whether the air conditioning runs is a forecast for nights
-    // nobody has played yet, so it is carried over only when the last
-    // season was all of one thing — that is the pattern that repeats.
-    // A season that was half cooled says nothing about which of
-    // *these* evenings will be hot, so those start unticked.
+    // The air-conditioning forecast carries over only when the last
+    // season was all cooled or all not.
     const cooled = s.games.filter((g) => g.air_conditioned).length;
     if (cooled > 0 && cooled === s.games.length) setAllAc(true);
   }
   document.getElementById("create-season-title").textContent = "開新一季";
-  // Out of the way: the club's name is not part of this flow, and the
-  // paragraph explaining what a season is was written for somebody
-  // who has never made one. Left in place they pushed the stepper
-  // 650px down the page, so every step opened below the fold.
-  // The whole box, not only its paragraph: hiding just the words
-  // leaves an empty dashed rectangle with a title in it. 開新一季 is
-  // already said by the 回到本季設定 button above and by the stepper
-  // below, so the box has nothing left to do here.
+  // Hide the intro box so the stepper starts near the top.
   document.getElementById("create-season-blurb").hidden = true;
   setWizardOpen(true);
   showWizardStep(1);
@@ -325,8 +293,7 @@ function generateDates() {
     toast("請填寫起始日期與場次數");
     return;
   }
-  // Walk forward to the first matching weekday on or after the start
-  // date, then step a week at a time.
+  // First matching weekday on or after the start, then a week at a time.
   const first = new Date(startValue + "T00:00:00");
   while (first.getDay() !== weekday) first.setDate(first.getDate() + 1);
 
@@ -363,8 +330,8 @@ function toggleAllAc() {
   setAllAc(wizardDates.some((d) => !(acSurcharge > 0 && wizardAcDates.has(d))));
 }
 
-// 移除場次 turns a tap on a date from "toggle its air conditioning"
-// into "remove it", until 完成.
+// 移除場次 makes a tap remove the date instead of toggling its air
+// conditioning, until 完成.
 let wizardRemoving = false;
 function toggleRemoving() {
   wizardRemoving = !wizardRemoving;
@@ -407,16 +374,13 @@ function removeExtraName(name) {
 async function loadClubRoster() {
   if (clubRoster.length) return;
   clubRoster = await fetchClubMembers(API_BASE, currentClubId());
-  // The organizer is nearly always playing too — pre-check everyone
-  // so the common case is "confirm", not "tick 18 boxes".
+  // Everyone pre-ticked: the common case is confirming.
   pickedIds = new Set(
     clubRoster.filter((m) => !nextSeasonMemberIds || nextSeasonMemberIds.has(m.id)).map((m) => m.id)
   );
   renderWizard();
-  // What each of them is owed or owes, so leaving somebody out is a
-  // decision made with the money in view rather than after it. Late
-  // and non-fatal: the names are what the step is for, and a club
-  // with no books yet answers an empty list.
+  // Each person's balance, so leaving somebody out is decided with the
+  // money in view. Optional: the names are what matters.
   try {
     const balances = await (
       await fetch(`${API_BASE}/clubs/${currentClubId()}/balances`, { headers: authHeader() })
@@ -424,7 +388,7 @@ async function loadClubRoster() {
     rosterBalances = new Map(balances.map((b) => [b.player_id, Number(b.balance)]));
     renderWizard();
   } catch {
-    // Leave the rows without a figure rather than block the step.
+    // Rows without a figure rather than a blocked step.
   }
 }
 
@@ -447,9 +411,8 @@ function selectedNames() {
 }
 
 function renderWizard() {
-  // step 2: the dates as the shared grid, plus the running total. With
-  // no air-conditioning charge a date has nothing to toggle, so only
-  // 移除場次 makes the cells tappable.
+  // Step 2: the dates and the running total. With no air-conditioning
+  // charge, cells are tappable only for 移除場次.
   const acSurcharge = Number(document.getElementById("c-ac").value) || 0;
   const acOn = (d) => acSurcharge > 0 && wizardAcDates.has(d);
   if (!wizardDates.length) wizardRemoving = false;
@@ -476,7 +439,7 @@ function renderWizard() {
 
   const cost = Number(document.getElementById("c-cost").value) || 0;
   const memberCount = selectedNames().length;
-  // Divided by the capacity, not by how many names are picked.
+  // Divided by capacity, not by the names picked.
   const capacity = Number(document.getElementById("c-capacity").value) || 0;
   const cooledCount = wizardDates.filter(acOn).length;
   const prices = previewSharePerGame(cost, wizardDates.length, capacity, acSurcharge, cooledCount);
@@ -494,9 +457,7 @@ function renderWizard() {
         : "<span>・填妥場地費與人數上限後顯示金額</span>");
   }
 
-  // step 3: the roster itself lives in a sheet and the step carries one
-  // line. A club runs to a dozen or more people, and that many tick
-  // boxes pushed the price and the buttons off the bottom of a phone.
+  // Step 3: one summary line; the roster itself is in a sheet.
   const owedLabel = (id) => {
     const amount = Number(rosterBalances.get(id) || 0);
     if (!amount) return "";
@@ -530,9 +491,8 @@ function renderWizard() {
     if (go) go.textContent = picked.length ? "編輯 ›" : "選擇成員 ›";
   }
 
-  // Somebody the club still owes, or who still owes the club, standing
-  // outside the new season. Not wrong — a balance carries in this
-  // club's books whatever happens — but worth seeing before building.
+  // People with a balance who are left out of the new season: allowed,
+  // but worth seeing.
   const leftOut = clubRoster.filter(
     (m) => !pickedIds.has(m.id) && Number(rosterBalances.get(m.id) || 0) !== 0
   );
@@ -594,11 +554,10 @@ function togglePick(id) {
   renderWizard();
 }
 
-/** Step 4: what is about to be created, said against what it is
- * continuing from. Building a season charges every member on the
- * spot, so the last screen before that is a read, not another form —
- * and when it carries a previous season forward, the only things
- * worth reading are what *changed*. */
+/** Step 4: what is about to be created, compared with the season it
+ * continues. Creating it charges every member at once, so this is a read,
+ * not another form.
+ */
 function renderConfirm() {
   const value = (id) => document.getElementById(id).value.trim();
   const last = creatingNextSeason ? currentSeason : null;
@@ -652,17 +611,14 @@ function renderConfirm() {
   document.getElementById("confirm-diff").innerHTML = rows.join("");
 }
 
-// What re-pricing a season costs everybody is worth saying at the
-// moment the figure actually changes, and not before: sitting there on
-// every visit, it is small print above the save button about something
-// you are probably not doing.
+// The re-pricing warning appears only once the cost actually changes.
 document.getElementById("f-cost").addEventListener("input", () => {
   const field = document.getElementById("f-cost");
   document.getElementById("cost-warn-note").hidden =
     field.disabled || field.value.trim() === String(originalVenueCost);
 });
 
-// Cost lives on step 1 but drives the numbers shown on 2 and 3.
+// Cost is on step 1 but drives the figures on steps 2 and 3.
 document.getElementById("c-cost").addEventListener("input", renderWizard);
 document.getElementById("c-ac").addEventListener("input", renderWizard);
 document.getElementById("c-capacity").addEventListener("input", renderWizard);
@@ -701,10 +657,7 @@ async function createSeason() {
   try {
     const season = await postJson(API_BASE, `/clubs/${currentClubId()}/seasons`, payload);
     rememberId("vf_org_season", String(season.id));
-    // Straight to the money. Building a season charges every member
-    // their season fee on the spot, so collecting it is what the
-    // organizer does next — and this page reloading itself to show a
-    // settings form nobody asked for was the 卡頓 in the old flow.
+    // Straight to collecting the fees just charged.
     toast("已建立本季，請接著收取季費");
     location.href = "organizer-ledger.html";
   } catch (e) {
@@ -714,13 +667,8 @@ async function createSeason() {
 
 const settingsLoad = staleGuard();
 
-/** The form stays hidden and the spinner stays up until there is
- * something to put in the fields — see the picker callback above.
- *
- * Read through getJsonSWR so a second visit paints from the last known
- * season straight away: this page sits at the end of a chain of five
- * round trips (LIFF, identify, clubs, seasons, then this one), and it
- * was the only link in it not cached.
+/** Loads the season into the form, which stays hidden behind the spinner
+ * until then. Read through getJsonSWR so a second visit paints at once.
  */
 async function loadSettings(seasonId) {
   const ticket = settingsLoad.take();
@@ -748,11 +696,10 @@ async function loadSettings(seasonId) {
   }
 }
 
-/** 本季: the season's span, what one night costs, the rules, and the
- * ways out to 名單, 季末結算 and the next season. Every figure comes
- * from the server — a game's `share` is its price, already rounded by
- * the one function that rounds (pricing.shares_by_game); this only
- * picks and adds them. */
+/** 本季: the season's span, a night's price, the rules, and links to 名單,
+ * 季末結算 and the next season. Prices are the server's (`share`, rounded
+ * once by pricing.shares_by_game); this only picks and adds them.
+ */
 function renderSeasonTab(season) {
   const settled = season.settled_at !== null;
   originalVenueCost = season.total_venue_cost;
@@ -766,8 +713,7 @@ function renderSeasonTab(season) {
   document.getElementById("season-meta").textContent =
     `${weekly}共 ${dates.length} 場次` + (cancelled ? `，其中 ${cancelled} 場已取消` : "");
 
-  // A night's price where nothing else moves it: no venue change, and
-  // not called off with its cost spread over the rest.
+  // A night's price with nothing else moving it.
   const typical = (cooled) =>
     season.games.find(
       (g) => g.status === "scheduled" && !!g.air_conditioned === cooled && Number(g.venue_cost_delta || 0) === 0
@@ -804,8 +750,8 @@ function renderSeasonTab(season) {
     fact("lock", "更動截止", `開賽前 ${season.change_deadline_hours} 小時`);
 
   document.getElementById("roster-count").textContent = `${season.members.length} 人`;
-  // The same window the ledger enforces: from three weeks before the
-  // last game (see organizer-ledger.html settleBlocker).
+  // The same window the ledger uses (see settleBlocker): from three weeks
+  // before the last game.
   document.getElementById("settle-row").hidden = settled;
   const last = dates[dates.length - 1];
   let sub = "已開放";
@@ -835,25 +781,14 @@ function gameStatusLabel(status) {
   return "";
 }
 
-/* 冷氣場次 — correcting the forecast made when the season was set up.
- *
- * Deliberately not the same act as the per-game switch on the
- * management page: that one records that the air conditioning really
- * ran (or didn't) and moves `total_venue_cost` with it, because the
- * venue really charges for it. This one only says which nights the
- * air-conditioning part of an unchanged bill belongs to, so the total
- * stays put and every game is simply re-priced around it. Using the
- * per-game switch to fix a mistyped forecast inflated the bill one
- * game at a time, which is why this exists.
- *
- * Games already played are not offered (2026-10-21): what happened on
- * those nights is recorded on 總覽, and the server refuses it too.
+/* 冷氣場次: correcting the air-conditioning forecast. The total stays and
+ * only which nights carry the AC portion moves; the per-game switch on 總覽
+ * records what actually ran and moves the total. Games already played are
+ * not offered, and the server refuses them too.
  */
 let acDates = new Set();
-// The season this block is currently showing. Kept here rather than
-// read from currentSeason so the functions below depend only on what
-// renderAcDates was handed — they are the same object in the page,
-// and this way they can be exercised without one.
+// The season this block shows, so the functions below depend only on what
+// renderAcDates was given.
 let acSeason = null;
 
 function acItems(season, chosen) {
@@ -872,14 +807,14 @@ function acItems(season, chosen) {
 function renderAcDates(season) {
   acSeason = season;
   const block = document.getElementById("ac-block");
-  // Nothing to place when the venue doesn't charge for the AC at all.
+  // Nothing to place when the AC is not charged.
   block.hidden = !(Number(season.ac_surcharge) > 0);
   if (block.hidden) return;
   const cooled = season.games.filter((g) => g.air_conditioned && g.status === "scheduled").length;
   document.getElementById("ac-sum").textContent =
     `預定 ${cooled} 場・每場冷氣費用 $${Number(season.ac_surcharge).toLocaleString("en-US")}`;
   document.getElementById("ac-grid").innerHTML = dayGridHtml(acItems(season), { lockPast: true });
-  // Only while there is a game still to come to correct.
+  // Only while a game is still to come.
   const today = todayKey();
   const correctable = season.games.some((g) => g.date >= today && g.status === "scheduled");
   document.getElementById("forecast-open").hidden = season.settled_at !== null || !correctable;
@@ -898,8 +833,7 @@ document.getElementById("forecast-grid").addEventListener("click", (e) => {
 });
 
 function toggleSeasonAcDate(iso) {
-  // Local until 儲存: a half-finished correction must not re-price the
-  // season one tap at a time.
+  // Local until 儲存.
   if (acDates.has(iso)) acDates.delete(iso);
   else acDates.add(iso);
   drawForecast();
@@ -907,10 +841,10 @@ function toggleSeasonAcDate(iso) {
 
 const forecastLoad = staleGuard();
 
-/** The grid, and what the change would cost. The figures are the
- * server's (POST .../air-conditioned-dates/preview): the browser does
- * not repeat the rounding rules, which would not see a cancelled night
- * or a night's own venue cost and would then disagree with the books. */
+/** The grid and what the change would cost, using the server's preview
+ * (POST .../air-conditioned-dates/preview) rather than repeating the
+ * rounding rules here.
+ */
 function drawForecast() {
   const season = acSeason;
   document.getElementById("forecast-grid").innerHTML = dayGridHtml(acItems(season, acDates), {
@@ -927,8 +861,7 @@ function drawForecast() {
     countRow +
     '<div class="st-fact"><span class="st-fk">每人費用</span><span class="st-fv"><i class="spinner sm" aria-hidden="true"></i> 計算中</span></div>';
   const ticket = forecastLoad.take();
-  // A read, not a write: plain fetch rather than postJson, which would
-  // mark the tapped date as busy and show the page's 儲存中 marker.
+  // A read, so plain fetch: postJson would show a saving marker.
   previewAcDates(season.id, [...acDates])
     .then((result) => {
       if (!forecastLoad.current(ticket)) return;
@@ -952,9 +885,9 @@ async function previewAcDates(seasonId, dates) {
   return data;
 }
 
-/** Before → after, for a plain night, a cooled night and the season. A
- * "plain" or "cooled" night is one with nothing else moving its price
- * — still on, and no venue change of its own. */
+/** Before and after for a plain night, a cooled night and the season fee.
+ * A plain or cooled night is one with nothing else moving its price.
+ */
 function forecastFigures(season, result) {
   const byDate = new Map(season.games.map((g) => [g.date, g]));
   const ordinary = result.games.filter((g) => {
@@ -994,16 +927,16 @@ async function saveAcDates() {
     );
     closeSheet("forecast-backdrop");
     toast("已更新預定冷氣場次", "good");
-    // Re-read: every game's share moved, and the season fee with it.
+    // Re-read: every game's share and the season fee moved.
     await loadSettings(acSeason.id);
   } catch (e) {
     toast("更新失敗：" + e.message);
   }
 }
 
-/** One line per game: the date, anything that makes this night unlike
- * the others, its air conditioning and its price. The row opens the
- * game's sheet. */
+/** One row per game: the date, what makes the night different, its air
+ * conditioning and price. Opens the game's sheet.
+ */
 function gameRowHtml(g, pricesAc) {
   const info = describeDate(g.date);
   const d = new Date(g.date + "T00:00:00");
@@ -1051,14 +984,10 @@ function renderGames(season) {
 
 let dateSheetGameId = null;
 
-/** One game: what it costs and its air conditioning, then whatever may
- * still be done to it.
- *
- * A game still to come can be moved, re-timed, given its own venue or
- * venue cost, or called off. A game already played can only be called
- * off — a night recorded wrongly still has to be correctable — and a
- * date in the past is not somewhere to move a game to. A cancelled
- * game, or any game of a settled season, is only read.
+/** One game: its price and air conditioning, then what may still be done.
+ * A game to come can be moved, re-timed, given its own venue or venue
+ * cost, or called off; a game already played can only be called off; a
+ * cancelled game, or any game of a settled season, is read only.
  */
 function openGameSheet(gameId) {
   const game = currentSeason.games.find((g) => g.id === gameId);
@@ -1114,13 +1043,9 @@ function cancelFromGameSheet() {
   openCancelSheet(id);
 }
 
-/** Moving a night rather than calling it off and booking another.
- *
- * Asked for on 2026-09-17: dates and times do move. The season keeps
- * the same number of games at the same share, so nobody's money
- * moves, and the absences, signups and queue recorded against this
- * game travel with it because they are keyed by the game and not by
- * its date. See routes/games.py move_game for the four refusals.
+/** Moves a night rather than calling it off and booking another: no money
+ * moves, and everything recorded against the game moves with it. See
+ * update_game in routes/games.py for what is refused.
  */
 let originalDelta = 0;
 
@@ -1131,9 +1056,7 @@ function fillGameFields(game) {
   document.getElementById("g-cost-hint").textContent =
     `本場目前每人 $${game.share}。場地費較高時填入差額，較低時填負數；留空表示與平常相同。`;
   document.getElementById("g-cost-warn").hidden = true;
-  // Assignment rather than addEventListener: this sheet is opened again
-  // for every game, and addEventListener would stack one more handler
-  // each time — the same reason the season picker uses onchange.
+  // Assigned rather than added: the sheet is reopened for every game.
   cost.oninput = () => {
     const now = Number(cost.value || 0);
     const warn = document.getElementById("g-cost-warn");
@@ -1141,13 +1064,8 @@ function fillGameFields(game) {
       warn.hidden = true;
       return;
     }
-    // Deliberately does not work out the new per-person figure here.
-    // Rounding happens in exactly one place — pricing.shares_by_game —
-    // and repeating it in the browser would give money a second source
-    // of truth that could disagree with the books. The total moves by
-    // exactly what was typed, which is knowable without rounding
-    // anything, and the new per-person amount shows on the row itself
-    // once it is saved.
+    // Shows how the season total moves, not a new per-person price:
+    // rounding happens only on the server.
     const moved = now - originalDelta;
     const total = Number(currentSeason.total_venue_cost) + moved;
     warn.hidden = false;
@@ -1161,9 +1079,7 @@ function fillGameFields(game) {
   writeTimeValue("g-end", game.end_time);
   const loc = document.getElementById("g-location");
   loc.value = game.location || "";
-  // Empty means "the same as the season", so the season's own venue is
-  // the placeholder rather than a generic example — an empty box then
-  // shows what will actually happen instead of looking unanswered.
+  // Empty means the season's venue, so that is the placeholder.
   loc.placeholder = currentSeason.location || "例如：晴光館";
   document.getElementById("g-location-hint").textContent = currentSeason.location
     ? `留空表示與本季相同：${currentSeason.location}`
@@ -1180,26 +1096,18 @@ async function saveGameEdit() {
     toast("請選擇日期");
     return;
   }
-  // Sent whole rather than diffed: an empty venue box or an unset hour
-  // is a real instruction — "put this night back on the season's" —
-  // and null is how the server is told that. A field left out would
-  // mean "leave it alone", which is a different request. See
-  // GameUpdate in schemas.py.
+  // Every field is sent: null means "back to the season's", which differs
+  // from leaving a field out. See GameUpdate in schemas.py.
   const cost = document.getElementById("g-cost-delta").value.trim();
   const payload = {
     date: value,
     location: document.getElementById("g-location").value.trim() || null,
     start_time: readTimeValue("g-start"),
     end_time: readTimeValue("g-end"),
-    // Empty means "the same as every other night", which the server
-    // reads as zero — see GameUpdate. Sent as typed rather than as a
-    // Number so a decimal never loses precision on the way.
+    // Empty means zero; sent as typed so decimals keep their precision.
     venue_cost_delta: cost === "" ? null : cost,
   };
-  // No markBusy here: postJson already marks whichever control was
-  // pressed. Nor translateApiError — postJson hands back a message
-  // that is already in Chinese, and translating it twice turns
-  // 「那一天這一季已經有一場了」 into 「操作失敗（…）」.
+  // postJson already marks the pressed control and translates errors.
   try {
     await postJson(API_BASE, `/games/${dateSheetGameId}`, payload, "PATCH");
     closeDateSheet();
@@ -1280,8 +1188,8 @@ function fillClubName() {
 const clubNameInput = document.getElementById("club-name");
 clubNameInput.addEventListener("input", updateClubNameRow);
 
-// 儲存 lights up only once the name has actually changed, and the
-// characters left are only worth saying then.
+// 儲存 is enabled, and the remaining length shown, only once the name
+// changes.
 function updateClubNameRow() {
   const value = clubNameInput.value.trim();
   const changed = value.length > 0 && value !== loadedClubName;
@@ -1356,7 +1264,7 @@ function openCostSheet() {
   if (!s || s.settled_at !== null) return;
   document.getElementById("f-cost").value = s.total_venue_cost;
   document.getElementById("f-ac").value = s.ac_surcharge;
-  // Hidden until the figure actually changes — see the f-cost listener.
+  // Hidden until the figure changes; see the f-cost listener.
   document.getElementById("cost-warn-note").hidden = true;
   openSheet("cost-backdrop");
 }
@@ -1373,9 +1281,9 @@ function openRulesSheet() {
   openSheet("rules-backdrop");
 }
 
-/** The venue bill and the air conditioning's share of it. Locked once
- * the season is settled, by the same rule on the server: both are
- * subtracted from each other to price a game. */
+/** Saves the venue bill and the air-conditioning surcharge; both price
+ * every game, so they are locked once settled, as on the server.
+ */
 async function saveCost() {
   const newCost = document.getElementById("f-cost").value.trim();
   if (newCost !== String(originalVenueCost)) {
@@ -1397,8 +1305,10 @@ async function saveCost() {
   }
 }
 
-/** Capacity, times, venue and the change deadline. Still editable on a
- * settled season, as before: none of them re-prices it. */
+/** Saves capacity, times, venue and the change deadline. Capacity
+ * re-prices the season, so the server refuses changing it once settled;
+ * the rest stays editable.
+ */
 async function saveRules() {
   const deadlineValue = document.getElementById("f-deadline").value;
   const payload = {

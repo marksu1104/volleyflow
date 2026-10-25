@@ -1,17 +1,15 @@
-// localhost -> the local API, anywhere else -> production. See apiBase.
+// The local API on a development machine, production elsewhere; see
+// apiBase.
 const API_BASE = apiBase();
 const LIFF_ID = "2011156233-6CouG6VI";
 let me = null;
 
 (async function init() {
-  // This page edits the Player row itself, so its id must be authoritative.
-  // An organizer may have linked this LINE account to an older roster row
-  // since the tab cached its identity; using that deleted id makes every
-  // profile write miss the real person. Other pages may keep the fast
-  // session cache, but profile deliberately re-identifies once on entry.
+  // This page edits the player itself, so it re-identifies on entry
+  // rather than trusting the cached identity, which may point at a row
+  // merged away since.
   sessionStorage.removeItem("vf_identity");
-  // Signing in is the slowest step here; say so rather than show a
-  // blank page while it runs.
+  // Signing in is the slowest step; show that it is loading.
   showPageLoading(document.getElementById("boot"));
   const identified = await initLiffIdentity(API_BASE, LIFF_ID);
   document.getElementById("boot").innerHTML = "";
@@ -23,9 +21,7 @@ let me = null;
   }
   me = identified;
   document.getElementById("content").hidden = false;
-  // Wired here rather than hardcoded in the markup so the address
-  // lives in exactly one place (js/common/) — member.html's join screen
-  // offers the same link.
+  // The address lives in one place (js/common/clubs.js).
   document.getElementById("oa-link").href = OFFICIAL_ACCOUNT_URL;
   renderProfile();
   showOfficialAccountState();
@@ -33,13 +29,9 @@ let me = null;
   await renderClubs();
 })();
 
-/** The way in to the problem reports, for the developer only — the
- * server names them in identify, and checks again on every report
- * request, so this only decides whether a link is drawn.
- *
- * The unread count is the whole signal now: reports stopped being
- * pushed over LINE on 2026-09-15, to keep the free tier's 200 monthly
- * messages for the short-roster alert. */
+/** The way into problem reports, for the developer only, with the unread
+ * count. The server checks again on every report request.
+ */
 async function showDeveloperReports() {
   document.getElementById("dev-reports").hidden = false;
   try {
@@ -52,9 +44,9 @@ async function showDeveloperReports() {
   }
 }
 
-/** 已加入 / 未加入 beside the official account, from LINE itself.
- * Nothing at all when LINE could not be asked: guessing either way
- * would be wrong for somebody (see LineReachableOut). */
+/** 已加入 / 未加入 beside the Official Account, from LINE; nothing when LINE
+ * could not be asked (see LineReachableOut).
+ */
 async function showOfficialAccountState() {
   try {
     const res = await fetch(`${API_BASE}/players/me/line-reachable`, { headers: authHeader() });
@@ -64,11 +56,11 @@ async function showOfficialAccountState() {
     if (reachable === true) el.innerHTML = '<span class="state-pill ok">已加入</span>';
     else if (reachable === false) el.innerHTML = '<span class="state-pill warn">未加入</span>';
   } catch (e) {
-    // The row still opens the account without a state beside it.
+    // The row still opens the account without a state.
   }
 }
 
-// 顯示名稱 opens in place, under its own row.
+// 顯示名稱 opens in place under its row.
 document.getElementById("name-row").addEventListener("click", () => {
   const edit = document.getElementById("name-edit");
   edit.hidden = !edit.hidden;
@@ -89,15 +81,11 @@ function renderProfile() {
 async function saveName() {
   const name = document.getElementById("name-input").value.trim();
   if (!name) { toast("名稱不得為空白"); return; }
-  // Both of these used to be silent: pressing 儲存 with the name
-  // unchanged returned without a word, and a successful save said
-  // nothing unless the name had been taken. A button that does
-  // nothing visible is indistinguishable from a broken one.
+  // Say something either way, so the button never seems to do nothing.
   if (name === me.name) { toast("名稱未變更"); return; }
   try {
     const updated = await postJson(API_BASE, `/players/${me.id}/name`, { name }, "PUT");
-    // initLiffIdentity caches "who am I" for the session; the name in
-    // it is now wrong.
+    // The cached identity holds the old name.
     sessionStorage.removeItem("vf_identity");
     me.name = updated.name;
     renderProfile();
@@ -131,15 +119,11 @@ document.getElementById("gender-pick").addEventListener("click", async (e) => {
   }
 });
 
-// The report form, its screenshot downscaler and sendReport all moved
-// to report.html on 2026-09-18 — deleted here rather than left behind
-// as dead code, so there is exactly one place that can send a report.
 
-/** One club: its name, the role if it is more than member, and where
- * the money stands. The row opens that club's breakdown on the ledger
- * page. 已結清 is said rather than left blank now that the figure is
- * the row's value (2026-10-20); an unknown balance still shows nothing
- * — see balanceBadgeHtml. */
+/** One club: its name, the role if organizer, and its balance (已結清 when
+ * settled, nothing when unknown; see balanceBadgeHtml). Opens that club's
+ * breakdown on the ledger page.
+ */
 function clubRowHtml(club) {
   const roleTag = club.role === "organizer" ? '<span class="role-tag">管理員</span>' : "";
   const balHtml = balanceBadgeHtml(club.balance, { settled: "已結清" });
@@ -152,25 +136,10 @@ function clubRowHtml(club) {
   `;
 }
 
-/** 我的球隊.
- *
- * Reported as 「每次都會進入網頁後過很久才載入出現」. Measured at 824ms to
- * the heading and 1,085ms to the rows — not slow against the rest of
- * the app, which is why it took three goes to see what was actually
- * wrong: this card had no loading state at all, so that second was a
- * blank space rather than a visibly busy one, and a blank space reads
- * as a page that has finished and found nothing.
- *
- * Something is on screen immediately, and the club names paint from
- * the last visit's copy without waiting for the network (see
- * getJsonSWR).
- *
- * The balances used to arrive separately, one request per club,
- * painted over the rows once they landed. That was the N+1 behind the
- * original complaint, and it also meant the list rendered twice —
- * names, then names-with-figures — so the row content shifted under
- * the reader a moment after appearing. One request now carries both,
- * and the rows paint once. */
+/** 我的球隊: shows a loading state at once, paints the clubs from the last
+ * visit's copy (getJsonSWR), and gets names and balances in one request
+ * so the rows paint once.
+ */
 async function renderClubs() {
   const list = document.getElementById("clubs-list");
   showPageLoading(list);

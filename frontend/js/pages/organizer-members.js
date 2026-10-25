@@ -1,4 +1,5 @@
-// localhost -> the local API, anywhere else -> production. See apiBase.
+// The local API on a development machine, production elsewhere; see
+// apiBase.
 const API_BASE = apiBase();
 // The club is chosen from the top bar, as on the member page.
 mountClubChip(document.getElementById("club-chip"), document.getElementById("club-picker"));
@@ -80,8 +81,8 @@ identityReady.then((identified) => {
     (seasonId) => {
       const clubId = currentClubId();
       const context = `${clubId || "none"}:${seasonId || "none"}`;
-      // Cached picker data is followed by a fresh copy. If it retained
-      // the same selection, do not flash the already-current page.
+      // The fresh copy after the cached one keeps the same selection: do
+      // not redraw.
       if (context === selectedContext) return;
       selectedContext = context;
       rosterEditing = false;
@@ -110,9 +111,7 @@ function renderJoinLink(invite) {
     '<button type="button" onclick="copyJoinLink()">複製</button></div>';
 }
 
-// A club switch first has to replace the season picker. Hide the old
-// club's roster at the start of that wait, rather than briefly letting
-// yesterday's selection look like it belongs to the newly chosen club.
+// Hide the old club's roster while the new club's seasons load.
 document.getElementById("club-picker").addEventListener("change", () => {
   rosterEditing = false;
   setMembersLoading(true);
@@ -264,9 +263,9 @@ async function approveRequest(playerId, asFixed, btn) {
     (member) => member.id !== person.id && member.status === "active" && !member.linked &&
       (member.name === person.name || member.name === originalName)
   );
-  // Never join identities by name automatically: two real people can
-  // share one. Here the organizer knows who requested access, so offer an
-  // explicit reconciliation before approving a second copy.
+  // Never join identities by name automatically, since two people can
+  // share one; offer the organizer an explicit link before approving a
+  // duplicate.
   if (accountlessMatches.length === 1) {
     const existing = accountlessMatches[0];
     if (confirm(`球隊名單已有「${existing.name}」。\n\n這個 LINE 帳號就是同一位成員嗎？確認後會沿用原有名單與帳務。`)) {
@@ -341,18 +340,16 @@ function renderDuplicates() {
     section.hidden = true;
     return;
   }
-  // Pending requests are reconciled by approveRequest. Merging one here
-  // would move the existing roster onto a membership that is still pending.
+  // Pending requests are handled by approveRequest, not merged here.
   const activeMembers = allClubMembers.filter((m) => m.status === "active");
   const exactNames = new Set(activeMembers.map((m) => m.name.trim()));
   const byName = new Map();
   for (const m of activeMembers) {
     const name = m.name.trim();
     const numbered = name.match(/^(.*) \((\d+)\)$/);
-    // Older versions added a global "(2)" suffix before the person had
-    // even joined a club. Treat that as the original name only when the
-    // unsuffixed row actually exists here; merging still requires the
-    // organizer's confirmation below.
+    // An older naming rule added "(2)" suffixes: treat one as the
+    // original name only if that name exists here. Merging still needs
+    // confirmation.
     const key = numbered && exactNames.has(numbered[1]) ? numbered[1] : name;
     byName.set(key, [...(byName.get(key) || []), m]);
   }
@@ -379,7 +376,7 @@ function renderDuplicates() {
     .join("");
 }
 
-// Kept: whoever has LINE, else whoever is on this season's roster, else the oldest.
+// Kept: whoever has LINE, else whoever is on the roster, else the oldest.
 function keeperOf(group) {
   const onRoster = new Set(currentSeason.members.map((m) => m.id));
   return (
@@ -407,10 +404,7 @@ async function mergeDuplicates(keepId, duplicateIds) {
 }
 
 
-// avatar_url is a plain <img src>, not interpolated as markup, so it
-// doesn't need escaping the way name does — but the name (and gender
-// label) do, since a LINE display name is attacker-supplied once
-// anyone can land in this pool via the join link.
+// Names come from LINE and must be escaped; see escapeHtml.
 function poolRowHtml(p) {
   const controls = rosterWrites.has(p.id)
     ? '<span class="roster-write-state"><i class="spinner sm" aria-label="儲存中"></i></span>'
@@ -434,9 +428,8 @@ function renderJoinPool() {
   const poolSection = document.getElementById("pool-section");
   const list = document.getElementById("pool-list");
   const others = currentPool || [];
-  // Before the first game, and while correcting an open season, retain
-  // an empty "其他成員" group so there is an honest place to add a visitor.
-  // In ordinary read-only mode an empty group adds no useful information.
+  // Keep an empty 其他成員 group while the roster can be edited, as the place
+  // to add a visitor.
   poolSection.hidden = !currentSeason || currentSeason.settled_at !== null ||
     (others.length === 0 && !canEditRoster());
   if (poolSection.hidden) return;
@@ -455,10 +448,10 @@ function setPoolExpanded(expanded) {
   poolToggle.setAttribute("aria-expanded", String(expanded));
 }
 
-/** Keep roster corrections in the current view. The server remains the
- * source of truth, but a successful write already returns enough data to
- * move the affected row without replacing the whole page and closing edit
- * mode. A later page visit still fetches a fresh copy as usual. */
+/** Redraws the roster lists in place after a correction: the write's
+ * response is enough to move the row without reloading the page or
+ * leaving edit mode.
+ */
 function renderRosterLists(enteringId = null) {
   movingPlayerId = enteringId;
   renderMembers(currentSeason);
@@ -549,17 +542,15 @@ async function promoteFromPool(playerId) {
   }
 }
 
-/** Someone with no LINE account can't open the app at all: they can't
- * take their own leave, sign themselves up, or set their own gender —
- * the organizer has to do all of it for them. Worth saying on the row,
- * because otherwise it looks like they're just not participating. */
+/** Marks somebody without a LINE account, who cannot act for themselves,
+ * so the organizer knows they must.
+ */
 function guestTag(m) {
   return m.linked ? "" : '<span class="guest-tag">訪客</span>';
 }
 
 function genderButtons(m) {
-  // Linked members too: people skip the gender question on first
-  // sign-in, and the court split needs it either way.
+  // Linked members too: the gender question can be skipped.
   if (!canEditRoster()) return "";
   return `
     <span class="mini-gender">
@@ -569,18 +560,13 @@ function genderButtons(m) {
   `;
 }
 
-/** Flips the button first and sends afterwards. Waiting on a round
- * trip to redraw a two-state toggle is the difference between a
- * control that feels like a switch and one that feels broken. */
+/** Flips the toggle first and sends afterwards, so it feels like a switch.
+ */
 async function setGender(playerId, gender) {
   if (!canEditRoster()) return;
   const member = (currentSeason.members || []).find((m) => m.id === playerId);
   const previous = member ? member.gender : null;
-  // Already set that way: the button is showing the state it sets, so
-  // there is nothing to draw and nothing to send. It used to send
-  // anyway, which meant tapping 男 on somebody already marked 男 sat
-  // silent for half a second and then changed nothing — the one control
-  // in the app that tests/visual/feedback.js still caught doing that.
+  // Already set: nothing to draw or send.
   if (previous === gender) return;
   if (member) member.gender = gender;
   bumpLocalRevision();
@@ -596,14 +582,9 @@ async function setGender(playerId, gender) {
   }
 }
 
-/** "This LINE account is really that person you typed in earlier."
- *
- * When the organizer writes a name into the roster before that person
- * has ever opened the app, and they then log in, the server creates a
- * second row for them on purpose — it will not guess identity from a
- * name, because guessing wrong would hand someone else's ledger to a
- * stranger. So the roster entry stays marked 訪客 and a duplicate sits
- * in the pool. This is the organizer making that call by hand.
+/** Links a LINE account to the roster entry typed in for that person
+ * earlier. The server never guesses this by name, so the organizer
+ * decides.
  */
 async function linkToRosterEntry(linePlayerId) {
   const guests = (currentSeason.members || []).filter((m) => !m.linked);
@@ -741,8 +722,7 @@ async function addGuest() {
   const input = document.getElementById("new-member-name");
   const genderInput = document.getElementById("new-member-gender");
   const name = input.value.trim();
-  // Checked here rather than left to the server: an empty name got a
-  // 400 back, which reaches the reader as nothing at all happening.
+  // Checked here so an empty name gets a message.
   if (!name) {
     toast("請先輸入訪客的名字");
     input.focus();

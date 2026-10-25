@@ -1,4 +1,5 @@
-// localhost -> the local API, anywhere else -> production. See apiBase.
+// The local API on a development machine, production elsewhere; see
+// apiBase.
 const API_BASE = apiBase();
 // The club is chosen from the top bar, as on the member page.
 mountClubChip(document.getElementById("club-chip"), document.getElementById("club-picker"));
@@ -35,9 +36,8 @@ if (location.hash === "#settle") showTab("closing");
 showPageLoading(document.getElementById("no-season"));
 document.getElementById("ledger-tabs").hidden = true;
 
-// Every club-scoped read carries the caller's token now, so nothing may
-// fetch before LIFF identity has resolved — otherwise authHeader() is
-// empty and the server correctly says 401.
+// Every read carries the caller's token, so nothing is fetched before
+// identity resolves.
 identityReady.then((identified) => {
   if (!identified) {
     stopLoadingEscalation();
@@ -54,8 +54,6 @@ identityReady.then((identified) => {
       const hasClub = !!currentClubId();
       if (id) {
         // The tabs stay hidden until loadLedger has the numbers.
-        // Revealing them here put an empty 季費已收 card on screen for
-        // the length of the fetch, which reads as broken, not busy.
         document.getElementById("season-picker-field").hidden = false;
         document.getElementById("season-picker").hidden = false;
         loadLedger(id);
@@ -64,20 +62,17 @@ identityReady.then((identified) => {
       }
     },
     (e) => showPageError(document.getElementById("no-season"), e.message),
-    // Only the clubs this person organizes (plus, for the developer,
-    // every other club) — see managesClub. A club they merely belong to
-    // used to appear here and open a management screen they cannot use.
+    // Only clubs this person organizes; see managesClub.
     managesClub
   );
 });
 
-/** The three tabs are meaningless without a season — there are no fees
- * to collect and nothing to settle — so hide them entirely rather than
- * showing three empty money screens. */
+/** Without a season there is nothing to collect or settle, so the tabs are
+ * hidden.
+ */
 function setHasSeason(hasSeason) {
-  // #tab-fee starts hidden in the markup too, or its 季費已收 heading
-  // and its empty white bar sit under the spinner while the numbers
-  // are still on their way.
+  // #tab-fee starts hidden in the markup too, so it does not show under
+  // the spinner.
   document.getElementById("ledger-tabs").hidden = !hasSeason;
   document.getElementById("season-picker-field").hidden = !hasSeason;
   document.getElementById("season-picker").hidden = !hasSeason;
@@ -93,37 +88,28 @@ function setHasSeason(hasSeason) {
           { label: "建立第一季", href: "organizer-settings.html" }
         )
       : noClubYetHtml();
-  // It opens on 當天臨打 (see below). A #settle link still wins
-  // outright — that is somebody arriving from a link that names the
-  // tab it wants.
+  // Opens on 當天臨打; a #settle link wins.
   if (hasSeason) {
     const today = dateKey(new Date());
-    // 季末結算 is worth an equal third of this control on exactly one
-    // night a season. Until the last game has been played it steps
-    // aside instead — still there, still tappable, just not competing
-    // with the two tabs used every week. showTab only toggles `on`
-    // and the panels' hidden flag, so this class survives every
-    // switch.
+    // Until the last game has been played, 季末結算 is shown quieter than the
+    // two weekly tabs, but still tappable.
     const games = currentSeason.games;
     const last = games[games.length - 1];
     const stillRunning =
       currentSeason.settled_at === null && !!last && last.date >= today;
     const closingTab = document.querySelector('#ledger-tabs [data-tab="closing"]');
     if (closingTab) closingTab.classList.toggle("quiet", stillRunning);
-    // 當天臨打 first, always (asked 2026-10-16): it is what this page is
-    // opened for on most days, not only on a game day.
+    // 當天臨打 first: what this page is opened for most days.
     showTab(location.hash === "#settle" ? "closing" : "dropin");
   }
 }
 
 const ledgerLoad = staleGuard();
 
-/** Changing club or season: the figures on screen belong to the old
- * one, so they come down at once and the lower half shows the same
- * 載入中 as the first load until the new season paints. Leaving them
- * up while the request was out read as the switch not having taken
- * (2026-10-03). Taking a ticket drops any paint still on its way for
- * the old season, which would otherwise put it back. */
+/** Changing club or season: the old figures come down at once and 載入中
+ * shows until the new season paints. Taking a ticket drops any paint
+ * still due for the old season.
+ */
 function showSwitching() {
   ledgerLoad.take();
   document.getElementById("ledger-tabs").hidden = true;
@@ -132,31 +118,20 @@ function showSwitching() {
   });
   showPageLoading(document.getElementById("no-season"));
 }
-// Alongside the pickers' own onchange (initClubAndSeasonPickers), not
-// instead of it: those fetch, this only clears the screen first.
+// Alongside the pickers' own handler, which fetches; this only clears the
+// screen.
 document.getElementById("club-picker").addEventListener("change", showSwitching);
 document.getElementById("season-picker").addEventListener("change", showSwitching);
 
 async function loadLedger(seasonId) {
-  // Two of these run on nearly every page load — see staleGuard — and
-  // whichever finishes last wins. Without the ticket the loser can be
-  // the older one, repainting money figures from before the last
-  // write.
+  // Two loads usually overlap; see staleGuard.
   const ticket = ledgerLoad.take();
-  // What the screen knew when this read set off. It matters more now
-  // that a cached copy can arrive: an answer from before the last tap
-  // would otherwise repaint a payment away. See localRevision.
+  // What the screen knew when this read left; see localRevision.
   const askedAt = localRevision();
   const errorEl = document.getElementById("error");
   errorEl.textContent = "";
   try {
-    // Cached copy first, network second — the same conversion
-    // organizer-settings.html made, for the same reason: this was the
-    // only link in the chain (LIFF, identify, clubs, seasons, then
-    // this) still going to the network every time. Measured at 1910ms
-    // warm against 508ms for 設定, which reads the same season the
-    // same way. A 404 now reports through the catch rather than its
-    // own branch, matching that page.
+    // Cached copy first, network second; a 404 reports through the catch.
     await getJsonSWR(`${API_BASE}/seasons/${seasonId}`, (season) => {
       paint(season).catch((e) => {
         if (!ledgerLoad.current(ticket)) return;
@@ -171,20 +146,15 @@ async function loadLedger(seasonId) {
 
   async function paint(season) {
     if (!ledgerLoad.current(ticket)) return;
-    // Older than what is on screen — painting it would undo a tap.
+    // Older than the screen: painting it would undo a tap.
     if (currentSeason && currentSeason.id === season.id && localRevision() !== askedAt) return;
     currentSeason = season;
-    // Started before the balances rather than after them: the two
-    // don't depend on each other, and running them back to back made
-    // this page wait out two round trips where one would do.
+    // Started alongside the balances; the two are independent.
     const settlementReady = fetchSettlement(season);
     await loadBalances(currentSeason);
     if (!ledgerLoad.current(ticket)) return;
-    // The screen goes up here, not after the settlement. That preview
-    // feeds 季末結算 and nothing else, so waiting for it held 季費 and
-    // 當天臨打 — three quarters of the page — behind a round trip they
-    // have no use for. renderClosingTab already copes with an empty
-    // preview; it is what it draws before one is fetched at all.
+    // The page goes up without waiting for the settlement preview, which
+    // only 季末結算 uses.
     await Promise.all([renderFeeTab(), renderDropInTab()]);
     if (!ledgerLoad.current(ticket)) return;
     setHasSeason(true);
@@ -194,19 +164,16 @@ async function loadLedger(seasonId) {
   }
 }
 
-// --- shared helpers -----------------------------------------------
+// Shared helpers
 
-/** Everyone's balance in one request. This used to be one request per
- * member — around forty on a page load for a normal club, against a
- * browser that opens six connections at a time, which is why this
- * screen crawled. Cached on `balances` so switching tabs doesn't
- * re-ask. */
+/** Everyone's balance in one request, kept so switching tabs does not
+ * re-ask.
+ */
 let balances = {};
 
 let settlementPreview = { members: [] };
 
-/** What settling right now would refund. Fetched alongside the
- * balances, not after them. */
+/** What settling now would refund. */
 async function fetchSettlement(season) {
   if (season.settled_at !== null) return { members: [] };
   try {
@@ -219,11 +186,9 @@ async function fetchSettlement(season) {
   }
 }
 
-/** `apply` is how the caller says whether this answer is still wanted.
- * It has to be its decision, not a check afterwards: applyBalances
- * replaces the whole map, so an answer older than the screen has
- * already overwritten the payment it was about by the time anyone
- * could notice and skip the repaint. */
+/** `apply` says whether this answer is still wanted, decided before the
+ * map is replaced rather than after.
+ */
 async function loadBalances(season, apply) {
   const use = apply || applyBalances;
   try {
@@ -237,32 +202,18 @@ async function loadBalances(season, apply) {
   }
 }
 
-/** Kept apart from the fetch above so the rows every money figure is
- * derived from can be set directly, without a network stub. */
+/** Sets the rows every figure comes from; separate from the fetch so tests
+ * can set them directly.
+ */
 function applyBalances(rows) {
   balances = {};
   for (const row of rows) balances[row.player_id] = row;
 }
 
-/** Re-reads everyone's balance after a payment, without being able to
- * undo the payment that asked for it.
- *
- * This used to fire a GET the instant one payment's POST came back.
- * Tap 已收 on several rows in a row and that GET overtakes the taps
- * still waiting their turn in the write queue: the answer describes
- * the books as they were before those taps, the tabs are rebuilt from
- * it, and the rows flip back — then the next payment's own refresh
- * puts them forward again. Exactly the 「切回原來的狀態又切回來」
- * reported on 請假, in a second place that had its own copy of the
- * same mistake.
- *
- * Two rules fix it, both borrowed from the member screen:
- * coalescedRefresh puts the read in the same queue as the writes, so
- * it can never ask a question the pending taps haven't been allowed to
- * answer; and the revision check drops an answer that set off before
- * the latest local change. Repainting only on a real difference stays
- * — after a payment the server normally agrees, and rebuilding three
- * tabs of identical markup is itself a visible stutter. */
+/** Re-reads balances after a payment without undoing it: queued with the
+ * writes (coalescedRefresh), dropped if older than the latest local
+ * change, and repainted only on a real difference.
+ */
 const refreshBalancesQuietly = coalescedRefresh(async () => {
   if (!currentSeason) return;
   const askedAt = localRevision();
@@ -277,8 +228,7 @@ const refreshBalancesQuietly = coalescedRefresh(async () => {
   if (changed) renderTabsFromBalances();
 });
 
-/** The zero row for someone with no ledger entries at all — a member
- * added moments ago, a drop-in who hasn't been charged yet. */
+/** The zero row for someone with no ledger entries yet. */
 function balanceOf(playerId) {
   return (
     balances[playerId] || {
@@ -292,59 +242,49 @@ function balanceOf(playerId) {
   );
 }
 
-/** Which part of a player's club ledger a row is about.
+/** Which part of a player's club ledger a row is about. Fees are charged
+ * when a season is created, so the ledger can hold a season not yet
+ * started.
  *
- * A club's books span seasons, and a season's fees are charged the
- * moment it is created (CLAUDE.md 2.4), so the ledger can hold a
- * season that hasn't started yet. Summing all of it put a January
- * season's fee into October's 應收 — on 季費 in 2026-09, and on
- * 季末結算 until 2026-10, where 已收 would have booked January's money
- * as October's.
- *
- * "through" — 季費 and 季末結算: this season and every earlier one
- * (the server's `through_season`), so last season's kept balance is
- * deducted or added here and a later season never is. "season" —
- * 當天臨打, which collects this season's money and nothing else. */
+ * "through" (季費 and 季末結算): this season and earlier ones (the server's
+ * `through_season`), so last season's kept balance counts and a later
+ * season never does. "season" (當天臨打): this season only.
+ */
 function splitLedger(row, scope = "through") {
   const balance = Number(row.balance);
   const seasonTotal = Number(row.season_total);
-  // A cached answer from before the server sent through_season has
-  // only the whole ledger to offer.
+  // An old cached answer without through_season has only the whole
+  // ledger.
   const through = row.through_season == null ? balance : Number(row.through_season);
   return {
     scope,
     seasonTotal,
-    // Earlier seasons only — what 上季餘額 / 上季未繳 refer to.
+    // Earlier seasons only: what 上季餘額 / 上季未繳 mean.
     earlierTotal: through - seasonTotal,
-    // Every other season, earlier or later — 當天臨打's context line.
+    // Every other season, earlier or later: 當天臨打's context line.
     otherTotal: balance - seasonTotal,
     balance,
     due: scope === "season" ? seasonTotal : through,
   };
 }
 
-/** One night of one drop-in, for 當天臨打 (2026-10-16).
- *
- * The row used to be the person's whole season of drop-in fees, so
- * 已收 on one night booked every night and marked them all paid. Now
- * it is that night's fee, less whatever was taken for that night; a
- * player who owes nothing for the season at all — paid in one go at
- * 季末結算, say — has every night settled. Only somebody on court is
- * ever listed, and the server refuses a night they aren't on court for. */
+/** One drop-in night, for 當天臨打: that night's fee less what was taken for
+ * it. A player who owes nothing for the season has every night settled.
+ */
 function nightSplit(row, gameId) {
   const seasonTotal = Number(row.season_total);
   const nights = row.nights;
   const night = nights ? nights.find((n) => n.game_id === gameId) : null;
   const base = { scope: "night", gameId, seasonTotal, seasonOwed: Math.max(0, -seasonTotal) };
-  // An answer from before the server sent nights, or a signup the
-  // books haven't caught up with yet: no figure rather than a wrong one.
+  // No figure rather than a wrong one, when the night is not in the
+  // answer yet.
   if (!night) return { ...base, due: 0, loading: true };
   const owed = seasonTotal >= 0 ? 0 : Math.max(0, Number(night.charged) - Number(night.paid));
   return { ...base, due: owed === 0 ? 0 : -owed };
 }
 
-/** A player's LINE picture, from whichever list on this season names
- * them — the roster, or a game they played as a drop-in. */
+/** A player's LINE picture, from whichever list on this season has them.
+ */
 function avatarUrlOf(playerId) {
   const season = currentSeason;
   if (!season) return null;
@@ -358,29 +298,26 @@ function avatarUrlOf(playerId) {
 }
 
 function moneyRowHtml(playerId, name, gender, split, extraBreakLabel, extraBreakValue) {
-  // The figure this row is about — see splitLedger. Every number and
-  // every button below reads from it, so a season-scoped row can
-  // never collect another season's money by accident.
+  // The figure this row is about (see splitLedger); every number and
+  // button reads from it.
   const due = split.due;
   const netCls = due === 0 ? "clear" : due > 0 ? "owed" : "owe";
   const netText = due === 0 ? "已結清" : due > 0 ? `應退 $${due}` : `應收 $${Math.abs(due)}`;
   const breakParts = [];
   if (extraBreakLabel) breakParts.push(`<span>${extraBreakLabel} <b>$${extraBreakValue}</b></span>`);
   if (split.scope === "night") {
-    // The rest of the season, so a guest who owes for other nights too
-    // is asked about them as well — but only this night is taken here.
+    // Mention the rest of the season too, but take only this night here.
     if (split.seasonOwed > Math.abs(Math.min(due, 0))) {
       breakParts.push(`<span>本季共應收 <b>$${split.seasonOwed}</b></span>`);
     }
   } else if (split.scope === "season") {
-    // Every season that isn't the one on screen, which may well be one
-    // still to come — so not 上季.
+    // Other seasons, possibly later ones, so not 上季.
     if (split.otherTotal !== 0) {
       breakParts.push(`<span>其他季別 <b>${split.otherTotal > 0 ? "+" : "−"}$${Math.abs(split.otherTotal)}</b></span>`);
     }
   } else if (split.earlierTotal !== 0) {
-    // Next to 本季季費 the credit is what comes off it; on its own it
-    // is just what the earlier seasons left.
+    // Beside 本季季費 the credit comes off it; alone it is what earlier
+    // seasons left.
     const credit = extraBreakLabel ? "上季餘額扣除" : "上季餘額";
     breakParts.push(
       `<span>${split.earlierTotal > 0 ? credit : "上季未繳"} <b>$${Math.abs(split.earlierTotal)}</b></span>`
@@ -388,8 +325,7 @@ function moneyRowHtml(playerId, name, gender, split, extraBreakLabel, extraBreak
   }
 
   let actionHtml = "";
-  // Only a night's row carries a game: what is taken there is booked
-  // against that night alone (see nightSplit).
+  // Only a night's row carries a game; see nightSplit.
   const night = split.gameId == null ? "null" : split.gameId;
   if (split.loading) {
     actionHtml = '<div class="m-done">載入中…</div>';
@@ -414,14 +350,8 @@ function moneyRowHtml(playerId, name, gender, split, extraBreakLabel, extraBreak
     actionHtml = '<div class="m-done">✓ 已結清</div>';
   }
 
-  // A guest's fee sits on their own ledger, but they have no account
-  // and pay nothing — the member who brought them hands over the cash
-  // — so without this the row says "小明 應收 $235" with no way to
-  // know who to ask. Not the only place it appears any more: the
-  // roster carries it too as of 2026-09-23, at the organizer's
-  // request. This used to read "kept off the roster, where it would
-  // be noise rather than an answer" — that decision is reversed, so
-  // don't delete either copy as a duplicate of the other.
+  // A guest's fee is on their own ledger, but the member who brought them
+  // hands over the cash, so name them.
   const brought = balanceOf(playerId).brought_by;
   const broughtTag = brought
     ? `<span class="m-brought">${escapeHtml(brought)} 報名</span>`
@@ -442,11 +372,7 @@ function moneyRowHtml(playerId, name, gender, split, extraBreakLabel, extraBreak
 }
 
 
-// Scoped to the clicked button's own row (via closest), not a
-// page-wide id lookup — the same player can legitimately have a row
-// in more than one tab at once (a fixed member who also signed up as
-// a drop-in), and a global "[data-x=playerId]" selector would always
-// hit whichever tab's row comes first in the DOM, even a hidden one.
+// Scoped to the clicked row: one player can have rows in several tabs.
 function showPartialInput(btn) {
   btn.closest(".m-act").classList.add("partial");
 }
@@ -549,16 +475,8 @@ async function recordCashRefund(playerId, amount) {
   await submitPayment(playerId, -amount);
 }
 
-/**
- * Records money, and shows it as recorded straight away.
- *
- * Two separate problems are being handled here. The tap used to wait
- * on a write and then a full reload of the page's data before
- * anything moved, which on a phone is a long, silent second or more.
- * And a tap that times out invites a second tap, which on money means
- * recording it twice — so each intended payment carries a token, and
- * the server returns the entry it already has rather than adding
- * another. Retrying is therefore always safe.
+/** Records money and shows it at once. Each intended payment carries a
+ * token, so a retried or double tap is recorded once.
  */
 async function submitPayment(playerId, amount, gameId = null) {
   const token = `${currentSeason.id}-${playerId}-${gameId}-${amount}-${Date.now()}`;
@@ -573,21 +491,13 @@ async function submitPayment(playerId, amount, gameId = null) {
       n.game_id === gameId ? { ...n, paid: String(Number(n.paid) + Number(amount)) } : n
     ),
   };
-  // The screen now knows something the server hasn't been told yet, so
-  // any balances read already in the air is out of date — same rule
-  // the member screen follows. See refreshBalancesQuietly.
+  // Balances already in flight are now stale; see refreshBalancesQuietly.
   bumpLocalRevision();
   renderTabsFromBalances();
 
   try {
-    // Queued, like every other write in the app. This page had never
-    // been: five taps on 已收 sent five requests at once and each one
-    // asked for a re-read the moment it landed, so a read could be
-    // answering the books as they were three payments ago while those
-    // three sat unsent. That is what put rows back to 未收 for half a
-    // second before they settled — the same 「切回原來的狀態又切回來」
-    // as 請假, from the same cause, on a screen that had never been
-    // given the fix.
+    // Queued like every write, so a re-read never answers before earlier
+    // taps are sent.
     const entry = await enqueueRequest(() =>
       postJson(API_BASE, `/clubs/${currentClubId()}/players/${playerId}/payments`, {
         amount: String(amount),
@@ -609,15 +519,15 @@ async function submitPayment(playerId, amount, gameId = null) {
   }
 }
 
-/** Redraws the three tabs from the balances already in hand — no
- * network, so the screen keeps up with a tap. */
+/** Redraws the three tabs from the balances in hand, without the network.
+ */
 function renderTabsFromBalances() {
   renderFeeTab();
   renderDropInList();
   renderClosingTab();
 }
 
-// --- 季費 tab --------------------------------------------------------
+// 季費 tab
 
 function renderFeeTab() {
   const season = currentSeason;
@@ -626,14 +536,12 @@ function renderFeeTab() {
   let total = 0;
   const rowsHtml = season.members
     .map((member) => {
-      // Up to this season: last season's kept balance comes off (or
-      // goes on) here, and a season booked later never does. See
-      // splitLedger.
+      // Up to this season; see splitLedger.
       const split = splitLedger(balanceOf(member.id));
       const feeCharged = -Number(balanceOf(member.id).season_fee_charged);
       total += feeCharged;
-      // The bar measures this season's fee, so what is still owed
-      // counts against it only up to the fee itself.
+      // The bar measures this season's fee, so what is owed counts only
+      // up to the fee.
       const outstanding = Math.min(feeCharged, Math.max(0, -split.due));
       collected += feeCharged - outstanding;
       return moneyRowHtml(member.id, member.name, member.gender, split, "本季季費", feeCharged);
@@ -644,9 +552,7 @@ function renderFeeTab() {
     rowsHtml || '<div class="empty">本季尚無固定成員</div>';
   document.getElementById("fee-collected").textContent = `$${Math.round(collected)} / $${Math.round(total)}`;
   document.getElementById("fee-progress").style.width = total > 0 ? `${Math.min(100, (collected / total) * 100)}%` : "0%";
-  // Counted the same way as the progress bar above it. These two used
-  // to disagree: the bar was season-scoped and this was club-wide, so
-  // the card could read "全部已收" over "3 人未收".
+  // Counted the same way as the bar above.
   const unpaidCount = season.members.filter(
     (m) => splitLedger(balanceOf(m.id)).due < 0
   ).length;
@@ -654,32 +560,26 @@ function renderFeeTab() {
     unpaidCount === 0
       ? "全部已收"
       : `${season.members.length - unpaidCount} 人已收・${unpaidCount} 人未收・季費於開季前收款`;
-  // Summed per game, not share x count: a cooled night costs more, so
-  // those two stopped being the same number.
+  // Summed per game: games can cost different amounts.
   const games = seasonBillableGames(season);
   document.getElementById("fee-share-label").textContent =
     `每人 $${seasonFeeFor(season)} · ${games} 場`;
   renderFeeNotice(feeNoticeState(season, todayString()));
 }
 
-// --- 繳費通知 ---------------------------------------------------------
+// 繳費通知
 
-/** Who this season's 繳費通知 would go to right now, and what the card
- * on the 季費 tab says. A pure function of the season and the
- * balances, so tests/frontend/fee_notice.test.js can state the rules.
- *
- * The only money message there is (2026-10-02): last season's kept
- * balance is folded in here rather than announced at settlement. The
- * server enforces every rule below again in send_fee_notice — these
- * exist so the card never offers a send that would be refused.
+/** Who this season's 繳費通知 would go to now, and what the card says. Pure,
+ * so tests/frontend/fee_notice.test.js states the rules; the server
+ * enforces them again.
  *
  * - A season already over gets no card.
- * - Until the previous season is settled the figure is not final, so
- *   the button is shown but disabled, with the reason.
- * - A message cannot be taken back: each member at most once a
- *   season, so anyone already sent one is never a recipient again.
- * - Nobody who owes nothing; nobody without LINE, who cannot receive
- *   it (counted, so the organizer knows to tell them in person). */
+ * - Until the previous season is settled the figure is not final: the
+ *   button is shown disabled, with the reason.
+ * - Each member at most once a season.
+ * - Nobody who owes nothing; nobody without LINE (counted, so the
+ *   organizer can tell them in person).
+ */
 function feeNoticeState(season, today) {
   const last = season.games.reduce((max, g) => (g.date > max ? g.date : max), "");
   if (!last || last < today) return { kind: "none" };
@@ -720,11 +620,10 @@ function renderFeeNotice(state) {
   btn.disabled = state.kind === "blocked";
 }
 
-/** Asks the server who would be sent the notice and what each would
- * read, and shows that. The text is the server's own (GET
- * /seasons/{id}/fee-notice), never rebuilt here: a copy of the wording
- * in the browser could drift from what is sent, and a LINE message
- * cannot be taken back. */
+/** Shows who would be sent the notice and what each would read, in the
+ * server's own text (GET /seasons/{id}/fee-notice), so what is approved
+ * is what is sent.
+ */
 let noticeLoad = 0;
 async function openFeeNotice() {
   const state = feeNoticeState(currentSeason, todayString());
@@ -796,13 +695,12 @@ function seasonBillableGames(season) {
   return season.games.filter((g) => g.status !== "cancelled_refunded").length;
 }
 
-// --- 當天臨打 tab -----------------------------------------------------
+// 當天臨打 tab
 
 function renderDropInGamePicker() {
   const picker = document.getElementById("dropin-game-picker");
-  // Tonight's game; else the latest one played, whose fees are what is
-  // being collected; else the first to come. Taiwan's date, not UTC's,
-  // which before 08:00 is still yesterday.
+  // Tonight's game, else the latest one played, else the first to come.
+  // Taiwan's date, not UTC's.
   const today = todayString();
   const games = currentSeason.games;
   const played = games.filter((g) => g.date <= today);
@@ -834,7 +732,7 @@ async function renderDropInList() {
         d.player_id,
         d.player_name,
         d.gender,
-        // Tonight's fee, collected on the night — not the season's.
+        // Tonight's fee, not the season's.
         nightSplit(balanceOf(d.player_id), gameId),
         null,
         null
@@ -843,7 +741,7 @@ async function renderDropInList() {
     .join("");
 }
 
-// --- 季末結算 tab -----------------------------------------------------
+// 季末結算 tab
 
 async function renderClosingTab() {
   const season = currentSeason;
@@ -852,9 +750,8 @@ async function renderClosingTab() {
   document.getElementById("closing-after").hidden = !settled;
 
   if (!settled) {
-    // Not offered before it can be done: the server refuses the same
-    // cases (_why_not_settleable), and a button that only explains its
-    // refusal after being pressed is the worse screen.
+    // Not offered before it is allowed; the server refuses the same
+    // cases.
     const blocked = settleBlocker(season, todayString());
     document.getElementById("closing-blocked").hidden = !blocked;
     document.getElementById("closing-blocked").textContent = blocked || "";
@@ -864,8 +761,7 @@ async function renderClosingTab() {
   }
 
   document.getElementById("closing-settled-at").textContent = season.settled_at.slice(0, 16).replace("T", " ");
-  // Up to this season, like everything on this tab: a season booked
-  // for later is not something this one kept back.
+  // Up to this season, like everything on this tab.
   const kept = season.members.filter((m) => splitLedger(balanceOf(m.id)).due !== 0);
   document.getElementById("closing-all-clear").hidden = kept.length > 0;
   document.getElementById("closing-kept-hint").hidden = kept.length === 0;
@@ -874,30 +770,20 @@ async function renderClosingTab() {
     .join("");
 }
 
-/* Settling in one pass.
- *
- * The list used to show only the people owed a refund, read-only, and
- * squaring up was a second errand afterwards: settle, then walk the
- * member list tapping 退款 or 已收 one at a time. Now every member
- * whose balance isn't zero gets a choice here, and 結算本季 writes the
- * refunds and the cash together.
- *
- * 保留至下一季 is the default and writes nothing: a balance is already
- * club-wide, so leaving it alone *is* carrying it forward. That is why
- * only the people actually handing money over end up in the request.
+/* Settling in one pass: every member with a non-zero balance gets a
+ * choice, and 結算本季 writes the refunds and the cash together. 保留至下一季 is
+ * the default and writes nothing; a balance already carries over.
  */
 const closingCash = new Map();
-// What the block is currently showing. Held here rather than read from
-// currentSeason/settlementPreview so the functions below depend only
-// on what they were handed — they are the same objects in the page.
+// What the block is showing, so the functions below depend only on what
+// they were given.
 let closingSeason = null;
 let closingPreview = null;
 
-/** When a season may be settled — the same rule the server enforces
- * in _why_not_settleable, stated here so the tab can say why instead
- * of offering a button that will be refused. From three weeks before
- * the last game, and only once no game still to come has an absence
- * nobody is filling. `today` is "YYYY-MM-DD", passed in for tests. */
+/** When a season may be settled, the rule _why_not_settleable enforces:
+ * from three weeks before the last game, once no game still to come has
+ * an unfilled absence. `today` is "YYYY-MM-DD", passed in for tests.
+ */
 function settleBlocker(season, today) {
   const games = [...season.games].sort((a, b) => (a.date < b.date ? -1 : 1));
   if (!games.length) return null;
@@ -929,9 +815,9 @@ function monthDay(iso) {
   return `${Number(m)}/${Number(d)}`;
 }
 
-/** What this member's balance is, from the club's point of view:
- * positive means the club owes them. Up to this season — see
- * splitLedger. */
+/** This member's balance up to this season; positive means the club owes
+ * them.
+ */
 function closingDue(playerId) {
   return Number(splitLedger(balanceOf(playerId)).due);
 }
@@ -940,10 +826,8 @@ function renderClosingChoices(season, preview) {
   closingSeason = season || closingSeason;
   closingPreview = preview || closingPreview;
   season = closingSeason;
-  // The settlement hasn't been written yet, so a member's balance
-  // doesn't include the refund it is about to credit them. Add it in,
-  // or someone owed exactly their refund reads as 已結清 and the
-  // organizer is never offered the payout.
+  // Add the refund the settlement is about to credit, or someone owed
+  // exactly their refund would read as 已結清.
   const refundOf = new Map(
     closingPreview.members.map((m) => [m.player_id, Number(m.refund)])
   );
@@ -985,10 +869,9 @@ function closingRowHtml(m) {
 }
 
 /** Cash in less cash out, so the organizer can count what should be in
- * their hand when the evening is over — and, under the list, what
- * 結算本季 is about to write. The choices above it are a selection,
- * not a record (styled as one: .seg-pick, never the solid 已收 that
- * records on the spot), so the line says when they take effect. */
+ * hand, and what 結算本季 will write. The choices above are a selection, not
+ * a record, so the line says when they take effect.
+ */
 function renderClosingCash(rows) {
   let total = 0;
   let moves = 0;
@@ -1006,28 +889,20 @@ function renderClosingCash(rows) {
 }
 
 function pickClosing(playerId, how) {
-  // The amount is read at settle time, not here: a preview refresh
-  // between the tap and 結算本季 would otherwise write a stale figure.
+  // The amount is read at settle time, so a refreshed preview is used.
   if (how === "cash") closingCash.set(playerId, true);
   else closingCash.delete(playerId);
   renderClosingChoices();
 }
 
-/** Undo a settlement.
- *
- * Every refund it wrote is cancelled by an opposite entry rather than
- * deleted — the books go on saying a settlement happened and was
- * undone. The one thing it cannot put right is cash already handed
- * over, so whoever was paid is named here by name rather than
- * counted: that money now reads as owed back, and the organizer is
- * the only one who can sort it out. See routes/seasons.py
- * unsettle_season.
+/** Undoes a settlement: each refund is cancelled by an opposite entry.
+ * Cash already paid out cannot be undone and now reads as owed back, so
+ * those members are named.
  */
 async function unsettleSeason() {
   if (!confirm("確定復原結算？\n退費紀錄以沖銷方式保留。")) return;
   try {
-    // postJson marks the pressed control busy and hands back a message
-    // already in Chinese — see saveGameEdit on the settings page.
+    // postJson marks the control busy and translates any error.
     const result = await postJson(API_BASE, `/seasons/${currentSeason.id}/unsettle`, {});
     const paid = (result && result.already_paid_out) || [];
     loadLedger(currentSeason.id);
@@ -1048,9 +923,8 @@ async function unsettleSeason() {
 async function settleSeason() {
   if (!confirm("確定結算本季？\n結算後名單與場地費即鎖定，其餘場次無法請假或報名臨打。")) return;
   const btn = document.getElementById("settle-btn");
-  // Read now, from the same figures on screen: the refund each member
-  // is about to be credited, plus whatever they already owed or were
-  // owed. Anyone not in closingCash simply isn't sent.
+  // Read now from the figures on screen; members not in closingCash are
+  // not sent.
   const refundOf = new Map(
     closingPreview.members.map((m) => [m.player_id, Number(m.refund)])
   );

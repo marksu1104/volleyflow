@@ -1,28 +1,21 @@
-// localhost -> the local API, anywhere else -> production. See apiBase.
+// The local API on a development machine, production elsewhere; see
+// apiBase.
 const API_BASE = apiBase();
 const LIFF_ID = "2011156233-6CouG6VI";
 
-// Reports used to be pushed to the developer over LINE, one or two
-// messages each out of the free tier's 200 a month — the same allowance
-// the short-roster alert needs. They are stored now and read here, on
-// demand, at no cost. The trade is that nothing pings anybody: this
-// page, and the unread count on the profile page, are the whole signal.
+// Reports are stored and read here on demand; this page and the unread
+// count on the profile page are the whole signal.
 
-/** The server stores UTC and doesn't say so; the people reading this
- * are in Taiwan, so the zone is named rather than left to whatever the
- * device happens to be set to. */
-// Shared with the ledger's 明細 — see stampTime in js/common/format.js. A
-// declaration rather than `const localTime = stampTime`, which is only
-// usable after the line it sits on has run and left the test harness
-// holding an undefined binding.
+// A report's time in Taipei; see stampTime. Declared as a function rather
+// than `const localTime = stampTime` so the test harness can see it.
 function localTime(iso) {
   return stampTime(iso);
 }
 
-/** One report. Every field is something a user typed or their browser
- * sent, and the person reading it is the developer — so all of it goes
- * through escapeHtml. A report drawn as markup would be a way to run
- * script in the one browser that can read everybody's reports. */
+/** One report. Every field came from a user or their browser, so all of it
+ * is escaped: this page is read by the one account that sees every
+ * report.
+ */
 function reportHtml(r) {
   const meta = [r.page, r.user_agent].filter(Boolean).map(escapeHtml).join("・");
   return `
@@ -44,13 +37,10 @@ function reportHtml(r) {
   `;
 }
 
-/** Screenshots are fetched with the same credentials as the list rather
- * than linked. They can show somebody's name and balance, and they sat
- * at a public URL only because LINE's servers had to fetch them to draw
- * an image message — which no longer happens. An <img> tag can't send
- * an Authorization header, so each one is fetched and handed to the tag
- * as a local blob. A picture that won't load stays hidden: the words
- * are the report. */
+/** Fetches screenshots with the developer's credentials (an <img> cannot
+ * send an Authorization header) and shows them as local blobs; they can
+ * show names and balances. A picture that fails stays hidden.
+ */
 async function loadScreenshots() {
   for (const img of document.querySelectorAll("img[data-shot]")) {
     try {
@@ -110,8 +100,7 @@ function renderReports(reports) {
   const reports = await res.json();
   renderReports(reports);
   loadScreenshots();
-  // Marked read once they have been drawn, not when they were fetched:
-  // a report the page failed to show hasn't been read.
+  // Marked read once drawn, not when fetched.
   if (reports.some((r) => !r.read)) {
     postJson(API_BASE, "/reports/read", {}).catch(() => {});
   }
