@@ -34,6 +34,16 @@ jobs:
       - name: Test
         run: uv run pytest --cov --cov-report=term-missing
 
+      # Billing is the part of this project that must not be wrong, so its
+      # three modules are held to every line run by a test. The rest of
+      # the codebase is reported above but not gated: one threshold for
+      # everything would either let billing slip or block unrelated work.
+      # Reads the data the Test step just wrote; it runs no tests itself.
+      - name: Billing coverage
+        run: >-
+          uv run coverage report --fail-under=100
+          --include="src/volleyflow/pricing.py,src/volleyflow/settlement.py,src/volleyflow/ledger.py"
+
       # The frontend has no build step and no framework, so its checks
       # run on the Node that's already on the runner — no dependencies to
       # install. They guard the parts that would be expensive to get
