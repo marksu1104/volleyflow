@@ -9,26 +9,13 @@ _PROFILE_URL = "https://api.line.me/v2/bot/profile/{user_id}"
 
 
 def is_reachable(user_id: str) -> bool | None:
-    """Whether a push to this person would actually arrive.
+    """Whether a push to this person would arrive: LINE delivers only to
+    somebody who has added the Official Account and not blocked it.
 
-    LINE delivers only to somebody who has added the Official Account
-    as a friend and hasn't blocked it, and refuses everyone else — which
-    is why send_game_reminder wraps each organizer in its own try. That
-    refusal happens at the moment it matters least: the night a game is
-    short-handed, in a log line nobody reads. This asks the same
-    question in advance, so an organizer can be told while there is
-    still time to fix it.
-
-    The profile endpoint answers without sending anything: 200 for a
-    friend, 404 for everyone else. That 404 is the answer and not a
-    failure, so this is the one call in this module that deliberately
-    does not raise_for_status.
-
-    Returns None for "cannot say" — no token, LINE unreachable, or any
-    other status. A caller must treat that as neither yes nor no:
-    telling somebody to add a friend they added months ago is worse
-    than staying quiet. Five seconds, not the ten the pushes get,
-    because a page waits on this one and a nightly job does not.
+    Asks the profile endpoint, which sends nothing: 200 for a friend,
+    404 for anyone else (an answer, not an error). Returns None when
+    it cannot say (no token, LINE unreachable), which callers must
+    treat as unknown. Five-second timeout, because a page waits on it.
     """
     token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     if not token:
@@ -63,9 +50,7 @@ def _push(to: str, text: str) -> None:
 
 
 def push_to_user(user_id: str, text: str) -> None:
-    """A private message to one person — used for the organizer-only
-    short-roster alert, never the group.
-    """
+    """Sends a private text message to one person."""
     _push(user_id, text)
 
 
@@ -97,9 +82,5 @@ def push_image_to_user(user_id: str, image_url: str) -> None:
     response.raise_for_status()
 
 
-# There is deliberately no push_to_group. One existed, for a nightly
-# roster message to the club's LINE group, and the organizer asked for
-# it to be dropped — the group already talks about the game in the
-# group, so a bot repeating the roster into it was noise. Deleted rather
-# than left behind an unused import, so nothing can quietly start using
-# it again. See notify/reminders.send_game_reminder.
+# Deliberately no push_to_group: nothing this app sends goes to a group
+# chat.

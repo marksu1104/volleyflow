@@ -1,12 +1,10 @@
 """Turning a LINE ID token into a verified identity.
 
-Every LIFF page gets a fresh signed JWT from liff.getIDToken() — this
-module is what stops the API from just trusting whatever line_user_id a
-client claims in a request body, which is what every endpoint did before
-this existed. Verification is delegated to LINE's own endpoint rather
-than checked locally (JWKS + signature verification), trading one
-network call per request for not needing a JWT/crypto dependency or a
-public-key cache to keep correct — an easy trade at this app's traffic.
+Every LIFF page gets a signed ID token from liff.getIDToken(); the API
+trusts only what LINE says that token belongs to, never a user id in a
+request body. Verification is delegated to LINE's endpoint rather than
+done locally, trading one network call per request for no JWT library
+or key cache to maintain.
 """
 
 import os
@@ -21,30 +19,18 @@ _DEV_FLAG = "VOLLEYFLOW_DEV_LOGIN"
 
 
 def verify_id_token(id_token: str) -> str:
-    """Returns the verified line_user_id (the token's `sub` claim).
+    """Returns the verified LINE user id (the token's `sub`).
 
-    Raises ValueError if LINE rejects the token — expired, wrong
-    audience, tampered, or just malformed. Never raises for "not
-    verifiable due to a network error"; that's left to bubble up as a
-    5xx, since silently treating a verification outage as "invalid" would
-    lock everyone out at once for an unrelated reason.
+    Raises ValueError if LINE rejects the token. A network failure is
+    left to surface as a 5xx: treating an outage as "invalid" would
+    sign everyone out at once.
     """
-    # A way to be somebody without LINE, for local work only. Nothing
-    # about the app is reachable without a verified identity, so on a
-    # laptop — no LIFF, no ID token — every page stops at "open this in
-    # LINE" and the only way to see a member's view was to pick up a
-    # phone and use the live data.
-    #
-    # This is a hole in authentication, so it is deliberately awkward to
-    # open: it needs an environment variable that production does not
-    # set, *and* a token shaped like nothing LINE would ever issue. Two
-    # conditions, either of which alone does nothing, and a value that is
-    # obvious in a log if it ever appears somewhere it shouldn't.
+    # Local sign-in without LINE, for development only. It needs both an
+    # environment variable production never sets and a token no LINE login
+    # could produce.
     if id_token.startswith(_DEV_PREFIX) and os.environ.get(_DEV_FLAG) == "1":
-        # Percent-decoded because this arrives in an Authorization
-        # header, and HTTP header values are ASCII — a browser refuses
-        # to send "Bearer dev:周恆" at all. The frontend encodes the
-        # name; this is the other half.
+        # Percent-decoded: HTTP header values are ASCII, so the frontend
+        # encodes the name.
         name = unquote(id_token.removeprefix(_DEV_PREFIX)).strip()
         if not name:
             raise ValueError("dev login needs a name after 'dev:'")

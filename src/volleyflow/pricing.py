@@ -1,8 +1,7 @@
-"""The per-game share calculation and its rounding rule.
+"""The per-game share and its rounding rule.
 
-The only place in the codebase where a monetary amount is rounded.
-See docs/billing-rules.md "Core formula" and "Why rounding happens exactly
-once" for the reasoning.
+The only place a monetary amount is rounded; see docs/billing-rules.md
+"Core formula" and "Why rounding happens exactly once".
 """
 
 from collections.abc import Sequence
@@ -14,24 +13,10 @@ def share_per_game(
 ) -> Decimal:
     """One person's cost for one game, rounded up to a whole dollar.
 
-    `capacity` is the season's cap on how many play a game — not how many
-    fixed members it currently has. That is the whole point: the price is
-    settled when the season is booked and never moves again, so adding or
-    dropping a member changes only that person's bill and nobody else's.
-    Splitting by the current roster instead meant one person leaving an
-    18-person season pushed everyone from $205 a night to $218, which is
-    both a surprise and, once a drop-in has filled the empty slot and
-    paid the same $205, an overcharge.
-
-    The club therefore collects the full venue cost only when every slot
-    is filled — by a member or by a drop-in, who pays this same figure.
-    An unfilled slot is money the organizer doesn't collect, which is why
-    capacity is theirs to set and worth setting honestly. Decided
-    2026-09-10; see docs/billing-rules.md "Who the cost is split between".
-
-    Every other amount in the system (season fees, drop-in fees, absence
-    refunds) is a multiple of this value. Rounding happens here and nowhere
-    else — see docs/billing-rules.md.
+    Split across `capacity` (the slots on court), not the current roster,
+    so the price is fixed when the season is booked: a member joining or
+    leaving changes only their own bill. An unfilled slot is money nobody
+    pays. See docs/billing-rules.md "Who the cost is split between".
     """
     if total_games <= 0:
         raise ValueError("total_games must be positive")
@@ -45,9 +30,8 @@ def share_per_game(
 def member_season_fee(share: Decimal, billable_games: int) -> Decimal:
     """A member's total charge for the season.
 
-    `billable_games` excludes CANCELLED_REFUNDED games — see
-    docs/billing-rules.md "Game cancellation". No rounding here; `share`
-    is already a whole dollar amount.
+    `billable_games` excludes CANCELLED_REFUNDED games. `share` is already
+    whole dollars, so nothing is rounded here.
     """
     return share * billable_games
 
@@ -61,37 +45,16 @@ def shares_by_game(
 ) -> list[Decimal]:
     """Each game's share per person, in the order the games were given.
 
-    `capacity`, not the roster size — see share_per_game for why.
-
-    Games don't all cost the same once air conditioning is in the
-    picture: a night with the AC on costs the club `ac_surcharge` more
-    than one without. Splitting the season total evenly across every
-    game would make a drop-in on a cool December night subsidise the
-    August ones, and would refund an absence from an expensive game at a
-    cheap game's rate.
-
-    `total_venue_cost` stays the authoritative figure — it is what the
-    club actually pays, discounts and all — so the AC portion is taken
-    out of it rather than added on top:
+    A night with the air conditioning on costs the club `ac_surcharge`
+    more, and a night at another venue costs its `venue_cost_deltas`
+    entry more (or less). Both are taken out of `total_venue_cost`, which
+    stays the authoritative figure, and added back on their own night:
 
         ac_total   = ac_surcharge x (games with the AC on)
-        base_each  = (total_venue_cost - ac_total) / total games
-        share(g)   = ceil((base_each + ac_surcharge if g else base_each)
-                          / capacity)
+        base_each  = (total_venue_cost - ac_total - sum(deltas)) / games
+        share(g)   = ceil((base_each + AC if on + delta(g)) / capacity)
 
-    `venue_cost_deltas` is the same idea for a night that ran somewhere
-    else: one entry per game saying what that night cost the club above
-    (or below) a normal one, taken out of the total before the split and
-    added back on the night it belongs to. A cheaper court is a negative
-    entry; only the aggregate is guarded, so a discount on one night and
-    a premium on another simply net off.
-
-    With `ac_surcharge` at zero and no deltas this is exactly
-    `share_per_game` for every game, which is what makes both changes
-    invisible to every season booked before they were modelled.
-
-    Rounding still happens once per share and nowhere else. The surplus
-    it creates is the same surplus described in docs/billing-rules.md.
+    With no surcharge and no deltas every game gets `share_per_game`.
     """
     total_games = len(air_conditioned)
     if total_games <= 0:

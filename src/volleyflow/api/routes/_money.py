@@ -1,8 +1,8 @@
-"""What a signup or a season costs, and the ledger entries that
-record it.
+"""What a signup or a season costs, and the ledger entries that record
+it.
 
-Writes money, reads people. Never reaches back up into the attendance
-rules — those call down into this.
+Writes money, reads people. Never calls up into the attendance rules;
+they call down into this.
 """
 
 from collections import defaultdict
@@ -54,17 +54,13 @@ from volleyflow.settlement import (
 
 
 def _seasons_up_to(db: Session, season_row: SeasonRow) -> list[int]:
-    """This club's seasons that start no later than `season_row` — the
-    ones whose money is due by the time it is.
+    """This club's seasons that start no later than `season_row`: the
+    ones whose money is due by then.
 
-    Every money figure for a season is "up to" that season, never the
-    whole club ledger. A member's fee is charged the moment they join a
-    season, so a club that books January in October already has
-    January's fee on everybody's ledger. Summing the whole ledger put
-    that fee into October's settlement as money owed, and offered to
-    collect it under October's name. Seasons are ordered by their first
-    game; one with no games yet has charged nobody, so it only ever
-    counts for itself.
+    A season booked ahead has already charged its fee, so every figure
+    for a season counts only it and earlier ones. Seasons are ordered
+    by their first game; one with no games has charged nobody and
+    counts only for itself.
     """
     starts: dict[int, date] = {
         season_id: start
@@ -84,8 +80,9 @@ def _seasons_up_to(db: Session, season_row: SeasonRow) -> list[int]:
 
 
 def _previous_season(db: Session, season_row: SeasonRow) -> SeasonRow | None:
-    """The club's season that starts most recently before this one, by
-    first game — the one whose kept balances this season collects."""
+    """The club's season that starts most recently before this one, whose
+    kept balances this season collects.
+    """
     own = (
         db.query(func.min(GameRow.date))
         .filter(GameRow.season_id == season_row.id)
@@ -113,8 +110,8 @@ def _fee_dues(
     db: Session, season_row: SeasonRow, player_ids: list[int]
 ) -> dict[int, tuple[Decimal, Decimal, Decimal]]:
     """Per player: (this season's fee, what earlier seasons left, what is
-    due up to this season) — all as positive-means-owed-to-them ledger
-    sums, the way the ledger signs everything."""
+    due up to this season), signed the ledger's way.
+    """
     if not player_ids:
         return {}
     in_season = LedgerEntryRow.season_id == season_row.id
@@ -151,10 +148,11 @@ def _fee_dues(
 def _fee_notice_plan(
     db: Session, season_row: SeasonRow
 ) -> list[tuple[SeasonMemberRow, FeeDue]]:
-    """Who this season's 繳費通知 would go to right now, and what each is
-    told: members with LINE, not yet sent it, who owe something up to
-    this season. Shared by the preview and the send, so the sheet the
-    organizer approves lists exactly the people who will hear."""
+    """Who this season's 繳費通知 would go to now, and what each is told:
+    members with LINE, not yet sent it, who owe something. Shared by
+    the preview and the send, so the organizer approves exactly who
+    will hear.
+    """
     pending = (
         db.query(SeasonMemberRow)
         .join(PlayerRow, PlayerRow.id == SeasonMemberRow.player_id)
@@ -216,11 +214,8 @@ def _club_balances_up_to_now(
     db: Session, player_id: int, today: date
 ) -> dict[int, Decimal]:
     """This player's balance in each club, up to that club's season in
-    play — the same season every page opens on (js/common/
-    defaultSeasonId): the one under way, else the next to start, else
-    the last to finish. A season booked further ahead has already
-    charged its fee, but it is not due yet, and the 繳費通知 for this
-    season doesn't count it either."""
+    play (see _season_in_play).
+    """
     sums = (
         db.query(
             LedgerEntryRow.club_id,
@@ -262,9 +257,10 @@ def _club_balances_up_to_now(
 
 
 def _season_in_play(spans: dict[int, tuple[date, date]], today: date) -> int | None:
-    """js/common/clubs.js defaultSeasonId, for the server: the season under way
-    (the one ending soonest, if they overlap), else the next to start,
-    else the last to finish."""
+    """The season a page opens on, matching defaultSeasonId in
+    js/common/clubs.js: the one under way (ending soonest if they
+    overlap), else the next to start, else the last to finish.
+    """
     running = [s for s, (first, last) in spans.items() if first <= today <= last]
     if running:
         return min(running, key=lambda s: spans[s][1])
@@ -278,22 +274,16 @@ def _season_in_play(spans: dict[int, tuple[date, date]], today: date) -> int | N
 
 def _counts_up_to(season_ids: list[int] | None) -> ColumnElement[bool]:
     """The ledger rows a season's figure includes: its own and earlier
-    seasons', plus any entry tied to no season at all — that is money
-    already moved, never a fee still to come. None: every row."""
+    seasons', plus entries tied to no season (money already moved).
+    None means every row.
+    """
     if season_ids is None:
         return true()
     return LedgerEntryRow.season_id.in_(season_ids) | LedgerEntryRow.season_id.is_(None)
 
 
 def _drop_in_share(db: Session, season_row: SeasonRow, game_id: int) -> Decimal:
-    """What one game costs one person.
-
-    Takes a game id rather than just the season because games no longer
-    all cost the same: a night with the air conditioning on costs the
-    club more, and a drop-in should pay for the night they actually turn
-    up to. With ac_surcharge at 0 every game returns the same figure,
-    which is what it always did.
-    """
+    """What one game costs one person; games can cost different amounts."""
     game_rows = (
         db.query(GameRow)
         .filter(GameRow.season_id == season_row.id)
@@ -313,22 +303,13 @@ def _drop_in_share(db: Session, season_row: SeasonRow, game_id: int) -> Decimal:
 def _record_drop_in_charge(
     db: Session, drop_in: DropInRow, season_row: SeasonRow, *, reverse: bool
 ) -> None:
-    """A confirmed drop-in owes share_per_game for that one game — charged
-    the moment they're confirmed (signup or waitlist promotion), reversed
-    the moment they cancel. Per the billing rules: "A DropIn pays the per-game
-    share, collected by the organizer."
+    """Charges a confirmed drop-in that game's share, or reverses it when
+    they leave.
 
-    A cancellation refunds `drop_in.charged_amount` — what this specific
-    signup actually paid — rather than recomputing the game's share as of
-    right now. Those can differ: the organizer can flip a game's air
-    conditioning or edit the season's capacity between signup and
-    cancellation, and either one moves `share_per_game`. Refunding the
-    recomputed share left a residual balance on somebody no longer
-    connected to the game at all — charged $667 for a cooled night,
-    refunded $572 once the setting was corrected — found by a random
-    sweep rather than a real invoice not adding up. `charged_amount` is
-    null on a drop-in recorded before this existed, so that one case
-    still falls back to the old behaviour.
+    A reversal refunds `charged_amount`, what this signup actually
+    paid, not the game's current share, which may have moved since
+    (the air conditioning or capacity changed). A signup recorded
+    before `charged_amount` existed falls back to the current share.
     """
     if reverse:
         share = drop_in.charged_amount
@@ -423,8 +404,8 @@ def _gather_member_settlements(
     db: Session, season_id: int
 ) -> tuple[SeasonRow, list[MemberSettlement]]:
     """Everything needed to report or record a season's settlement,
-    shared by the read-only settlement view and the settle-for-real
-    endpoint below so they can never disagree with each other.
+    shared by the settlement view and the settle endpoint so they
+    cannot disagree.
     """
     facts = _load_season_facts(db, season_id)
     settlements = [
@@ -437,20 +418,15 @@ def _gather_member_settlements(
 
 
 SETTLE_WINDOW = timedelta(weeks=3)
-"""How long before the last game a season may be settled. Fixed rather
-than a club setting, at the organizer's choice (2026-10-02): the roster
-is usually certain well before the final night, and a setting nobody
-changes is one more thing on the settings page to read past."""
+"""How long before the last game a season may be settled."""
 
 
 def _why_not_settleable(db: Session, season_id: int, today: date) -> str | None:
     """Why this season cannot be settled yet, or None if it can.
 
-    Settling locks attendance, so the games still to come must already
-    be decided: settling is open from three weeks before the last game,
-    and only once none of the remaining games has an absence nobody is
-    filling. A slot still open could yet be filled — and that would
-    change who gets refunded, after the refunds were written.
+    Settling locks attendance, so it opens three weeks before the last
+    game and only once no remaining game has an absence nobody is
+    filling: filling it later would change who is refunded.
     """
     facts = _load_season_facts(db, season_id)
     games = sorted(facts.games_by_id.values(), key=lambda g: g.date)
@@ -468,16 +444,14 @@ def _why_not_settleable(db: Session, season_id: int, today: date) -> str | None:
 
 
 def _sync_season_fee_ledger(db: Session, season_row: SeasonRow) -> None:
-    """Bring every current member's season_fee_charged total up to date
-    with what settle_member says they should owe right now, writing one
-    adjustment entry per player for the difference — never editing a
-    past entry. Call this after anything that can change the target: the
-    initial roster at season creation, adding/removing a member, editing
-    total_venue_cost, or cancelling a game with a refund.
+    """Brings every current member's season-fee total up to what
+    settle_member says they owe now, with one adjustment entry per
+    player and never an edit. Call after anything that changes the
+    target: the starting roster, the venue cost or capacity, a game
+    cancelled with a refund.
 
     See docs/billing-rules.md "Keeping the charge in sync when the
-    inputs change". A no-op for anyone whose target hasn't moved (e.g.
-    editing the venue's location touches nothing here).
+    inputs change".
     """
     _, settlements = _gather_member_settlements(db, season_row.id)
     now = _now()
@@ -517,8 +491,7 @@ def _sync_season_fee_ledger(db: Session, season_row: SeasonRow) -> None:
             )
         )
 
-    # Anyone charged before but no longer a member (removed from the
-    # roster) gets their charge reversed to zero — see docs/billing-rules.md.
+    # Anyone charged but no longer on the roster is reversed to zero.
     for player_id, already_charged in charged_by_player.items():
         if player_id in current_member_ids or already_charged == 0:
             continue
@@ -542,12 +515,9 @@ def _sync_member_season_fee_ledger(
     *,
     is_member: bool,
 ) -> None:
-    """Correct one member's season-fee total after a roster add/remove.
-
-    Capacity is the fee denominator, so changing the roster does not move
-    anybody else's target. The former all-member sync loaded every player,
-    absence and drop-in even though only this one ledger can change; against
-    the remote database that made a simple +/− wait several seconds.
+    """The same correction for one member, after they are added or
+    removed. Capacity is the denominator, so nobody else's charge can
+    move.
     """
     target = Decimal("0")
     if is_member:

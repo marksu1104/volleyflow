@@ -80,18 +80,12 @@ def delete_season(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> None:
-    """Deletes a season outright, with its games, attendance and the
-    ledger entries it wrote. For a season created by mistake or for
-    testing — not for tidying up a real one.
+    """Deletes a season with its games, attendance and ledger entries;
+    meant for a season created by mistake.
 
-    Refused once settled. A settled season is closed books: the design rules
-    call for every data change to be auditable, and destroying finished
-    accounts is the one thing that can't be.
-
-    Refused, too, once anybody has paid into it. The fee charges are
-    meaningless without the season, but a payment is cash the organizer
-    actually received; deleting it along with the rest made that money
-    vanish from the books, and the confirmation never said so.
+    Refused once settled, because finished accounts must stay
+    auditable, and once anybody has paid into it, because a payment is
+    cash the organizer really received.
     """
     season = db.get(SeasonRow, season_id)
     if season is None:
@@ -133,8 +127,8 @@ def list_seasons(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> list[SeasonSummaryOut]:
-    """Enough per season to label it in a picker — dates, not a bare id
-    a human has no way to recognize. Members only, same as the roster.
+    """Each season's id and dates, enough to label it in a picker.
+    Members only.
     """
     _get_club_or_404(db, club_id)
     _require_club_access(db, club_id, current_player)
@@ -181,12 +175,8 @@ def start_season(
     _get_club_or_404(db, club_id)
     _require_organizer(db, club_id, current_player)
 
-    # A fixed member holds a slot for the whole season, so
-    # the roster this season starts with can never be larger than its own
-    # capacity — the same rule add_member enforces for a roster change
-    # mid-season. This was the one way left to build an over-capacity
-    # season, found by tests/api/test_fuzz.py once the mid-season path was
-    # closed.
+    # A fixed member holds a slot at every game, so the starting roster
+    # cannot exceed capacity (the same rule add_member enforces later).
     if len(payload.member_names) > payload.capacity:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -208,9 +198,8 @@ def start_season(
     db.add(season)
     db.flush()
 
-    # Which nights are forecast to need the air conditioning. A forecast
-    # only — each game can be corrected on the evening itself, which is
-    # when anyone actually knows.
+    # Which nights are forecast to need the air conditioning; each game can
+    # be corrected on the night.
     cooled = set(payload.air_conditioned_dates)
     games = [
         GameRow(season_id=season.id, date=d, air_conditioned=d in cooled)
@@ -218,11 +207,8 @@ def start_season(
     ]
     db.add_all(games)
 
-    # The same person named twice is one member, not two rows and a
-    # crash: two names that resolve to one player (the list typed twice,
-    # or two spellings the club already maps to one person) would
-    # otherwise build two identical season_members rows and fail on the
-    # primary key. Nothing about the season changes — a roster is a set.
+    # A roster is a set: two names resolving to the same person add them
+    # once.
     member_ids = []
     for name in payload.member_names:
         player = _get_or_create_player(db, club_id, name)
@@ -294,14 +280,12 @@ def update_season(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> SeasonOut:
-    """A partial update — only fields the client actually sent are
-    touched (see SeasonUpdate). Changing `total_venue_cost` changes
-    every member's per-game share for the whole season (past games
-    included, since there's one season-wide split, not a per-period
-    one) — the frontend warns about this before calling in; once
-    settled, the ledger already reflects the old cost, so it's locked.
-    Each current member's season_fee_charged total is corrected with an
-    adjustment entry — see _sync_season_fee_ledger.
+    """Changes only the fields the client sent (see SeasonUpdate).
+
+    A new venue cost or capacity re-prices every game of the season,
+    so each member's season-fee charge is corrected with an adjustment
+    entry (see _sync_season_fee_ledger), and both are locked once the
+    season is settled.
     """
     season = db.get(SeasonRow, season_id)
     if season is None:
@@ -314,9 +298,7 @@ def update_season(
         "ac_surcharge": season.ac_surcharge,
         "capacity": season.capacity,
     }
-    # All three, not just the venue cost: capacity is the other half of
-    # share_per_game's denominator, so moving any of them
-    # would re-price a season whose ledger is already closed.
+    # All three move the per-game share, so none may change once settled.
     priced = {"total_venue_cost", "ac_surcharge", "capacity"} & updates.keys()
     if priced and season.settled_at is not None:
         raise HTTPException(
@@ -324,11 +306,8 @@ def update_season(
             "Season is already settled — venue cost can't change now",
         )
 
-    # Lowering capacity below what's already on court would be the same
-    # overfill add_member refuses, just reached from the other side — a
-    # fixed member is expected at every game already, so the roster size
-    # and every game's expected attendance are both floors on how far
-    # capacity can drop.
+    # Capacity cannot drop below the roster size or below any game's
+    # expected attendance.
     if "capacity" in updates and updates["capacity"] < season.capacity:
         new_capacity = updates["capacity"]
         roster_size = (
@@ -354,16 +333,13 @@ def update_season(
         db.flush()
         _sync_season_fee_ledger(db, season)
 
-    # More room on court is a slot opening as surely as somebody taking
-    # leave, so the queue is offered it the same way: in order, at games
-    # still to come (asked for 2026-10-14 — raising it left people queued
-    # behind empty places). After the fee sync, so each promotion is
-    # charged at the share the new capacity sets.
+    # A higher capacity opens slots, so the queue is offered them at games
+    # still to come. Done after the fee sync, so each promotion is charged
+    # at the new share.
     if raised:
         _offer_freed_slots_to_the_queue(db, season)
 
-    # What re-prices the season goes on the record, each with its old
-    # value; times, venue and the deadline move no money.
+    # Changes that re-price the season are audited with their old value.
     for field, action in (
         ("total_venue_cost", "venue_cost_changed"),
         ("ac_surcharge", "ac_surcharge_changed"),
@@ -391,30 +367,16 @@ def set_air_conditioned_dates(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> None:
-    """Correct which nights this season is down as needing the AC.
+    """Corrects which nights the season is forecast to need the air
+    conditioning.
 
-    The forecast made when the season was booked is easy to get wrong,
-    and until now there was no way to fix it: the only control was
-    games.set_game_air_conditioning, which treats a change as the AC
-    having actually run on the night and moves `total_venue_cost` by
-    `ac_surcharge` accordingly. Using that to correct a mistyped forecast
-    silently inflated or shrank the club's bill, one game at a time.
-
-    So this one leaves the total alone. What it does change is how that
-    total is *divided*: the AC portion comes out of the total before the
-    even split (see pricing.shares_by_game), so moving it to different
-    nights re-prices every game. A member's whole-season fee stays within
-    a few dollars of where it was — not exactly equal, because each
-    game's share is rounded up on its own and the rounding lands
-    differently — and _sync_season_fee_ledger writes that difference as
-    an adjustment, exactly as editing the venue cost does.
-
-    Refused once the season is settled, for the same reason every other
-    money-moving edit is: the books are closed. Refused too for a game
-    already played (2026-10-21): what happened on that night is recorded
-    with games.set_game_air_conditioning, which moves the bill, and
-    letting the forecast be "corrected" afterwards as well would adjust
-    the same night twice, once each way.
+    The total venue cost stays the same; only which nights carry the
+    AC portion moves, which re-prices each game. Rounding makes a
+    member's season fee shift by a few dollars, written as an
+    adjustment entry. Refused once settled, and for a game already
+    played: what happened on the night is recorded with
+    games.set_game_air_conditioning, so the same night is never
+    adjusted both ways.
     """
     season = db.get(SeasonRow, season_id)
     if season is None:
@@ -467,15 +429,10 @@ def preview_air_conditioned_dates(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> AirConditionedPreviewOut:
-    """What correcting the forecast would do to every game's price and to
-    a member's season fee, without doing it.
-
-    The settings page shows this while the organizer taps dates, so the
-    figures come from the same pricing code as the books themselves
-    (settlement.season_shares) rather than from a second copy of the
-    rounding rules in the browser — which could not see cancelled games
-    or a night's own venue cost, and would then disagree with the ledger.
-    Writes nothing.
+    """What correcting the forecast would do to each game's price and to
+    a member's season fee, without saving anything. Uses the same
+    pricing code as the books, so the preview cannot disagree with the
+    ledger.
     """
     season_row = db.get(SeasonRow, season_id)
     if season_row is None:
@@ -546,17 +503,15 @@ def get_season(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> SeasonDetailOut:
-    """The whole season: roster, every game, who's absent, who's
-    dropping in, who's waiting. Members of this season's club only — it
-    names names.
+    """The whole season: roster, every game, who is away, who is playing,
+    who is queued. Members of the club only.
     """
     season_row = db.get(SeasonRow, season_id)
     if season_row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
     _require_club_access(db, season_row.club_id, current_player)
 
-    # "locked" is about this caller, not about the date alone — the
-    # organizer is never locked out (see _require_within_change_deadline).
+    # "locked" is per caller: the organizer is never locked out.
     viewer_is_organizer = _runs_club(db, season_row.club_id, current_player)
 
     game_rows = (
@@ -580,33 +535,22 @@ def get_season(
     }
     previous = _previous_season(db, season_row)
 
-    # One query per attendance kind for the whole season, not one per
-    # game — looping a query per game (3 * N round trips to Neon for N
-    # games) is the classic N+1 problem and was most of why this
-    # endpoint felt slow. Group the results by game_id in Python instead.
-    # Absences and drop-ins are each ordered earliest-first per game so
-    # they can be paired off FIFO below — same rule, applied here purely
-    # for display, as settlement.covered_absences applies for refunds.
-    # An explicit substitute (covers_absence_id) always pairs with that
-    # absence regardless of order, exactly as covered_absences does.
+    # One query per kind of attendance for the whole season, grouped by game
+    # in Python, instead of one per game. Absences and drop-ins are ordered
+    # earliest first so they can be paired FIFO for display, by the same
+    # rule settlement.covered_absences uses for refunds.
     absences_by_game: dict[int, list[tuple[int, str]]] = defaultdict(list)
-    # The caller's own leave. A 代打 covering one of these is theirs to
-    # take back (the server allows it in _require_may_cancel_drop_in), and it
-    # is no longer found through the bringer, which stays whoever put
-    # the 代打 on the list.
+    # The caller's own absences: a 代打 covering one of them is theirs to
+    # cancel.
     my_absence_ids: set[int] = set()
-    # Profile pictures by row, kept beside the tuples below rather than
-    # widening them: every unpacking of those would have to change too.
+    # Profile pictures by row, kept apart from the tuples below.
     avatar_of_absence: dict[int, str | None] = {}
     avatar_of_drop_in: dict[int, str | None] = {}
     for absence, player in (
         db.query(AbsenceRow, PlayerRow)
         .join(PlayerRow, AbsenceRow.player_id == PlayerRow.id)
-        # Members only. "Away" is a statement about somebody expected
-        # here, so a leave record left behind by a player since taken off
-        # the roster is not one — and printing it listed a name under
-        # 請假 that is not on the roster above it. remove_member closes
-        # these now; this covers the ones written before it did.
+        # Members still on the roster only: "away" is about somebody
+        # expected here.
         .join(
             SeasonMemberRow,
             and_(
@@ -629,11 +573,8 @@ def get_season(
         int,
         list[tuple[int, int, str, Gender | None, int | None, int | None, str | None]],
     ] = defaultdict(list)
-    # outerjoin, not join. brought_by_player_id is null for everybody who
-    # signed themselves up — the ordinary case — so an inner join here
-    # would drop those rows and the roster would lose most of its
-    # drop-ins. money._who_brought uses a plain join correctly, because
-    # it only ever builds a map of the ones who *were* brought.
+    # outerjoin: brought_by_player_id is null for everyone who signed
+    # themselves up.
     Bringer = aliased(PlayerRow)
     for drop_in, player, bringer_name in (
         db.query(DropInRow, PlayerRow, Bringer.name)
@@ -680,9 +621,7 @@ def get_season(
             )
         )
 
-    # One place computes what each game costs a person; the games below
-    # and the drop-in charges elsewhere both read from it, so they can't
-    # disagree. See settlement.season_shares.
+    # Each game's price, from the same function the ledger uses.
     shares = season_shares(season_from_rows(season_row, game_rows, member_rows))
 
     games = []
@@ -692,18 +631,11 @@ def get_season(
         # (drop_in_id, player_id, name, gender, covers_absence_id) tuples
         drop_ins = drop_ins_by_game[game.id]
 
-        # Two different questions, deliberately answered separately.
-        #
-        # "Who did this member arrange to stand in for them?" has an
-        # answer only when they actually arranged somebody
-        # (covers_absence_id). "Does this absence get its money back?" is
-        # answered by anybody filling the slot, matched FIFO — the rule in
-        # settlement.covered_absences.
-        #
-        # These used to be one map, so a person who signed themselves up
-        # off the waitlist was shown as a named member's 代打, and that
-        # member was shown as having arranged them. Neither had agreed to
-        # anything. Reported from real use on 2026-09-10.
+        # Two separate questions. Who a member arranged to stand in for them
+        # (covers_absence_id) is a relationship between two people. Whether
+        # an absence is refunded depends on anybody filling the slot,
+        # matched FIFO. Somebody who came off the queue is never shown as a
+        # member's 代打.
         absence_name_by_id = dict(absences_list)
         arranged_for_absence: dict[str, str] = {}
         arranged_by_drop_in: dict[int, str] = {}
@@ -740,8 +672,7 @@ def get_season(
             ) in drop_ins
             if covers is None
         ]
-        # Who is standing in the slot — which is also what decides the
-        # refund. Named, but not "covered by": nobody asked them.
+        # Who is standing in the slot, which also decides the refund.
         filled_by: dict[int, str] = {
             aid: arranged_for_absence[absence_name_by_id[aid]]
             for aid in claimed_absence_ids
@@ -757,9 +688,7 @@ def get_season(
                 status=game.status,
                 air_conditioned=game.air_conditioned,
                 share=shares[game.id],
-                # Null for almost every game, meaning "the same as the
-                # rest of the season" — the screen falls back to the
-                # season's own pair rather than showing a gap.
+                # Null means the season's own venue.
                 location=game.location,
                 start_time=game.start_time,
                 end_time=game.end_time,
@@ -785,9 +714,9 @@ def get_season(
                         player_name=name,
                         gender=gender,
                         covering=arranged_by_drop_in.get(drop_in_id),
-                        # Themselves, or a guest they brought. The screen
-                        # uses this to decide whose signup it may offer to
-                        # cancel; the server checks it again on the way in.
+                        # Themselves or a guest they brought: whose signup
+                        # the screen may offer to cancel. The server checks
+                        # again.
                         signed_up_by_me=(
                             player_id == current_player.id
                             or brought_by == current_player.id
@@ -819,15 +748,8 @@ def get_season(
         game_end_time=season_row.game_end_time,
         location=season_row.location,
         change_deadline_hours=season_row.change_deadline_hours,
-        # The headline figure a season is described by: what one game
-        # costs one person before any air conditioning. Each game carries
-        # its own share above, because a cooled night costs more.
-        #
-        # Divided by capacity, not by the roster. This call site was
-        # missed when the rule changed on 2026-09-10, so
-        # the screens quoted a price the ledger never charged whenever the
-        # roster wasn't exactly full — and an empty roster divided by zero
-        # and returned a 500, which is how tests/api/test_fuzz.py found it.
+        # What one game costs one person before air conditioning, divided by
+        # capacity like every share.
         share_per_game=share_per_game(
             season_row.total_venue_cost
             - season_row.ac_surcharge * sum(1 for g in game_rows if g.air_conditioned),

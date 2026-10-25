@@ -1,23 +1,17 @@
-"""Every LINE message the app sends, and when.
+"""Every LINE message the app sends, and when. All are private messages;
+nothing goes to a group.
 
-At a game's change deadline (decided 2026-10-05), once: the roster
-status to that club's organizers, and a promotion notice to everybody
-who came off the waiting list, and to whoever signed them up. Held until
-then because a roster keeps moving until the deadline — somebody takes
-leave, then names a 代打 — and a notice sent at the first move could be
-wrong by the second.
-
-After the deadline the same job, every ten minutes, tells whoever has
-come off the queue since — if they are still on court by then, and only
-once per signup (2026-10-14). It used to be the route, the moment they
-were promoted, which an organizer's next tap could already undo:
-taking leave back and retaking it told the same person twice, and naming
-a 代打 bumped somebody back to the queue right after they had been told
-they were playing. A queued person named a 代打 counts as promoted too.
-
-Also: a game called off, to everybody expected at it; people waiting to
-join, to the organizer, once a day; and the season's 繳費通知, when the
-organizer sends it.
+- At a game's change deadline, once: the roster status to that club's
+  organizers, and a promotion notice (遞補通知) to everybody who came off
+  the queue and to whoever signed them up. Held until the deadline
+  because the roster keeps moving until then.
+- After the deadline, every ten minutes: a promotion notice to whoever
+  has come off the queue since, if still on court when the job runs,
+  once per signup. A queued person named a 代打 counts as promoted.
+- A game called off (場次取消): everybody expected at it.
+- People waiting to join (加入申請): the club's organizers, once a day.
+- The season's fee notice (繳費通知): each member, when the organizer
+  sends it, at most once a season.
 """
 
 import logging
@@ -46,34 +40,23 @@ from volleyflow.schedule import GameStatus, change_deadline
 
 logger = logging.getLogger("volleyflow.reminders")
 
-# Every push ends with this. A notice that names a problem without
-# offering a way to act on it makes the reader go and find the app
-# themselves, and the join-request digest was worse than that — it said
-# "go to 管理成員" and gave no route at all.
-#
-# The liff.line.me address rather than the GitHub Pages one: only a LIFF
-# URL opens inside LINE carrying an identity. The plain site address,
-# tapped from a chat, lands on liff.login() and bounces the reader to a
-# LINE login screen for no reason.
-#
-# This is the member app — the same destination as the rich menu's first
-# button, so the app has one front door rather than several. There is no
-# LIFF app pointing at the organizer pages, so a digest cannot deep-link
-# to 管理成員; it names the screen and lets the reader get there.
-#
-# Adding it costs nothing: it rides inside a message already being sent,
-# and the free tier counts messages, not characters.
+# Every push ends with a link to the member app. A liff.line.me address,
+# because only a LIFF URL opens inside LINE with the user signed in. No LIFF
+# app points at the organizer pages, so notices for organizers name the
+# screen instead of linking to it.
 APP_URL = "https://liff.line.me/2011156233-6CouG6VI"
 LEDGER_URL = "https://liff.line.me/2011156233-SWicoUre"
-"""我的帳務 (frontend/ledger.html) — its own LIFF app, since one LIFF app
-has one endpoint. `?club=` opens that club's breakdown directly."""
+"""我的帳務 (ledger.html), a LIFF app of its own because a LIFF app has one
+endpoint. `?club=` opens that club's breakdown.
+"""
 
 _WEEKDAYS = "一二三四五六日"
 
 
 def _when(game: GameRow, season: SeasonRow) -> str:
-    """ "10/7（二）20:00" — the way the app itself writes a game. The time
-    is the game's own when it has one, else the season's usual one."""
+    """ "10/7（二）20:00", the way the app writes a game: the game's own
+    start time, else the season's.
+    """
     d = game.date
     text = f"{d.month}/{d.day}（{_WEEKDAYS[d.weekday()]}）"
     start = game.start_time or season.game_start_time
@@ -81,17 +64,14 @@ def _when(game: GameRow, season: SeasonRow) -> str:
 
 
 def _message(title: str, club: str, body: list[str], link: tuple[str, str]) -> str:
-    """Every notice has one shape (agreed 2026-10-03): 【球隊】 and what
-    the notice is, the facts one per line, then where to go. Blank lines
-    between the three, because LINE shows them as one block otherwise.
+    """Every notice has one shape: 【球隊】 and what the notice is, the facts
+    one per line, then where to go, separated by blank lines.
 
-    No line longer than about ten Chinese characters (2026-10-05): a LINE
-    bubble on a small phone is about 65% of a 320-wide screen, and a line
-    that wraps there is the one people misread. Measured, not guessed —
-    on 季費繳費通知 the organizer's own phone wrapped two lines. Facts
-    that would run longer are split across two lines, the second in
-    （）. The link itself cannot be shortened and always wraps, which is
-    why its label sits on a line of its own."""
+    No line is longer than about ten Chinese characters, which is what
+    fits a LINE bubble on a small phone without wrapping. Longer facts
+    are split over two lines, the second in （）. The link always wraps,
+    so its label sits on its own line.
+    """
     label, url = link
     return "\n".join([f"【{club}】{title}", "", *body, "", f"{label}：", url])
 
@@ -109,10 +89,7 @@ class _Roster:
 
 
 def _roster(session: Session, game: GameRow, season: SeasonRow) -> _Roster:
-    """Fixed members minus this game's live absences, plus confirmed
-    drop-ins. A cancelled absence is not an absence — it used to be
-    counted as one here, which under-reported every roster where
-    somebody had taken leave and then taken it back."""
+    """Fixed members minus live absences, plus confirmed drop-ins."""
     absent_ids = {
         player_id
         for (player_id,) in session.query(AbsenceRow.player_id).filter(
@@ -158,9 +135,9 @@ def _organizer_line_ids(session: Session, club_id: int) -> list[str]:
 
 
 def _push_each(line_user_ids: list[str], text: str, what: str) -> int:
-    """One try per person. LINE refuses a push to anybody who hasn't
-    added the Official Account, and letting that error escape stopped
-    everyone after them in the list (fixed 2026-09-15)."""
+    """Pushes to each person separately, so one refusal (somebody who has
+    not added the Official Account) does not stop the rest.
+    """
     told = 0
     for line_user_id in line_user_ids:
         try:
@@ -190,10 +167,9 @@ def roster_status_text(session: Session, game: GameRow, season: SeasonRow) -> st
 
 
 def send_roster_status(session: Session, game: GameRow) -> int:
-    """The roster status, to that club's organizers alone — never the
-    members, at the organizer's choice (2026-10-05): the app already shows
-    the roster to anyone who looks, and one message per game is what the
-    free tier can afford. Returns how many organizers it reached."""
+    """Sends the roster status to the club's organizers only; members see
+    the roster in the app. Returns how many organizers it reached.
+    """
     season = session.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
     recipients = _organizer_line_ids(session, season.club_id)
@@ -211,23 +187,22 @@ def send_roster_status(session: Session, game: GameRow) -> int:
 
 
 def _taiwan_now() -> datetime:
-    """Wall-clock time where the clubs play — the terms a game's date and
-    start time are stored in."""
+    """Wall-clock time where the clubs play, the terms game dates and
+    times are stored in.
+    """
     return (
         datetime.now(UTC).astimezone(timezone(timedelta(hours=8))).replace(tzinfo=None)
     )
 
 
 def send_deadline_notices(session: Session, now: datetime) -> int:
-    """Everything due at a deadline that has passed, for every game still
-    to be played today or later. Run every ten minutes; returns how many
-    games it sent for.
+    """Sends everything due at a deadline that has passed, for every game
+    today or later. Run every ten minutes; returns how many games it
+    sent for.
 
-    Each game is marked and committed *before* anything is sent. A LINE
-    message cannot be taken back, so a run that overlaps another, or
-    fails half way, must find the game already claimed rather than send
-    it twice; the cost is that a failure mid-send leaves somebody untold,
-    which the organizer can see on the roster anyway.
+    Each game is marked and committed before anything is sent: a LINE
+    message cannot be taken back, so an overlapping or failed run must
+    find the game already claimed rather than send twice.
     """
     due: list[GameRow] = []
     for game, season in (
@@ -253,25 +228,20 @@ def send_deadline_notices(session: Session, now: datetime) -> int:
 
     for game in due:
         send_roster_status(session, game)
-    # After the roster status, and covering the games just claimed as well
-    # as every earlier one: whoever has come off the queue since is told.
+    # Then everybody who has come off a queue since, including at the games
+    # just claimed.
     send_promotion_notices(session, now)
     return len(due)
 
 
 def send_promotion_notices(session: Session, now: datetime) -> int:
-    """Tell everybody who is on court off the queue, in a game whose
-    deadline notices have gone out, and hasn't been told yet. Returns how
-    many messages went out.
+    """Tells everybody who came off the queue onto court, in a game whose
+    deadline notices have gone out, and has not been told yet. Returns
+    how many messages went out.
 
-    Who is owed a notice is read at send time, not when they were
-    promoted: somebody promoted and bumped back between two runs is never
-    told anything, and taking leave back and forth promotes the same row
-    each time but tells it once. A queued person named a 代打 is on court
-    off the queue like anybody promoted, and hears the same way.
-
-    Marked and committed before sending, like the roster status — a run
-    that overlaps another must find them already claimed.
+    Read at send time, so somebody promoted and bumped back between
+    two runs is never told, and a row promoted twice is told once.
+    Marked and committed before sending, like the roster status.
     """
     owed = (
         session.query(DropInRow)
@@ -300,9 +270,9 @@ _JOIN_NAMES_SHOWN = 8
 
 
 def send_join_request_digests(session: Session) -> int:
-    """One message per club with people waiting to be let in, from the
-    daily run — never one per person, which would spend a month's pushes
-    in the first week. Returns how many clubs had somebody waiting."""
+    """One message per club with people waiting to be let in, never one
+    per person. Returns how many clubs had somebody waiting.
+    """
     names: dict[int, list[str]] = defaultdict(list)
     for club_id, name in (
         session.query(ClubMemberRow.club_id, PlayerRow.name)
@@ -314,17 +284,13 @@ def send_join_request_digests(session: Session) -> int:
     for club_id, waiting in names.items():
         club = session.get(ClubRow, club_id)
         club_name = club.name if club is not None else ""
-        # Who, not just how many (2026-10-05) — one name a line, so a long
-        # list stays readable. Past a handful the rest are counted rather
-        # than listed; the 名單 page has them all.
+        # One name a line; past a handful the rest are counted.
         shown = waiting[:_JOIN_NAMES_SHOWN]
         body = [f"待核准：{len(waiting)} 人", *shown]
         if len(waiting) > len(shown):
             body.append(f"（另 {len(waiting) - len(shown)} 人）")
-        # Not a link to the 名單 page itself: the app link opens the
-        # member page, and a path appended to a LIFF link lands on the
-        # wrong file. So the link says only where it goes, and the line
-        # above it says where to go from there.
+        # A path appended to a LIFF link opens the wrong page, so the link
+        # goes to the app and the line above says where to go from there.
         text = _message(
             "加入申請",
             club_name,
@@ -336,11 +302,8 @@ def send_join_request_digests(session: Session) -> int:
 
 
 def _line_ids_for(session: Session, player_ids: list[int]) -> dict[int, str]:
-    """Player id -> LINE id, for whoever has one.
-
-    A missing id is the ordinary case, not a failure: a guest the
-    organizer typed in by hand has no LINE account at all, and neither
-    does somebody's +1. They simply can't be told.
+    """Player id -> LINE id, for whoever has one. A guest typed in by
+    hand has no LINE account and simply cannot be told.
     """
     if not player_ids:
         return {}
@@ -358,16 +321,12 @@ def _club_name(session: Session, club_id: int) -> str:
 
 
 def tell_promoted(session: Session, promoted: list[tuple[int, int]]) -> int:
-    """Send the 遞補通知 to each person, and whoever signed them up, naming
+    """Sends the 遞補通知 to each person and whoever signed them up, naming
     which night is theirs. Returns how many messages went out.
 
-    Who is owed one is send_promotion_notices' decision; this only words
-    and sends it. Takes `(game_id, player_id)` pairs because one run can
-    cover several nights — removing somebody from a season's roster frees
-    their place at every game.
-
-    **Call this after the commit, never before** — a push sent from
-    inside a transaction that then rolls back cannot be taken back.
+    Takes (game_id, player_id) pairs because one run can cover several
+    nights. Call after the commit: a push sent inside a transaction
+    that rolls back cannot be taken back.
     """
     told = 0
     for game_id, player_id in promoted:
@@ -391,8 +350,7 @@ def tell_promoted(session: Session, promoted: list[tuple[int, int]]) -> int:
         if player is None:
             continue
         bringer = session.get(PlayerRow, bringer_id) if bringer_id else None
-        # The same words for the person and whoever signed them up; who
-        # signed them up is not the news (2026-10-05).
+        # The same words for the person and whoever signed them up.
         body = [f"場次：{_when(game, season)}", "", f"遞補上場：{player.name}"]
         text = _message(
             "遞補通知",
@@ -410,10 +368,10 @@ def tell_promoted(session: Session, promoted: list[tuple[int, int]]) -> int:
 
 
 def notify_game_cancelled(session: Session, game: GameRow) -> int:
-    """Tell everybody expected at a game that it is off: the members not
-    on leave, the confirmed drop-ins, and whoever signed those up. Before
-    this, calling a game off reached nobody. Only for a game still to
-    come; returns how many messages went out. Call after the commit."""
+    """Tells everybody expected at a game still to come that it is off:
+    members not on leave, confirmed drop-ins, and whoever signed those
+    up. Returns how many messages went out. Call after the commit.
+    """
     if game.date < _taiwan_now().date():
         return 0
     season = session.get(SeasonRow, game.season_id)
@@ -446,9 +404,10 @@ def notify_game_cancelled(session: Session, game: GameRow) -> int:
 
 @dataclass(frozen=True)
 class FeeDue:
-    """What one member is asked to pay for a season. Amounts are what the
-    message states, all positive except `earlier`, which is signed the
-    ledger's way: positive is a credit coming off."""
+    """What one member is asked to pay for a season. All amounts are
+    positive except `earlier`, which is signed the ledger's way:
+    positive is a credit coming off.
+    """
 
     player_id: int
     fee: Decimal
@@ -460,13 +419,8 @@ class FeeDue:
 
 
 def notify_fee_due(session: Session, season: SeasonRow, dues: list[FeeDue]) -> set[int]:
-    """Send each member their 繳費通知. Returns who it reached.
-
-    The only message about money, and sent once a season: a kept refund
-    or an unpaid balance from last season is folded in here rather than
-    announced at settlement. Anyone LINE refuses — no account, or the
-    Official Account never added — is left out of the result, so the
-    caller can leave them free to be sent it later.
+    """Sends each member their 繳費通知 and returns who it reached. Anyone
+    LINE refuses is left out, so they can be sent it later.
     """
     reachable = _line_ids_for(session, [d.player_id for d in dues])
     told: set[int] = set()
@@ -483,8 +437,9 @@ def notify_fee_due(session: Session, season: SeasonRow, dues: list[FeeDue]) -> s
 
 
 def fee_notice_text(session: Session, season: SeasonRow, due: FeeDue) -> str:
-    """The message itself — also what the confirmation sheet shows, so
-    what the organizer approves is word for word what is sent."""
+    """The message itself, also shown on the confirmation sheet, so the
+    organizer approves exactly what is sent.
+    """
     games = (
         session.query(GameRow.date)
         .filter(
@@ -514,12 +469,10 @@ def fee_notice_text(session: Session, season: SeasonRow, due: FeeDue) -> str:
 
 
 def _earlier_lines(due: FeeDue) -> list[str]:
-    """What last season left, in the words a member can check: the
-    refund for their absences, and whatever else is outstanding either
-    way. Nothing at all when last season left nothing — "上季餘額：$0"
-    reads like something went wrong. A refund handed over in cash at
-    settlement is already squared, so `earlier` is 0 and it isn't
-    mentioned either."""
+    """What last season left: the refund for covered absences and
+    anything else outstanding. Nothing when last season left nothing,
+    since "上季餘額：$0" reads like an error.
+    """
     if due.earlier == 0:
         return []
     lines = []
@@ -538,14 +491,12 @@ def _earlier_lines(due: FeeDue) -> list[str]:
 
 
 if __name__ == "__main__":
-    # Two jobs, two schedules: `deadline` every ten minutes
-    # (deadline-notices.yml), the join digest once a day (reminders.yml).
+    # Two jobs: `deadline` every ten minutes (deadline-notices.yml), the
+    # join digest once a day (reminders.yml).
     logging.basicConfig(level=logging.INFO)
     job = sys.argv[1] if len(sys.argv) > 1 else "daily"
     with get_session() as db_session:
         if job == "deadline":
-            # Deadline notices for games just past it, and promotion
-            # notices for everybody who has come off a queue since.
             games = send_deadline_notices(db_session, _taiwan_now())
             print(f"Sent deadline notices for {games} game(s)")
         else:

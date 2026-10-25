@@ -59,11 +59,10 @@ def list_club_members(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> list[ClubMemberOut]:
-    """Everyone in the club and their role — distinct from a *season's*
-    fixed roster (GET /seasons/{id} returns that). Members only: this
-    returns real names, genders and LINE profile pictures. Pending requests
-    are only included when an organizer explicitly asks for them: ordinary
-    club members must never learn who is waiting to join.
+    """Everyone in the club and their role (a season's fixed roster comes
+    from GET /seasons/{id}). Members only, since it returns names,
+    genders and profile pictures. Pending join requests are included
+    only when an organizer asks for them.
     """
     _get_club_or_404(db, club_id)
     statuses: tuple[str, ...]
@@ -107,18 +106,11 @@ def list_my_guests(
     current_player: PlayerRow = Depends(get_current_player),
 ) -> list[GuestOut]:
     """The people this caller has brought to this club before, most
-    recent first.
+    recent first, so a friend can be picked with a tap instead of
+    typed again (which creates a duplicate person with their own
+    ledger).
 
-    Typing a friend's name again every week is how the same person ends
-    up in the database three times under three spellings, and each of
-    those copies carries its own money. Offering the ones already
-    brought — as a tap, not a text field — is what stops that.
-
-    Deliberately capped and deduplicated by player: a club that brings in
-    a lot of outside players would otherwise grow a list nobody can scan,
-    and the useful part is the handful of regulars. Cancelled signups
-    still count — somebody you brought and then couldn't is still
-    somebody you know.
+    Capped and deduplicated; cancelled signups still count.
     """
     _require_club_access(db, club_id, current_player)
 
@@ -142,23 +134,10 @@ def list_my_guests(
         .all()
     )
 
-    # Grouped by name, not by player id.
-    #
-    # A typed name always creates a new person — deliberately, since two
-    # real people can be called 小明 and one inheriting the other's
-    # ledger is not recoverable. The cost is that bringing the same
-    # friend three weeks running, by typing, made three of them. Showing
-    # that as three identical rows makes the picker useless at exactly
-    # the moment it is meant to help.
-    #
-    # So they merge here, and the row carries the most recent id: picking
-    # it signs the friend up as that person, which pulls future weeks
-    # onto one row instead of adding a fourth. The list narrows itself
-    # over time rather than growing.
-    #
-    # It cannot separate two different people who share a name — but
-    # neither could the reader, and the manual field is still there for
-    # somebody genuinely new.
+    # Grouped by name: typing the same friend's name each week creates a new
+    # person each time, and the picker should show them once. The row
+    # carries the most recent id, so picking it keeps future signups on one
+    # person.
     by_name: dict[str, GuestOut] = {}
     for player, signed_up_at in rows:
         existing = by_name.get(player.name)
@@ -184,12 +163,8 @@ def add_club_guest(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> MemberOut:
-    """Add an accountless visitor to a club, but not to any season.
-
-    A club roster and a season's fixed roster answer different questions:
-    this route only records that the person belongs to the team. The
-    organizer may later add them to a season through the existing season
-    endpoint, which is the only path that creates a season-fee charge.
+    """Adds an accountless visitor to the club but to no season. Only the
+    season roster endpoint creates a season-fee charge.
     """
     _get_club_or_404(db, club_id)
     _require_organizer(db, club_id, current_player)
@@ -228,20 +203,13 @@ def link_player(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> MemberOut:
-    """Says "this LINE account is that person on the roster".
+    """Records that this LINE account is that person on the roster.
 
-    identify_player deliberately never guesses this by name: a wrong
-    guess hands someone else's ledger to a stranger, so the organizer —
-    who actually knows who's who — makes the call. That was always the
-    design; this is the endpoint that was missing to carry it out, which
-    is why a member typed in by hand stayed marked 訪客 even after they
-    logged in, with a second copy of themselves sitting in the join pool.
-
-    The roster entry survives, keeping its id and therefore its whole
-    ledger history; the LINE-created row donates its identity and is
-    deleted. Refused if that row has any history of its own, since
-    deleting it would then destroy real records — remove the duplicate
-    roster entry instead.
+    identify_player never guesses this by name, because a wrong guess
+    hands somebody's ledger to a stranger; the organizer decides. The
+    roster entry keeps its id and ledger; the row created by LINE
+    gives up its identity and is deleted, which is refused if it has
+    history of its own.
     """
     _get_club_or_404(db, club_id)
     _require_organizer(db, club_id, current_player)
@@ -277,10 +245,9 @@ def link_player(
                 "remove the duplicate roster entry instead",
             )
 
-    # Two flushes, not one: line_user_id is unique, and within a single
-    # flush SQLAlchemy is free to apply the target's UPDATE before the
-    # source's, leaving both rows holding the same id for an instant —
-    # which the index rejects. Release it first, then hand it over.
+    # Two flushes: line_user_id is unique, and in one flush the target's
+    # update could run before the source's, briefly giving both rows the
+    # same id.
     released = source.line_user_id
     source.line_user_id = None
     db.flush()
@@ -288,19 +255,12 @@ def link_player(
     target.avatar_url = source.avatar_url
     db.flush()
 
-    # Guests they brought come with them. This is the one reference to a
-    # player that the refusal above doesn't cover, and it can't: signing a
-    # friend up is an ordinary thing to have done before the organizer
-    # gets round to linking your account, so refusing over it would block
-    # the normal case. Re-pointed rather than cleared, because the whole
-    # meaning of this endpoint is that the two rows are one person — and
-    # left alone it was a foreign key violation, a 500, and a browser
-    # reporting it as a CORS error because a crash carries no headers.
+    # Guests they brought move with them: the two rows are one person.
     db.query(DropInRow).filter(DropInRow.brought_by_player_id == source.id).update(
         {DropInRow.brought_by_player_id: target.id}, synchronize_session=False
     )
-    # Places they held in a queue carry no money, so they go rather than
-    # block the link; anything on court was charged and was refused above.
+    # Queue places carry no money, so they are dropped rather than blocking
+    # the link.
     db.query(DropInRow).filter(
         DropInRow.player_id == source.id, DropInRow.status == QUEUED
     ).delete(synchronize_session=False)
@@ -336,8 +296,7 @@ def _games_touched(
         game_id
         for (game_id,) in db.query(GameRow.id).filter(GameRow.season_id.in_(rostered))
     }
-    # A live signup in either list: on court or queued, it is a game they
-    # are down for.
+    # A live signup, on court or queued.
     for table in (AbsenceRow, DropInRow):
         touched |= {
             game_id
@@ -360,8 +319,9 @@ def merge_players(
 ) -> MemberOut:
     """Folds a typed-in duplicate into the person they really are: every
     signup, absence and ledger entry in this club moves over, and the
-    duplicate leaves the club. Refused where both are down for the same
-    game, because one person can't be there twice."""
+    duplicate leaves the club. Refused where both are down for the
+    same game.
+    """
     _get_club_or_404(db, club_id)
     _require_organizer(db, club_id, current_player)
     keep = _get_player_or_404(db, player_id)
@@ -414,10 +374,8 @@ def merge_players(
     db.delete(duplicate_membership)
     if keep.gender is None:
         keep.gender = duplicate.gender
-    # Repair the label produced by the old global collision rule while the
-    # organizer is explicitly confirming that these two rows are one person.
-    # A naturally numbered name is untouched unless it is exactly the old
-    # row's name plus the generated suffix.
+    # Remove a "(2)"-style suffix that an older naming rule added, now that
+    # the two rows are confirmed to be one person.
     if re.fullmatch(rf"{re.escape(duplicate.name)} \(\d+\)", keep.name):
         keep.name = duplicate.name
     _audit(
@@ -445,18 +403,13 @@ def remove_club_member(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> None:
-    """Take someone out of the club — a wrong-link join, a test account,
-    or someone who has left for good. Distinct from removing them from a
-    *season's* roster (DELETE /seasons/{id}/members/{id}), which is about
-    one season's billing.
+    """Takes someone out of the club: a wrong join, a test account,
+    someone who left for good. Different from removing them from a
+    season's roster.
 
-    Refused while they're still on any of this club's season rosters:
-    that removal has to go through the season endpoint, which corrects
-    everyone's charge. Silently dropping them here would leave a season
-    whose member list and ledger disagree.
-
-    Refused for the last organizer, which would leave the club with
-    nobody able to manage it.
+    Refused while they are on any season roster (that goes through the
+    season endpoint, which corrects the charges), while they have
+    money or signups open, and for the last organizer.
     """
     _get_club_or_404(db, club_id)
     _require_organizer(db, club_id, current_player)
@@ -480,10 +433,8 @@ def remove_club_member(
             "Still a fixed member of a season — remove them from that season first",
         )
 
-    # Taking somebody out while money or a signup is still open stranded
-    # both: their fee could no longer be marked received, and their place
-    # stayed on a roster under a name the club no longer had (2026-10-16).
-    # Settled and finished with, they can go.
+    # Not while money or a signup is still open: their fee could no longer
+    # be marked received.
     balance = (
         db.query(func.coalesce(func.sum(LedgerEntryRow.amount), 0))
         .filter(

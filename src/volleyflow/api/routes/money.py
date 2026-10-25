@@ -58,10 +58,9 @@ def record_payment(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> LedgerEntryOut:
-    """A manual cash movement the organizer marks by hand — the billing rules:
-    payments and refunds are recorded manually, never via a payment
-    gateway. Positive amount: the player paid the organizer. Negative:
-    the organizer paid the player.
+    """A cash payment or refund the organizer marks by hand; there is no
+    payment gateway. Positive: the player paid the organizer.
+    Negative: the organizer paid the player.
     """
     _get_club_or_404(db, club_id)
     _require_organizer(db, club_id, current_player)
@@ -78,9 +77,8 @@ def record_payment(
             )
         season_id = night_season.id
         night = game
-        # A drop-in fee is owed only by somebody who actually got a place
-        # that night, so it is only taken from somebody on court then —
-        # never a queued signup (asked 2026-10-16).
+        # Only from somebody on court that night, never from a queued
+        # signup.
         on_court = (
             db.query(DropInRow.id)
             .filter(
@@ -96,10 +94,8 @@ def record_payment(
                 "That player isn't on court for that game",
             )
 
-    # Recording money is the one thing that must not happen twice because
-    # a phone lost signal mid-request and the tap was repeated. If this
-    # token has been seen, the payment is already recorded: hand back the
-    # entry that exists rather than writing another.
+    # A repeated tap after a lost connection must not record the money
+    # twice: a token already seen returns the entry that exists.
     if payload.client_token is not None:
         already = (
             db.query(LedgerEntryRow)
@@ -141,9 +137,8 @@ def record_payment(
     try:
         db.commit()
     except IntegrityError:
-        # Two copies of the same tap arrived close enough together that
-        # both passed the check above; the index caught the loser. The
-        # payment is recorded either way, which is all the caller needs.
+        # Two copies of the same tap both passed the check; the index caught
+        # the second, and the payment is recorded either way.
         db.rollback()
         existing = (
             db.query(LedgerEntryRow)
@@ -181,17 +176,9 @@ def list_club_balances(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> list[PlayerBalanceOut]:
-    """Every player's balance in this club, in one query.
-
-    The ledger screen needs a number per person, and fetching each
-    person's full entry history to add it up in the browser meant one
-    request per member — around forty on a page load for a normal club,
-    against a six-connection browser limit. The sums are trivial for the
-    database to do together, so it does.
-
-    Organizer-only: this is the whole club's books at a glance. A member
-    reading their own balance still goes through the per-player ledger
-    endpoint, which shows the entries behind the number.
+    """Every player's balance in this club, summed by the database in one
+    query. Organizer only; a member reads their own through the
+    per-player ledger.
     """
     _get_club_or_404(db, club_id)
     _require_organizer(db, club_id, current_player)
@@ -238,9 +225,9 @@ def list_club_balances(
 def _drop_in_nights(
     db: Session, club_id: int, season_id: int | None
 ) -> dict[int, list[DropInNightOut]]:
-    """Player id -> each night of the season they're on court as a drop-in,
-    with that night's fee and what has been taken for it. One pass over
-    the season's signups and one over its night-tagged payments."""
+    """Player id -> each night of the season they play as a drop-in, with
+    that night's fee and what was paid for it.
+    """
     season = db.get(SeasonRow, season_id) if season_id is not None else None
     if season is None or season.club_id != club_id:
         return {}
@@ -281,8 +268,9 @@ def _drop_in_nights(
 def _season_ids_up_to(
     db: Session, club_id: int, season_id: int | None
 ) -> list[int] | None:
-    """`_seasons_up_to` for a season named in a query string, or None —
-    meaning every season — when none was named or it isn't this club's."""
+    """`_seasons_up_to` for a season named in the query string, or None
+    (every season) when none is named or it is another club's.
+    """
     if season_id is None:
         return None
     season = db.get(SeasonRow, season_id)
@@ -292,20 +280,10 @@ def _season_ids_up_to(
 
 
 def _who_brought(db: Session, club_id: int) -> dict[int, str]:
-    """Guest player id -> the name(s) of whoever signed them up.
-
-    A guest's fee is charged to their own ledger, but they have no
-    account and pay nothing — the member who brought them hands over
-    the cash — so "who do I collect this from" is otherwise
-    unanswerable, and on a night when three members each bring
-    somebody it is guesswork.
-
-    Not the only place it appears any more: the roster carries it too
-    as of 2026-09-23, at the organizer's request, served there by
-    seasons.py as DropInDetailOut.brought_by_name. This paragraph used
-    to end "deliberately absent from the roster, where it would be
-    noise" — that decision is reversed, so don't delete either copy as
-    a duplicate of the other.
+    """Guest player id -> who signed them up. A guest's fee is on their
+    own ledger, but the member who brought them is who hands over the
+    cash. The roster shows the same thing
+    (DropInDetailOut.brought_by_name).
     """
     Bringer = aliased(PlayerRow)
     rows = (
@@ -320,8 +298,7 @@ def _who_brought(db: Session, club_id: int) -> dict[int, str]:
     names: dict[int, list[str]] = {}
     for player_id, bringer_name in rows:
         names.setdefault(player_id, []).append(bringer_name)
-    # Two names is already enough to go and ask; beyond that the list
-    # stops fitting on a phone and stops being the point.
+    # Two names are enough to know whom to ask.
     return {
         player_id: "、".join(sorted(who)[:2]) + ("等" if len(who) > 2 else "")
         for player_id, who in names.items()
@@ -337,14 +314,10 @@ def get_player_ledger(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> PlayerLedgerOut:
-    """A player's full append-only history within this club and the
-    balance it adds up to. Positive balance: the organizer owes the
-    player. Negative: the player owes the organizer. Spans every season
-    *in this club* — see docs/billing-rules.md "Ledger" for why nothing
-    ever needs to be explicitly carried over. A player active in two
-    clubs has two separate balances, never combined. Self-or-organizer:
-    money is sensitive enough that only the player themselves or their
-    club's organizer should be able to read it.
+    """A player's full history in this club and the balance it adds up to
+    (positive: the organizer owes them). Spans every season of the
+    club; a player in two clubs has two separate balances. The player
+    or the club's organizer only.
     """
     _get_club_or_404(db, club_id)
     _require_self_or_organizer(db, club_id, current_player, player_id)
@@ -395,8 +368,9 @@ def reverse_payment(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> LedgerEntryOut:
-    """Undoes a payment or refund marked by mistake with an opposite entry.
-    The original stays on the books, so the history still says what happened."""
+    """Undoes a payment or refund marked by mistake with an opposite
+    entry; the original stays.
+    """
     entry = db.get(LedgerEntryRow, entry_id)
     if entry is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such ledger entry")

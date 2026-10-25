@@ -9,10 +9,8 @@ from volleyflow.api.error_reporting import ErrorReportingMiddleware, store_error
 from volleyflow.api.line_webhook import router as line_webhook_router
 from volleyflow.api.routes import router
 
-# Swagger UI and the OpenAPI schema are a complete, browsable map of the
-# API. Useful while developing, not something to leave open on a
-# deployment holding real people's names and money — set VOLLEYFLOW_DOCS=1
-# to turn them back on locally.
+# Swagger UI and the OpenAPI schema map the whole API, so they are off
+# unless VOLLEYFLOW_DOCS=1 (local only).
 _DOCS_ENABLED = os.environ.get("VOLLEYFLOW_DOCS") == "1"
 
 app = FastAPI(
@@ -22,20 +20,12 @@ app = FastAPI(
     openapi_url="/openapi.json" if _DOCS_ENABLED else None,
 )
 
-# The frontend is plain static HTML/JS served from GitHub Pages — a
-# different origin than this API — without CORS enabled, the browser
-# blocks every fetch() call before it reaches a route.
+# The frontend is served from GitHub Pages, a different origin.
 _ALLOWED_ORIGINS = ["https://marksu1104.github.io"]
 
-# The local pages are served from a different port than this API, so they
-# are a different origin and need allowing too — but only when local
-# sign-in is already on, which production never sets. One switch for the
-# whole local setup rather than a second thing to remember.
-#
-# A regex rather than a list because the address isn't known in advance:
-# testing on a real phone means serving to whatever 192.168.x.x the
-# router handed out today. Confined to the three private IPv4 ranges
-# (RFC 1918) — a public address never matches.
+# Local pages on another port, or on a phone on the same network, are
+# allowed only when local sign-in is on. Private IPv4 ranges only (RFC
+# 1918).
 _PRIVATE_LAN_ORIGIN = (
     r"http://(localhost|127\.0\.0\.1|\[::1\]"
     r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
@@ -44,13 +34,10 @@ _PRIVATE_LAN_ORIGIN = (
 )
 _dev_login = os.environ.get("VOLLEYFLOW_DEV_LOGIN") == "1"
 
-# Order matters: Starlette wraps middleware added *later* around
-# middleware added earlier, so ErrorReportingMiddleware must be added
-# before CORSMiddleware for a caught error's response to still pass back
-# out through CORS and get its header — see ErrorReportingMiddleware's
-# own docstring for what goes wrong the other way around.
+# Order matters: middleware added later wraps middleware added earlier, so a
+# caught error's response still passes out through CORS.
 app.add_middleware(ErrorReportingMiddleware)
-# Crashes are kept for the developer's overview too, not only logged.
+# Crashes are kept for the developer's overview, not only logged.
 app.state.error_store = store_error_event
 app.add_middleware(
     CORSMiddleware,
@@ -66,7 +53,7 @@ app.include_router(line_webhook_router)
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    """Liveness check — no DB touch on purpose, so pinging it to keep
-    the free Render instance awake doesn't also load Neon every time.
+    """Liveness check. Touches no database, so pinging it to keep the
+    free Render instance awake does not also wake Neon.
     """
     return {"status": "ok"}

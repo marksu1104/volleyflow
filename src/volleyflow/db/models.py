@@ -1,9 +1,8 @@
 """SQLAlchemy table definitions.
 
-One row class per domain concept in players.py, schedule.py, attendance.py,
-and ledger.py. Membership isn't a row class of its own, same as it isn't a
-Python class in the domain layer — season_members is a plain association
-table with no columns beyond the two foreign keys.
+One row class per domain concept in players.py, schedule.py,
+attendance.py and ledger.py. A season's fixed membership is the
+season_members association table, with no columns beyond its two keys.
 """
 
 from datetime import date, datetime, time
@@ -32,25 +31,22 @@ class Base(DeclarativeBase):
 
 
 class ClubRow(Base):
-    """The tenant boundary. One volleyball group with
-    its own organizer, members, seasons, and books."""
+    """The tenant boundary: one volleyball group with its own organizer,
+    members, seasons and books.
+    """
 
     __tablename__ = "clubs"
 
-    # Deliberately no uniqueness constraint on name: two unrelated clubs
-    # can reasonably pick the same name (id is the real identity), unlike
-    # a Player's name-within-a-club, which _get_or_create_player treats
-    # as an identity key.
+    # No unique name: two clubs may share one.
     id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     name: Mapped[str]
     created_at: Mapped[datetime]
 
 
 class ClubMemberRow(Base):
-    """A Player's relationship to a Club, and their role in it. Distinct
-    from SeasonMemberRow (a season's fixed member list): this is
-    club-wide — someone can be a club member, or its organizer, without
-    yet being on any particular season's roster.
+    """A Player's relationship to a Club and their role in it. Club-wide,
+    unlike SeasonMemberRow: somebody can belong to a club without
+    being on any season's roster.
     """
 
     __tablename__ = "club_members"
@@ -68,62 +64,48 @@ class ClubMemberRow(Base):
     role: Mapped[str]
     joined_at: Mapped[datetime]
     status: Mapped[str] = mapped_column(default="active", server_default="active")
-    """'pending' from joining by link until the organizer approves them, then
-    'active'. Somebody pending can see and do nothing in the club."""
+    """'pending' after joining by link until the organizer approves, then
+    'active'. A pending member can see and do nothing in the club.
+    """
     wants_fixed_membership: Mapped[bool | None] = mapped_column(default=None)
-    """What this person said they are when they joined, before anyone
-    with authority weighed in. NULL: never asked. True: they say they're
-    a fixed member and are waiting for the organizer to put them on a
-    season's roster — until then they can look but not act, since a
-    fixed member's obligations are a money question the organizer
-    decides. False: they're here for single games, and can sign up as a
-    drop-in straight away.
-
-    Deliberately not the same thing as SeasonMemberRow: that's the
-    organizer's decision and the thing billing reads. This is only a
-    stated intention, and never affects a charge."""
+    """What they asked to be when they joined. NULL: never asked. True: a
+    fixed member, waiting for the organizer to put them on a roster.
+    False: here for single games, able to sign up straight away. Only
+    a stated intention; billing never reads it.
+    """
 
 
 class PlayerRow(Base):
     __tablename__ = "players"
 
-    # line_user_id, not name, is the real identity once it's set (see
-    # identify_player). Two different clubs each having a member named
-    # "Alice" is expected and fine, so — unlike line_user_id — name has
-    # no uniqueness constraint of its own.
+    # line_user_id is the identity once set; names are unique only within a
+    # club, enforced by _get_or_create_player.
     __table_args__ = (
-        # A plain (non-partial) unique constraint on a nullable column
-        # still allows any number of NULLs in Postgres — legacy members
-        # entered by name before LINE binding existed can all sit at
-        # NULL until their first visit claims a line_user_id.
+        # Allows any number of NULLs, for people typed in by name.
         UniqueConstraint("line_user_id", name="uq_players_line_user_id"),
-        # NULL passes a SQL CHECK (it's neither true nor false), so this
-        # still allows gender to be unset — it only rejects a bad string.
+        # NULL passes a CHECK, so gender may be unset.
         CheckConstraint("gender IN ('male', 'female')", name="ck_players_gender"),
     )
 
     id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     name: Mapped[str]
     gender: Mapped[str | None] = mapped_column(default=None)
-    """"male" or "female", self-reported. Never used by billing — display
-    only, e.g. counting how many of each are expected at a game."""
+    """"male" or "female", self-reported. Display only, never used by
+    billing.
+    """
     line_user_id: Mapped[str | None] = mapped_column(default=None)
-    """The stable LINE identity, set once this Player opens the LIFF at
-    least once (see routes.identify_player). None for a legacy member
-    entered by name only who has never opened the LIFF — identify_player
-    never auto-links such a row to a new LINE identity by name; that
-    reconciliation is a manual, organizer-driven action."""
+    """The LINE identity, set the first time they open the app. None for
+    somebody typed in by name; linking them to a LINE account is the
+    organizer's decision.
+    """
     avatar_url: Mapped[str | None] = mapped_column(default=None)
-    """LINE profile picture URL, synced on every identify_player call.
-    Display only."""
+    """LINE profile picture, refreshed on every visit. Display only."""
 
 
 class SeasonRow(Base):
     __tablename__ = "seasons"
 
-    # Guards against a season ever being created with numbers that would
-    # make pricing.share_per_game or settlement produce a silently wrong
-    # result instead of failing loudly at creation time.
+    # Numbers that would make pricing fail silently are refused at creation.
     __table_args__ = (
         CheckConstraint(
             "total_venue_cost >= 0", name="ck_seasons_venue_cost_non_negative"
@@ -144,64 +126,53 @@ class SeasonRow(Base):
 
     id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id"))
-    """Which Club this season belongs to. Games,
-    absences, drop-ins, and season membership all derive their club
-    through this foreign key chain rather than storing their own
-    club_id."""
+    """The season's club. Games, absences, drop-ins and season membership
+    reach their club through this, never storing their own club_id.
+    """
     total_venue_cost: Mapped[Decimal] = mapped_column(Numeric(10, 0))
-    """What the club actually pays the venue for the whole season,
-    discounts and all. Stays authoritative: the air-conditioning portion
-    is taken *out* of this figure rather than added on top, so this is
-    always the number the organizer transferred."""
+    """What the club actually pays the venue for the season.
+    Authoritative: the air-conditioning portion is taken out of it,
+    not added on top.
+    """
     ac_surcharge: Mapped[Decimal] = mapped_column(Numeric(10, 0), default=Decimal("0"))
-    """What one game's air conditioning adds to the venue bill.
-
-    Every venue's AC pricing reduces to this: bundled venues charge 0
-    (the default, which makes every game cost the same and the whole
-    calculation identical to what it was before), venues with a higher
-    hourly rate when the AC is on charge the difference times the hours,
-    venues billing a flat AC fee charge that. See
-    pricing.shares_by_game."""
+    """What one game's air conditioning adds to the venue bill; 0 when
+    included. See pricing.shares_by_game.
+    """
     capacity: Mapped[int] = mapped_column(default=18)
     minimum_roster: Mapped[int] = mapped_column(default=12)
-    """Below this expected attendance, the organizer gets a short-roster
-    alert. Default 12 is two full 6-a-side sides."""
+    """The fewest players a game should have. Default 12 is two sides of
+    six.
+    """
     settled_at: Mapped[datetime | None] = mapped_column(default=None)
-    """Set once /settle has run for this season — guards against
-    charging member season fees twice."""
+    """When the season was settled; a settled season's books and
+    attendance are closed.
+    """
     game_start_time: Mapped[time | None] = mapped_column(default=None)
     game_end_time: Mapped[time | None] = mapped_column(default=None)
-    """The season's fixed weekly time slot, e.g. 18:30-22:00. Optional —
-    billing and attendance never depend on it, it's only shown to people
-    and included in reminder messages."""
+    """The usual weekly time slot. Display only."""
     location: Mapped[str | None] = mapped_column(default=None)
-    """The venue name, e.g. "晴光館". Same reasoning as the time slot:
-    display-only, optional."""
+    """The venue name. Display only."""
     change_deadline_hours: Mapped[int] = mapped_column(default=24, server_default="24")
-    """How many hours before a game starts attendance changes (absence,
-    signup, cancelling either) close for members — 24 means "until this
-    time the day before". Every season has one (decided 2026-10-05): the
-    roster status and the promotion notices go out when it passes, so a
-    season without one would never tell anybody anything. Hours rather
-    than the days this replaced, because a day-based deadline closed at
-    midnight, and that is when the notices would have arrived."""
+    """How many hours before a game members' attendance changes close; 24
+    means "until this time the day before". Also when the roster
+    status and promotion notices go out, so every season has one.
+    """
 
 
 class SeasonMemberRow(Base):
-    """Membership: a Player's fixed-member relationship to a Season."""
+    """A Player's fixed membership of a Season."""
 
     __tablename__ = "season_members"
 
-    # season_id is already indexed as the primary key's leading column;
-    # player_id isn't covered by anything until this.
+    # season_id leads the primary key; player_id needs its own index.
     __table_args__ = (Index("ix_season_members_player_id", "player_id"),)
 
     season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id"), primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), primary_key=True)
     fee_notice_sent_at: Mapped[datetime | None] = mapped_column(default=None)
-    """When this member was sent this season's 繳費通知, or None. A LINE
-    message cannot be taken back, so each member gets it at most once a
-    season; this is what makes a second tap send nothing."""
+    """When this member was sent the season's 繳費通知. A LINE message cannot
+    be taken back, so it is sent at most once a season.
+    """
 
 
 class GameRow(Base):
@@ -216,64 +187,37 @@ class GameRow(Base):
         Enum(GameStatus, name="game_status"), default=GameStatus.SCHEDULED
     )
     air_conditioned: Mapped[bool] = mapped_column(default=False)
-    """Whether the air conditioning ran for this game.
-
-    Set from a forecast when the season is created and corrected on the
-    day — whether it actually runs is decided that evening, not when the
-    season is booked. Flipping it moves the season's total venue cost by
-    ac_surcharge and re-syncs every member's charge; see
-    routes.set_game_air_conditioning."""
+    """Whether the air conditioning ran: a forecast at booking, corrected
+    on the night. Changing it moves the season's total by ac_surcharge
+    and re-syncs every member's charge; see
+    routes.set_game_air_conditioning.
+    """
     location: Mapped[str | None] = mapped_column(default=None)
     roster_notice_sent_at: Mapped[datetime | None] = mapped_column(default=None)
-    """When this game's deadline notices went out — the organizer's roster
-    status and the promotion notices held until then. Set before sending,
-    so the job that runs every ten minutes sends them exactly once; a
-    promotion after it is told straight away instead."""
+    """When the game's deadline notices went out. Set before sending, so
+    the job that runs every ten minutes sends them once.
+    """
     start_time: Mapped[time | None] = mapped_column(default=None)
     end_time: Mapped[time | None] = mapped_column(default=None)
-    """This one night's venue and time, when they differ from the rest
-    of the season's.
-
-    NULL means "the same as every other night", which is the normal case
-    and what every game booked before 2026-09-17 holds — so the season's
-    own pair stays the answer unless a game overrides it. Asked for
-    because a booking really does move: 「有時候會換場地」.
-
-    Display-only, exactly like the season's pair: billing never reads
-    them, so changing one writes no ledger entry. See
-    docs/billing-rules.md, "Keeping the charge in sync when the inputs
-    change" — an edit that changes nobody's math writes nothing. What
-    that different venue *costs* is the separate column below."""
+    """This night's own venue and time, when different from the season's.
+    NULL means the season's. Display only: billing never reads them.
+    """
     venue_cost_delta: Mapped[Decimal] = mapped_column(
         Numeric(10, 0), default=Decimal("0")
     )
-    """What this one night costs the club above (or below) a normal night.
-
-    The money half of moving a game: the replacement court charges a
-    different amount, so the club really transfers a different amount.
-    Priced exactly like `ac_surcharge` — taken out of the season total
-    before the even split, then added back on the night it belongs to —
-    so it lands on whoever played that night and on nobody else, and
-    every other night's price does not move at all.
-
-    Zero for every game booked before 2026-09-17, which collapses the
-    calculation back to what it was. Negative is allowed and meaningful
-    (a cheaper hall); only the aggregate is guarded, in
-    pricing.shares_by_game. Changing it moves `total_venue_cost` and
-    re-syncs every member's charge through adjustment entries, so unlike
-    the three columns above this one is *not* display-only. See
-    docs/billing-rules.md, "A different venue for one night"."""
+    """What this night costs above (or below) a normal one, when it runs
+    somewhere else. Priced like ac_surcharge, so it lands only on that
+    night's players. Changing it moves `total_venue_cost` and re-syncs
+    every member's charge. See docs/billing-rules.md "A different
+    venue for one night".
+    """
 
 
 class AbsenceRow(Base):
     __tablename__ = "absences"
 
-    # A player can have only one *active* absence per game at a time —
-    # two would double-count at settlement (two refunds, or the roster
-    # math in _has_open_slot off by one). This is a partial index, not a
-    # plain unique constraint, because cancel-then-record-again is a
-    # legitimate flow (see cancel_absence): cancelled_at IS NULL excludes
-    # the soft-deleted row that flow leaves behind.
+    # One live absence per player per game. Partial, so cancelling and
+    # recording again stays possible.
     __table_args__ = (
         Index(
             "uq_absences_active_player_game",
@@ -283,8 +227,7 @@ class AbsenceRow(Base):
             postgresql_where=text("cancelled_at IS NULL"),
             sqlite_where=text("cancelled_at IS NULL"),
         ),
-        # game_id isn't the leading column of anything above; player_id
-        # is, so it doesn't need a separate index here.
+        # game_id leads no index above; player_id does.
         Index("ix_absences_game_id", "game_id"),
     )
 
@@ -293,20 +236,15 @@ class AbsenceRow(Base):
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     recorded_at: Mapped[datetime]
     cancelled_at: Mapped[datetime | None] = mapped_column(default=None)
-    """Set if the member decided to attend after all. Only allowed while
-    nothing is covering this absence yet — see routes.cancel_absence."""
+    """Set when the member decides to play after all; see
+    routes.cancel_absence.
+    """
     retired_at: Mapped[datetime | None] = mapped_column(default=None)
-    """Set, alongside cancelled_at, when this absence was closed only
-    because the player was taken off the season's roster — not because
-    they said they were coming after all.
-
-    The two have to be told apart, because only this one is undone by
-    putting them back on the roster. Without it, removing a member whose
-    slot a drop-in had filled was a one-way door: the roster dropped to
-    17 of 18 while that game stayed at 18 on court, so adding the same
-    person back was refused for having no room. See
-    routes._restore_retired_absences; the drop-in side of the same idea
-    is DropInRow.absorbed_at."""
+    """Set with cancelled_at when the absence was closed because the
+    player was taken off the roster, so putting them back can restore
+    it. See routes._restore_retired_absences and
+    DropInRow.absorbed_at.
+    """
 
 
 PLAYING = "playing"
@@ -314,23 +252,14 @@ QUEUED = "queued"
 
 
 class DropInRow(Base):
-    """One person's signup for one game, on court or waiting for a place.
-
-    Until 2026-10-07 the queue was a table of its own, and moving somebody
-    between the two meant deleting a row in one and copying its fields
-    into a new row in the other — along at least five different paths.
-    Two real bugs were a field one of those paths forgot: 「候補會不見」
-    (2026-09-11) and a guest's bringer showing the wrong name
-    (2026-10-03). Now a move changes `status` and nothing else, so there
-    is nothing to forget to carry over.
+    """One person's signup for one game, on court or waiting in the
+    queue. Moving between the two changes `status` and nothing else.
     """
 
     __tablename__ = "drop_ins"
 
-    # Same reasoning as AbsenceRow.uq_absences_active_player_game: one
-    # active drop-in per player per game, but cancel-then-resign-up must
-    # stay legal, hence the partial predicate rather than a plain
-    # constraint.
+    # One live signup per player per game, partial for the same reason as
+    # absences.
     __table_args__ = (
         Index(
             "uq_drop_ins_active_player_game",
@@ -349,23 +278,21 @@ class DropInRow(Base):
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     signed_up_at: Mapped[datetime]
-    """When they took the place on court they hold — what FIFO absence
-    coverage and "the latest signup yields" order by. For somebody
-    promoted off the queue it is when they joined the queue, so the one
-    who waited longest keeps their precedence."""
+    """When they took the place on court they hold, which FIFO coverage
+    and "the latest signup yields" order by. For somebody promoted off
+    the queue, when they joined it.
+    """
     cancelled_at: Mapped[datetime | None] = mapped_column(default=None)
     status: Mapped[str] = mapped_column(default=PLAYING, server_default=PLAYING)
     """`playing` (on court, charged) or `queued` (waiting, not charged).
-    Live only while `cancelled_at` is null — see `playing()` / `queued()`,
-    which every query uses rather than spelling the pair out."""
+    Live only while `cancelled_at` is null; queries use `playing()`
+    and `queued()`.
+    """
     queued_at: Mapped[datetime | None] = mapped_column(default=None)
-    """When this person joined the queue, if they ever did. The queue is
-    ordered by it, and it is the place somebody is owed back when a slot
-    they left the queue for is taken off them by anybody but themselves.
-
-    Null for somebody who was never in the queue — typed in by name, or
-    signed up straight into an open slot. Taking their slot away cancels
-    the signup rather than putting them in a queue they never joined.
+    """When they joined the queue, if they ever did: the queue's order,
+    and the place they are owed back if a slot is taken off them. Null
+    for somebody never in the queue, whose signup is cancelled
+    instead.
     """
 
     @classmethod
@@ -379,80 +306,43 @@ class DropInRow(Base):
         return and_(cls.cancelled_at.is_(None), cls.status == QUEUED)
 
     absorbed_at: Mapped[datetime | None] = mapped_column(default=None)
-    """Set when this drop-in was cancelled *by the system* because the
-    player became a fixed member of the season, not by the player
-    changing their mind.
-
-    Both look identical in `cancelled_at`, and telling them apart is the
-    whole point: taking somebody back off the roster has to restore the
-    nights they really played, and must not resurrect a signup they
-    cancelled themselves. Without this column an add-then-remove erased
-    a game the person had attended, along with the fee owed for it —
-    reported from real use on 2026-09-10.
+    """Set when the system cancelled this signup because the player
+    became a fixed member, so taking them off the roster restores
+    exactly these and never a signup they cancelled themselves.
     """
     covers_absence_id: Mapped[int | None] = mapped_column(
         ForeignKey("absences.id"), default=None
     )
-    """Set when this drop-in is a member's own named substitute ("代打")
-    for that specific absence, rather than a general signup matched by
-    FIFO order — see attendance.DropIn.covers."""
+    """The absence this drop-in was personally named to cover (a 代打),
+    rather than a signup matched by FIFO order.
+    """
     brought_by_player_id: Mapped[int | None] = mapped_column(
         ForeignKey("players.id"), default=None
     )
-    """Who put this person on the list, when it wasn't themselves — and so
-    who the organizer asks to make sure they pay.
-
-    The fee is charged to the person's own ledger, never the bringer's;
-    the bringer is who is answerable for it. Set once and never changed
-    (decided 2026-10-03): not when they move between court and queue,
-    and not when they are named a 代打. Naming a 代打 used to overwrite
-    this with the absent member, which lost the original bringer and,
-    once the 代打 went back to the queue, showed somebody who had never
-    signed them up. A 代打 typed in fresh is brought by whoever typed
-    them in, the same rule as any other signup."""
+    """Who put this person on the list, when it was not themselves: whom
+    the organizer asks to make sure they pay. The fee is on the
+    person's own ledger. Set once and never changed, including when
+    they move between court and queue or are named a 代打.
+    """
     charged_amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 0), default=None)
-    """What this drop-in was actually charged, so cancelling refunds
-    exactly that — not a share recomputed at cancellation time, which can
-    have moved if the game's air conditioning or the season's capacity
-    changed in between. Before this column, cancelling left a residual
-    balance on somebody no longer connected to the game at all: charged
-    $667 for a cooled night, refunded $572 after the organizer corrected
-    the air conditioning setting, an $95 gap that never balances out.
-    Found by a random sweep (tests/api/test_fuzz.py) rather than by
-    anyone noticing the discrepancy on a real invoice.
-
-    Null for every drop-in recorded before this column existed; those
-    fall back to the old behaviour of recomputing the current share, on
-    the same reasoning as `brought_by_player_id` above.
+    """What this signup was charged, so cancelling refunds exactly that
+    even if the game's share has changed since. Null on older rows,
+    which fall back to the current share.
     """
 
     promotion_notice_sent_at: Mapped[datetime | None] = mapped_column(default=None)
-    """When this signup's 遞補通知 went out, if it has.
-
-    Set by the deadline job, which alone sends promotion notices: every
-    ten minutes it tells whoever has come off the queue onto the court of
-    a game past its deadline, and stamps them so they are told once.
-    Until 2026-10-14 a route told them the moment they were promoted, so
-    taking leave back and retaking it promoted — and told — the same
-    person twice, and naming a 代打 a minute later bumped somebody back to
-    the queue after they had been told they were playing. Never cleared:
-    somebody told, bumped and promoted again is playing as they were told.
+    """When this signup's 遞補通知 went out. Set by the deadline job, which
+    alone sends promotion notices, so each person is told once. Never
+    cleared.
     """
 
 
 class ProblemReportRow(Base):
     """A problem report somebody sent, kept for the developer to read.
 
-    Stored since 2026-09-15. Before that the words went straight to the
-    developer's LINE chat and only a screenshot was kept here, just long
-    enough for LINE's servers to fetch it — a push per report, two with a
-    picture, out of the same 200 a month the short-roster alert needs.
-    See routes/reports.py.
-
-    Who sent it, from which club and screen, are text rather than foreign
-    keys: a report is a snapshot of what somebody saw, and it must neither
-    block deleting the club it mentions nor change if that club is later
-    renamed. Rows go after 90 days.
+    Who sent it and from which club and screen are text, not foreign
+    keys: a snapshot that must not block deleting the club or change
+    when it is renamed. Rows go after 90 days.
     """
 
     __tablename__ = "problem_reports"
@@ -460,8 +350,9 @@ class ProblemReportRow(Base):
     id: Mapped[str] = mapped_column(primary_key=True)
     """Random, so holding one report's id says nothing about any other."""
     message: Mapped[str | None] = mapped_column(default=None)
-    """NULL only on rows from before reports were stored — screenshots
-    kept for LINE to fetch, with no words attached. Never listed."""
+    """NULL only on old rows that held a screenshot and no text; never
+    listed.
+    """
     reporter: Mapped[str | None] = mapped_column(default=None)
     club: Mapped[str | None] = mapped_column(default=None)
     page: Mapped[str | None] = mapped_column(default=None)
@@ -488,13 +379,9 @@ class LedgerEntryRow(Base):
             postgresql_where=text("reverses_entry_id IS NOT NULL"),
             sqlite_where=text("reverses_entry_id IS NOT NULL"),
         ),
-        # Makes recording a payment safe to repeat. A tap that times out
-        # on a phone, a double tap, a retry — all send the same
-        # client-generated token, and the database refuses the second
-        # row rather than recording the money twice. Partial, because
-        # only client-initiated entries carry a token; everything the
-        # server writes itself (fees, refunds, adjustments) leaves it
-        # NULL, and any number of NULLs coexist.
+        # Makes recording a payment safe to repeat: the same client token
+        # cannot be stored twice. Partial, because only client-initiated
+        # entries carry a token.
         Index(
             "uq_ledger_entries_client_token",
             "client_token",
@@ -507,50 +394,40 @@ class LedgerEntryRow(Base):
     id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
     club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id"))
-    """Stored directly rather than derived, unlike every other table:
-    season_id below is optional (a manual payment might not relate to
-    any one season), so there's no foreign-key chain to always reach a
-    club through."""
+    """Stored directly, unlike every other table: season_id is optional,
+    so there is not always a chain of foreign keys to a club.
+    """
     entry_type: Mapped[EntryType] = mapped_column(Enum(EntryType, name="entry_type"))
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 0))
-    """Signed from the player's point of view (see ledger.LedgerEntry):
-    positive means the organizer owes the player, negative means the
-    player owes the organizer — so this deliberately has no
-    non-negative check constraint."""
+    """Signed from the player's point of view: positive means the
+    organizer owes the player.
+    """
     recorded_at: Mapped[datetime]
     season_id: Mapped[int | None] = mapped_column(
         ForeignKey("seasons.id"), default=None
     )
-    """Which season this relates to, when there is one — a manual cash
-    payment might cover more than one season, so this stays optional."""
+    """The season this relates to, when there is one."""
     note: Mapped[str | None] = mapped_column(default=None)
     reverses_entry_id: Mapped[int | None] = mapped_column(
         ForeignKey("ledger_entries.id"), default=None
     )
     """Set on the entry that undoes a mistaken payment; the original stays."""
     client_token: Mapped[str | None] = mapped_column(default=None)
-    """A token the caller generates once per intended action, so a
-    retried or double-tapped request lands as one entry. See the partial
-    unique index above."""
+    """Generated by the client once per intended action, so a retried or
+    double-tapped request lands once. See the partial unique index
+    above.
+    """
     game_id: Mapped[int | None] = mapped_column(ForeignKey("games.id"), default=None)
-    """The night a drop-in payment was taken for, on 當天臨打.
-
-    Null for every other entry. Before 2026-10-16 that tab showed and
-    collected a drop-in's whole season of fees, so 已收 on one night
-    marked every other night paid too. A night counts as paid when
-    payments for it cover its fee, or when the player owes nothing for
-    the season at all — a lump sum at 季末結算 settles every night.
-    An undo carries the same night as the payment it reverses."""
+    """The night a drop-in payment was taken for, from 當天臨打; null for
+    other entries. An undo carries the same night as the payment it
+    reverses.
+    """
 
 
 class ErrorEventRow(Base):
     """A request the server failed on, kept for the developer's overview.
-
-    Written by api/error_reporting.py alongside the log line, so a crash
-    can be read from the app rather than only from Render's log. Text
-    rather than foreign keys, like a problem report: a record of what
-    happened, which must not block deleting anything it mentions. Rows
-    go after 30 days.
+    Text rather than foreign keys, like a problem report. Rows go
+    after 30 days.
     """
 
     __tablename__ = "error_events"
@@ -565,18 +442,17 @@ class ErrorEventRow(Base):
     error_type: Mapped[str]
     message: Mapped[str]
     location: Mapped[str]
-    """The deepest line of this project's own code it passed through."""
+    """The deepest line of this project's own code the error passed
+    through.
+    """
 
 
 class AuditEventRow(Base):
-    """Who did what to whose money or membership, and when — the record
-    CLAUDE.md asks of every data change ("who, when, what changed"),
-    started 2026-10-22 with the operations that move money or people.
+    """Who did what to whose money or membership, and when.
 
-    Written in the same transaction as the change it describes, so the
-    two can never disagree. Names are copied in rather than joined:
-    the record has to outlive merges, renames and deleted clubs. Never
-    updated or deleted.
+    Written in the same transaction as the change, so the two always
+    agree. Names are copied in, so the record outlives merges, renames
+    and deleted clubs. Never updated or deleted.
     """
 
     __tablename__ = "audit_events"

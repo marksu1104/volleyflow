@@ -1,9 +1,7 @@
-"""The rules about who is on court, and the machinery that moves
-them.
-
-The top helper layer: capacity, deadlines, the queue, substitutes, and
-the absorb/restore pairs that make adding and removing a fixed member
-undoable. Calls down into _money to record what those movements cost.
+"""The rules about who is on court, and the helpers that move people on
+and off it: capacity, deadlines, the queue, substitutes, and the
+absorb/restore pairs that make adding and removing a fixed member
+undoable. Calls down into _money to record what each move costs.
 """
 
 from datetime import datetime
@@ -53,11 +51,9 @@ from volleyflow.settlement import (
 def _reject_if_already_playing(
     db: Session, game: GameRow, season: SeasonRow, player: PlayerRow
 ) -> None:
-    """The three ways a signup would double-book someone for one game.
-
-    Shared by the single and batch signup routes so the two can't drift
-    apart on what counts as a duplicate — the batch route in particular
-    must reject the whole group rather than let one bad entry through.
+    """Refuses a signup that would put someone on this game twice. Shared
+    by the single and batch signup routes so both reject the same
+    cases.
     """
     live = (
         db.query(DropInRow)
@@ -79,12 +75,8 @@ def _reject_if_already_playing(
             f"{player.name} is already on the waitlist for this game",
         )
 
-    # A fixed member is expected at every game already;
-    # signing up as a drop-in on top of that would charge them the
-    # per-game share a second time, on top of the season fee that
-    # already covers this game, and count them twice against capacity.
-    # Easy to do by accident: someone new joins the club, sees a signup
-    # button, taps it, and only afterwards gets added to the roster.
+    # A fixed member is already expected at every game; signing up again
+    # would charge them twice and count them twice.
     fixed_member = db.get(
         SeasonMemberRow, {"season_id": season.id, "player_id": player.id}
     )
@@ -96,18 +88,13 @@ def _reject_if_already_playing(
 
 
 def _get_game_or_404(db: Session, game_id: int) -> GameRow:
-    """Locks the game row for the rest of this transaction.
+    """Loads the game and locks its row for the rest of the transaction.
 
-    Every caller of this reads the game's current roster to decide
-    something — is there an open slot, who's next on the waitlist — then
-    writes based on that read. Without the lock, two concurrent requests
-    for the same game (e.g. a burst of drop-ins racing for a slot that
-    just opened) can each read "one slot open" before either commits,
-    and both get confirmed past capacity. SELECT ... FOR UPDATE makes the
-    second request wait for the first to commit, so it sees the first
-    request's write before making its own decision. SQLite ignores this
-    (no row locking support) — only the `postgres`-marked tests actually
-    exercise it.
+    Callers read the roster and then write based on it (is there a
+    slot, who is next in the queue). SELECT ... FOR UPDATE makes a
+    concurrent request for the same game wait, so two requests cannot
+    both take the last slot. SQLite ignores the lock; the `postgres`
+    tests exercise it.
     """
     game = db.query(GameRow).filter(GameRow.id == game_id).with_for_update().first()
     if game is None:
@@ -127,37 +114,18 @@ def _require_season_member(db: Session, season_id: int, player_id: int) -> None:
 
 
 def _expected_on_court(db: Session, game: GameRow, season: SeasonRow) -> int:
-    """How many people this game expects: fixed members minus this game's
-    absences, plus active drop-ins. Members who haven't taken leave count
-    as attending by default — see the attendance rules, "members are expected by
-    default."
+    """How many people this game expects: fixed members, minus members on
+    leave, plus drop-ins playing.
 
-    Independent of `season.capacity` on purpose: `update_season` needs
-    this number to check a *proposed* capacity before committing to it,
-    not the one already on the row.
+    Independent of `season.capacity`, so a proposed capacity can be
+    checked before it is saved.
     """
     member_count = (
         db.query(SeasonMemberRow).filter(SeasonMemberRow.season_id == season.id).count()
     )
-    # cancelled_at matters: a member who took leave and then cancelled it
-    # is expected again. Counting their cancelled absence made `expected`
-    # too low and the game look emptier than it is, so capacity admitted
-    # one drop-in too many for every absence that had ever been undone.
-    #
-    # The join is the same mistake in its other form. Taking somebody off
-    # the roster deliberately leaves their absences behind (see
-    # remove_member — settlement only ever walks the current member list,
-    # so they are harmless there), but this sum is not settlement: an
-    # absence with nobody on the roster behind it was subtracting a head
-    # that `member_count` had already stopped counting, so every removal
-    # made the game look one seat emptier forever. A random sweep put
-    # seven people on a court for six that way.
-    #
-    # remove_member now closes those absences at the source, so new ones
-    # can't appear — but rows written before it did are still in the
-    # database, and this is what keeps them from mispricing a live
-    # season. It is also just the right question to ask: how many
-    # *members* are away.
+    # Only live absences of members still on the roster: a cancelled absence
+    # means they are coming, and a removed member is no longer counted in
+    # member_count.
     absences = (
         db.query(AbsenceRow)
         .join(
@@ -198,15 +166,12 @@ def _is_signed_up(db: Session, game: GameRow, player_id: int) -> bool:
 def _games_with_no_room(
     db: Session, season: SeasonRow, *, member_count: int | None = None
 ) -> list[GameRow]:
-    """The games where one more expected body wouldn't fit.
+    """The scheduled games where one more expected player would not fit.
 
-    Adding a fixed member adds them to *every* game in the season, so the
-    question "is there room" has to be asked of all of them at once. A
-    random sweep (tests/api/test_fuzz.py) put seven people on a court for
-    six that way: the organizer added a member while a game was already
-    full of drop-ins, and nothing checked. The attendance rules make capacity a
-    hard limit that the organizer does not get to exceed either, so this
-    is a refusal rather than a warning.
+    Adding a fixed member adds them to every game, so all of them are
+    checked. Capacity is a hard limit for the organizer too, so this
+    is a refusal, not a warning. Counts are read once for the whole
+    season rather than per game; the formula is _expected_on_court's.
     """
     games = (
         db.query(GameRow)
@@ -218,11 +183,6 @@ def _games_with_no_room(
     if not games:
         return []
 
-    # This used to call _expected_on_court once per game. That is three
-    # database round trips for every date (members, absences, drop-ins),
-    # so adding one roster member to a 13-game season took more than forty
-    # queries before it could answer. Read each count once for the whole
-    # season instead. The formula remains exactly _expected_on_court's.
     if member_count is None:
         member_count = (
             db.query(func.count(SeasonMemberRow.player_id))
@@ -271,9 +231,10 @@ def _games_with_no_room(
 
 def _deadline_at(game: GameRow, season: SeasonRow) -> datetime:
     """When members stop being able to change this game: the season's
-    deadline in hours before the game starts. The game's own start time
-    if it has one, else the season's usual one, else the start of the
-    day — so a game with no time at all closes early rather than late."""
+    deadline in hours before the start time (the game's own, else the
+    season's, else midnight, so a game with no time closes early
+    rather than late).
+    """
     return change_deadline(
         game.date,
         game.start_time or season.game_start_time,
@@ -282,27 +243,15 @@ def _deadline_at(game: GameRow, season: SeasonRow) -> datetime:
 
 
 def _within_change_deadline(game: GameRow, season: SeasonRow) -> bool:
-    """Whether absence/signup changes (and cancelling either) are still
-    open to members for this game."""
+    """Whether members may still change attendance for this game."""
     return _now_in_taiwan() < _deadline_at(game, season)
 
 
 def _require_season_open(season: SeasonRow) -> None:
-    """Refuses any change to a season whose books are closed.
+    """Refuses any change to a settled season.
 
-    The billing rules: settlement "computes each member's absence refund and
-    locks the season". The roster endpoints had always honoured that;
-    attendance did not, and the gap was not theoretical — measured on
-    2026-09-12, after settling a season you could still sign somebody up,
-    which wrote them a real charge onto closed books, and still record a
-    member's leave, which earned a refund that could never be paid
-    because a season cannot be settled twice.
-
-    Deliberately not folded into _require_within_change_deadline below,
-    though every caller wants both: that rule exempts the organizer, and
-    this one must not. The organizer is exactly the person with the
-    buttons to do this, and "the books are closed" is not a rule they are
-    above — it is the one they most need held to.
+    Kept separate from _require_within_change_deadline because the
+    organizer is exempt from the deadline but not from this.
     """
     if season.settled_at is not None:
         raise HTTPException(
@@ -314,12 +263,8 @@ def _require_season_open(season: SeasonRow) -> None:
 def _require_within_change_deadline(
     db: Session, game: GameRow, season: SeasonRow, current_player: PlayerRow
 ) -> None:
-    """The deadline exists so a roster stops shifting under the organizer
-    at the last minute — so it doesn't apply to the organizer. They're
-    the one absorbing whatever happens on the day: someone drops out an
-    hour before, a replacement turns up, a court gets cancelled. Blocking
-    them from recording that doesn't make the roster more accurate, it
-    just makes the records wrong.
+    """Refuses a change after the deadline, except from the organizer,
+    who has to be able to record what actually happened on the night.
     """
     if _within_change_deadline(game, season):
         return
@@ -332,20 +277,15 @@ def _require_within_change_deadline(
 
 
 def _is_absence_covered(db: Session, absence_row: AbsenceRow) -> bool:
-    """Whether a drop-in — an explicit substitute or a FIFO match — is
-    currently covering this absence, per the same rule settlement.py
-    uses for refunds. Cancelling an absence out from under someone who
-    already committed to cover it needs the organizer, not a silent
-    auto-fix, so callers use this to block that case.
+    """Whether a drop-in (a named substitute or a FIFO match) currently
+    covers this absence, by the same rule settlement uses for refunds.
     """
     game_row = db.get(GameRow, absence_row.game_id)
     assert game_row is not None
     game = game_from_row(game_row)
 
     absence_rows = db.query(AbsenceRow).filter(AbsenceRow.game_id == game_row.id).all()
-    # Never the queue: somebody waiting covers nobody. drop_in_from_row
-    # refuses a queued row outright, so a query that forgot this fails
-    # loudly instead of refunding an absence nobody filled.
+    # Never the queue: somebody waiting covers nobody.
     drop_in_rows = (
         db.query(DropInRow)
         .filter(DropInRow.game_id == game_row.id, DropInRow.status == PLAYING)
@@ -372,13 +312,10 @@ def _is_absence_covered(db: Session, absence_row: AbsenceRow) -> bool:
 
 
 def _back_to_the_queue(db: Session, drop_in: DropInRow, season: SeasonRow) -> None:
-    """Moves somebody off the court and back into the queue, at the place
-    they hold there — the time they first joined it, or when they signed
-    up if they never queued. Their fee comes off, and any 代打 arrangement
-    goes: in the queue they cover nobody.
-
-    One row changing state, not a row cancelled here and copied there.
-    Every field — who brought them above all — is simply still on it.
+    """Moves somebody off the court and back into the queue at the place
+    they held (when they first queued, or signed up if they never
+    did). Their fee comes off and any 代打 arrangement is dropped. The
+    row changes status; nothing is copied.
     """
     _record_drop_in_charge(db, drop_in, season, reverse=True)
     drop_in.queued_at = drop_in.queued_at or drop_in.signed_up_at
@@ -388,20 +325,12 @@ def _back_to_the_queue(db: Session, drop_in: DropInRow, season: SeasonRow) -> No
 
 
 def _off_the_court(db: Session, drop_in: DropInRow, season: SeasonRow) -> None:
-    """Takes a place off somebody, by anybody but themselves.
+    """Takes a place off somebody, done by anyone but themselves.
 
-    A place in the queue is given up, not lost: somebody who left it to
-    take a slot is owed it back at the position they held. Somebody who
-    was never waiting — typed in by name, or signed straight into an open
-    slot — has no place to give back and must not be put into a queue
-    they never joined, or they reappear in the next open slot; their
-    signup is cancelled instead.
-
-    One function because the rule has to hold in every path that takes a
-    slot away: cancelling a substitute, replacing one with somebody else,
-    and the organizer clearing a row. Replacing one was written without
-    it and silently deleted the person being replaced — reported from
-    real use on 2026-09-11 as "候補會不見".
+    Somebody who came from the queue goes back to it at their old
+    position. Somebody who never queued has no place to return to, so
+    their signup is cancelled instead of putting them in a queue they
+    never joined.
     """
     if drop_in.queued_at is not None:
         _back_to_the_queue(db, drop_in, season)
@@ -414,19 +343,12 @@ def _off_the_court(db: Session, drop_in: DropInRow, season: SeasonRow) -> None:
 def _displace_latest_drop_in(
     db: Session, game: GameRow, season: SeasonRow
 ) -> int | None:
-    """Move the latest confirmed drop-in back to this game's waitlist.
+    """Moves the latest confirmed drop-in back to this game's queue, to
+    make room for a fixed member being added to the roster.
 
-    Fixed members have priority when the organizer corrects an open
-    season's roster. If the extra member would overfill an upcoming game,
-    the latest signup yields first (last in, first out), keeps their
-    original place in the queue, and gets the exact charge for that signup
-    reversed. Named substitutes are included: the organizer explicitly
-    chose that fixed membership outranks every kind of drop-in.
-
-    Returns the displaced player's id, or None when there is no active
-    drop-in to move. The latter should be impossible while the roster is
-    below capacity and the attendance invariants hold, but lets the caller
-    fail safely instead of overfilling a legacy-inconsistent game.
+    Last in, first out; named substitutes are included, because fixed
+    membership outranks every drop-in. Returns the displaced player's
+    id, or None if there was no drop-in to move.
     """
     displaced = (
         db.query(DropInRow)
@@ -445,18 +367,13 @@ def _displace_latest_drop_in(
 def _release_whoever_is_covering(
     db: Session, absence: AbsenceRow, season: SeasonRow
 ) -> int | None:
-    """Puts the stand-in back in the queue when the member returns.
+    """Puts the stand-in back in the queue when the absent member
+    returns.
 
-    The named 代打 first, if there is one — the member arranged them, so
-    the member may un-arrange them. Otherwise whichever 臨打 the FIFO
-    match had landed on, which is the person the slot actually went to.
-    Somebody else's named substitute is never touched: that slot belongs
-    to a different absence.
-
-    They go back at the time they originally queued, so they keep their
-    place, and the fee comes off. Returns whose it was, so the screen can
-    say — a player silently vanishing off a roster is worse than the
-    swap itself.
+    Their named 代打 if they have one, otherwise the drop-in the FIFO
+    match landed on. Somebody else's named substitute is never
+    touched. Returns the released player's id so the screen can say
+    who it was.
     """
     arranged = (
         db.query(DropInRow)
@@ -467,9 +384,7 @@ def _release_whoever_is_covering(
     if releasing is None:
         if not _is_absence_covered(db, absence):
             return None
-        # The FIFO match: the earliest unclaimed signup is the one this
-        # absence's refund is paying for, so it is the one that steps
-        # back out. Same ordering as settlement.covered_absences.
+        # The FIFO match, in the same order as settlement.covered_absences.
         releasing = (
             db.query(DropInRow)
             .filter(
@@ -492,25 +407,14 @@ def _release_whoever_is_covering(
 def _make_room_for_substitute(
     db: Session, game: GameRow, season: SeasonRow
 ) -> int | None:
-    """Frees the slot a named substitute is about to take, and says whose
-    it was.
+    """Frees the slot a named substitute is about to take, and returns
+    whose it was.
 
-    Recording an absence offers the empty slot to the waitlist straight
-    away, so by the time the member names the person they
-    actually wanted, a queued stranger is usually already standing in it.
-    Adding the substitute on top of that put a nineteenth player in an
-    eighteen-player game — reported from real use on 2026-09-10, and the
-    reason this exists.
-
-    The person bumped is the most recent signup nobody personally
-    arranged. Somebody else's named substitute is never touched: they
-    were chosen the same way this one is. Being bumped puts them back in
-    the queue at the time they originally signed up, so they keep their
-    place ahead of anyone who joined it later, and their fee comes off.
-
-    Returns None when there was already room, and raises when the only
-    people here were personally arranged — then there is no fair pick and
-    the organizer has to decide.
+    The queue may already have filled the slot the absence opened. The
+    most recent signup nobody arranged goes back to the queue at their
+    original place, with their fee reversed; another member's named
+    substitute is never bumped. Returns None if there was already
+    room, and refuses if everyone on court was personally arranged.
     """
     if _has_open_slot(db, game, season):
         return None
@@ -539,20 +443,9 @@ def _make_room_for_substitute(
 def _require_may_cancel_drop_in(
     db: Session, drop_in: DropInRow, season: SeasonRow, current_player: PlayerRow
 ) -> None:
-    """Who may take a confirmed signup back off the list.
-
-    Three people besides the organizer, and a check on the player alone
-    missed two of them:
-
-    * the player themselves;
-    * whoever brought them — a guest has no account and never will, so
-      the member who signed them up is the only one who can undo it;
-    * the member whose absence they were arranged to cover — the screen
-      offers that member 取消代打, and refusing it here made the button
-      fail with a 403 for everyone except the organizer.
-
-    Anybody else gets 403, including a member acting on a stranger's
-    signup and a member acting on a substitute somebody else arranged.
+    """Who may take a confirmed signup off the list: the player, whoever
+    signed them up, the member whose absence they were arranged to
+    cover, or the organizer. Anybody else gets 403.
     """
     if drop_in.player_id == current_player.id:
         return
@@ -566,18 +459,12 @@ def _require_may_cancel_drop_in(
 
 
 def _promote_entry(db: Session, entry: DropInRow) -> DropInRow:
-    """Turn one queued person into a confirmed drop-in, charged exactly
-    as a direct signup would be.
-
-    Shared by the automatic promotion below and the organizer's manual
-    one, so "what promoting somebody means" — including the ledger entry
-    — is written once and cannot drift between the two.
+    """Turns one queued person into a confirmed drop-in, charged exactly
+    as a direct signup. Shared by automatic and manual promotion.
     """
-    # signed_up_at becomes when they joined the queue, not when the slot
-    # happened to open. It is what FIFO absence coverage orders by —
-    # stamping "now" instead sent somebody who had waited longest to the
-    # back of the line. queued_at stays, so the place can be given back
-    # if this slot is taken off them again.
+    # Their signup time becomes when they joined the queue, which FIFO
+    # coverage orders by. queued_at stays, so the place can be given back if
+    # the slot is taken away again.
     assert entry.queued_at is not None
     entry.signed_up_at = entry.queued_at
     entry.status = PLAYING
@@ -592,12 +479,8 @@ def _promote_entry(db: Session, entry: DropInRow) -> DropInRow:
 
 
 def _promote_from_waitlist(db: Session, game_id: int) -> int | None:
-    """Pull the earliest-queued waitlist entry into a confirmed drop-in.
-
-    Returns the promoted player's id, or None if nobody was waiting. See
-    The attendance rules: "a member records an absence -> the waitlist is offered
-    the slot in order." Order is the rule here and stays the rule; the
-    organizer overrides it explicitly through promote_from_waitlist.
+    """Promotes the earliest-queued person for this game. Returns their
+    player id, or None if nobody was waiting.
     """
     entry = (
         db.query(DropInRow)
@@ -613,43 +496,19 @@ def _promote_from_waitlist(db: Session, game_id: int) -> int | None:
 def _offer_freed_slots_to_the_queue(
     db: Session, season: SeasonRow
 ) -> list[tuple[int, int]]:
-    """Taking somebody off the roster frees their place at every game they
-    were expected at, so the queue is offered those places — earliest
-    queued first, one person per place, exactly as an absence does.
+    """Offers the queue the places freed at every future game when
+    somebody is taken off the roster, earliest queued first.
 
-    Asked for on 2026-09-12, after the removal fix turned up a game
-    sitting at 2 on a court for 3 with somebody still waiting in the
-    queue for it. The attendance rules list an absence and a cancelled signup
-    as the moments a slot is offered on; a removal frees a slot just as
-    squarely and was simply not on the list.
-
-    Whoever comes off the queue joins that one game as a drop-in — the
-    organizer's words: 「不代表他會占掉原來的固定名額，他只是來候補那一
-    場而已」. That is already what promotion means everywhere else
-    (_promote_entry writes a DropInRow and charges one game's share), so
-    nothing here has to make it true; it is worth writing down only
-    because "somebody left the roster, so somebody else joins it" would
-    be the wrong reading.
-
-    Future games only. A removal frees the slot at every game in the
-    season including ones already played, and promoting somebody into
-    last month's game would put them on a roster they never stood on and
-    charge them for the night.
+    Whoever is promoted joins that one game as a drop-in; they do not
+    take the fixed place. Games already played are skipped, so nobody
+    is charged for a night they did not attend. Returns (game_id,
+    player_id) pairs, so each person can be told which night is
+    theirs.
     """
-    # (game_id, player_id), not just the player: one removal can free a
-    # place at several games at once, and whoever is promoted has to be
-    # told *which night* is theirs — see
-    # reminders.send_promotion_notices.
     promoted: list[tuple[int, int]] = []
     today = _today_in_taiwan()
-    # Locked, in date order, exactly as _get_game_or_404 locks the one
-    # game every other path through here holds. This is the only caller
-    # that reaches a game without going through that, so without the
-    # lock a removal and a cancellation could each read the same first
-    # name off the queue and each write it in. Date order so two
-    # removals take the games in the same sequence and queue up behind
-    # one another rather than deadlocking. SQLite ignores the clause;
-    # only the postgres-marked tests exercise it.
+    # Locked like _get_game_or_404, in date order so concurrent removals
+    # take the games in the same sequence instead of deadlocking.
     queued_game_ids = db.query(DropInRow.game_id).filter(DropInRow.queued())
     games = (
         db.query(GameRow)
@@ -664,9 +523,7 @@ def _offer_freed_slots_to_the_queue(
         .all()
     )
     for game in games:
-        # A game can free more than one place if the roster shrank by
-        # more than one person before this ran, so keep offering until
-        # the court is full or the queue is empty.
+        # Keep offering until the court is full or the queue is empty.
         while _has_open_slot(db, game, season):
             player_id = _promote_from_waitlist(db, game.id)
             if player_id is None:
@@ -679,17 +536,11 @@ def _offer_freed_slots_to_the_queue(
 def _absorb_drop_ins_into_membership(
     db: Session, season: SeasonRow, player_id: int
 ) -> None:
-    """Someone who signed up as a drop-in and is now being made a fixed
-    member: cancel those signups and hand the fees back.
+    """Cancels the drop-in signups of somebody just made a fixed member,
+    and refunds their drop-in fees for the season, since their season
+    fee now covers every game.
 
-    This is the ordinary sequence for a new person, not an edge case —
-    they join the club, see a signup button, tap it, and the organizer
-    adds them to the roster afterwards. Left alone they'd be charged the
-    per-game share twice for the same game (once as a drop-in, once
-    inside their season fee) and counted twice against capacity.
-
-    No waitlist promotion here, deliberately: they were already counted
-    as attending and still are, just as a member now, so no slot opened.
+    No slot opens (they are still expected), so nobody is promoted.
     """
     game_ids = [
         row.id
@@ -713,18 +564,12 @@ def _absorb_drop_ins_into_membership(
     )
     for drop_in in drop_ins:
         drop_in.cancelled_at = now
-        # Marked, so removing them from the roster later can tell these
-        # apart from signups the player cancelled themselves and put
-        # exactly these back — see _restore_absorbed_drop_ins.
+        # Marked so a later removal can restore exactly these; see
+        # _restore_absorbed_drop_ins.
         drop_in.absorbed_at = now
 
-    # Reverse to a target of nothing owed, rather than recomputing a
-    # share and subtracting that: the share when they signed up was
-    # divided among a smaller roster than the one they've just joined,
-    # so a freshly computed refund would be smaller than what was
-    # actually taken and quietly leave them short. Their season fee now
-    # covers every game, so their drop-in fees for this season must come
-    # to exactly zero, whatever they were charged along the way.
+    # Refund whatever drop-in fees they were charged this season, rather
+    # than a recomputed share, so the total comes to exactly zero.
     charged = sum(
         (
             amount
@@ -749,13 +594,8 @@ def _absorb_drop_ins_into_membership(
             )
         )
 
-    # Waiting for a slot is equally moot once they're on the roster.
-    # Cancelled without the absorbed mark, so it is not restored if they
-    # later come off the roster: a queue place carries no money and no
-    # attendance, and putting somebody back into a queue that has moved
-    # on since would be a guess. A drop-in is the opposite — a night
-    # somebody really played and really owes for — which is why that one
-    # is marked and does come back.
+    # Queue places are cancelled without the mark: they carry no money or
+    # attendance, so they are not restored later.
     for queued in db.query(DropInRow).filter(
         DropInRow.player_id == player_id,
         DropInRow.game_id.in_(game_ids),
@@ -768,28 +608,12 @@ def _absorb_drop_ins_into_membership(
 def _close_absences_of_former_member(
     db: Session, season: SeasonRow, player_id: int
 ) -> set[int]:
-    """Retires the leave records of somebody taken off the roster.
+    """Retires the leave of somebody taken off the roster.
 
-    Whoever was standing in for them keeps the slot, and deliberately so:
-    removing an absent member drops both a name from the roster and an
-    absence from the count, which leaves expected attendance exactly
-    where it was. Releasing the substitute as well would open a slot that
-    nothing has freed.
-
-    The arrangement is dropped though — `covers_absence_id` is cleared —
-    so they become an ordinary drop-in. They stay on the list, but they
-    are no longer "X's 代打" for an X who has left the season, which is
-    both untrue and the sort of thing the game sheet would print.
-
-    Marked `retired_at`, not merely cancelled, so putting the same person
-    back on the roster can put their leave back with them. Without that
-    mark the two look identical and a removal could not be undone: the
-    substitute keeps the slot, so the game stays at capacity while the
-    roster drops by one, and re-adding the person is refused for having
-    no room on a court they were never going to stand on.
-
-    Returns the games they were away from, because the absorbed signups
-    restored next must not put them back into one of those.
+    Whoever stood in for them keeps the slot, as an ordinary drop-in
+    rather than the 代打 of somebody no longer on the season. Marked
+    `retired_at` so re-adding the same person can restore their leave.
+    Returns the games they were away from.
     """
     game_ids = [
         row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id)
@@ -823,9 +647,9 @@ def _close_absences_of_former_member(
 def _retired_absences(
     db: Session, season: SeasonRow, player_id: int
 ) -> list[AbsenceRow]:
-    """The leave records this player would get back by rejoining this
-    season's roster — the ones a removal closed, never the ones they
-    cancelled themselves.
+    """The leave this player gets back by rejoining the season's roster:
+    the absences a removal closed, never ones they cancelled
+    themselves.
     """
     game_ids = [
         row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id)
@@ -850,28 +674,11 @@ def _retired_absence_game_ids(
 
 
 def _restore_retired_absences(db: Session, season: SeasonRow, player_id: int) -> None:
-    """Puts back the leave a removal closed, when the same person is put
-    back on the same season's roster.
+    """Puts back the leave a removal closed when the same person rejoins
+    the roster.
 
-    The mirror of _restore_absorbed_drop_ins, and for the same reason:
-    taking somebody off the roster must be undoable. They said they were
-    away on those nights and somebody is standing in for them; coming
-    back to the roster does not make them available on nights they had
-    already said they would miss.
-
-    The 代打 arrangement is deliberately not re-made — `covers_absence_id`
-    stays cleared. Who personally arranged whom is a relationship between
-    two people and it was genuinely dropped when the
-    member left; the FIFO rule that decides which absence gets refunded
-    is billing, works off the counts, and needs no such link.
-
-    Leave is not put back on a night they have since signed up for
-    themselves. Their signup is the later word, exactly as the absence
-    was the later word when they left the roster — and restoring it
-    anyway quietly erased a night they had really booked: the signup is
-    absorbed into the membership, then skipped on the way out again
-    because the player counts as away. Found on 2026-09-16, one step
-    along from the 500 that tests/visual/smoke.js hit.
+    The 代打 link is not restored. Leave is not put back on a night they
+    have since signed up for, because that signup is the later word.
     """
     game_ids = [
         row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id)
@@ -886,9 +693,7 @@ def _restore_retired_absences(db: Session, season: SeasonRow, player_id: int) ->
     }
     absences = _retired_absences(db, season, player_id)
     for absence in absences:
-        # The mark comes off either way: it means "a removal closed
-        # this", and that is no longer true once the player is back on
-        # the roster, whether or not the leave itself comes back.
+        # The mark comes off whether or not the leave comes back.
         absence.retired_at = None
         if int(absence.game_id) in signed_up_for:
             continue
@@ -900,29 +705,13 @@ def _restore_retired_absences(db: Session, season: SeasonRow, player_id: int) ->
 def _restore_absorbed_drop_ins(
     db: Session, season: SeasonRow, player_id: int, away_from: set[int] | None = None
 ) -> None:
-    """The mirror of _absorb_drop_ins_into_membership: put back the
-    signups that were cancelled only because this player joined the
-    fixed roster, now that they have left it again.
+    """Undoes _absorb_drop_ins_into_membership when the player leaves the
+    roster again: puts back the signups cancelled only because they
+    joined it, charged at the current share.
 
-    Only rows carrying `absorbed_at` are touched, so a signup the player
-    cancelled themselves stays cancelled — they are indistinguishable in
-    `cancelled_at`, and resurrecting one would put somebody on a roster
-    they had deliberately left.
-
-    `away_from` names the games they had taken leave from as a member,
-    and those signups stay cancelled too. The absence is the later and
-    more specific statement: somebody who signed up as a guest, was put
-    on the roster, and then said they can't make that night is not coming
-    to it, whatever happens to their membership afterwards. Restoring it
-    anyway put a seventh person on a six-person court — found by a random
-    sweep, since it needs a signup, a promotion to the roster, an absence
-    and a removal, in that order, to show up at all.
-
-    Charged at the current per-game share rather than at whatever was
-    refunded: that is what a drop-in for this game costs now, and with
-    the roster back to its previous size it is normally the same figure
-    anyway. Capacity is not rechecked — this is restoring a night that
-    already happened, not admitting somebody new.
+    Only rows marked `absorbed_at` are touched. Games in `away_from`
+    (where they had taken leave as a member) stay cancelled. Capacity
+    is not rechecked: this restores nights that were already theirs.
     """
     game_ids = [
         row.id for row in db.query(GameRow).filter(GameRow.season_id == season.id).all()
@@ -941,14 +730,8 @@ def _restore_absorbed_drop_ins(
         .all()
     )
     skip = set(away_from or set())
-    # One person can hold one slot at a game, and the database enforces
-    # it (uq_drop_ins_active_player_game). Restoring blind could break
-    # that two ways: a row for a game they are already signed up for,
-    # and two marked rows for the same game left over from earlier
-    # round trips. tests/visual/smoke.js hit the second on 2026-09-16 —
-    # removing a member answered 500.
-    # Any live row, queued included: the database allows one per
-    # person per game, whichever list it is in.
+    # One live row per person per game (uq_drop_ins_active_player_game),
+    # queued included, so skip games where they already have one.
     taken = {
         int(game_id)
         for (game_id,) in db.query(DropInRow.game_id).filter(
@@ -959,10 +742,8 @@ def _restore_absorbed_drop_ins(
     }
     restored = False
     for drop_in in absorbed:
-        # Cleared whether or not this row comes back, so a row this
-        # removal decided against can never be restored by a later one:
-        # the mark says "cancelled only because they joined the roster",
-        # and that reason is spent once it has been ruled on.
+        # Cleared either way, so a later removal cannot restore a row this
+        # one decided against.
         drop_in.absorbed_at = None
         game_id = int(drop_in.game_id)
         if game_id in skip or game_id in taken:
@@ -976,8 +757,9 @@ def _restore_absorbed_drop_ins(
 
 
 def _delete_season_rows(db: Session, season: SeasonRow) -> None:
-    """Removes a season and everything hanging off it, children first so
-    no foreign key is ever left dangling."""
+    """Deletes a season and everything under it, children first so no
+    foreign key dangles.
+    """
     game_ids = [
         row.id
         for row in db.query(GameRow)

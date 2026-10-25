@@ -43,9 +43,8 @@ def get_club_invite(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> InviteOut:
-    """The token for this club's join link — organizer-only, since only
-    the join-link screen in organizer-members.html asks for it. See
-    api/invites.py for why a token replaced the raw club id.
+    """The token for this club's join link. Organizer only. See
+    api/invites.py.
     """
     club = _get_club_or_404(db, club_id)
     _require_organizer(db, club_id, current_player)
@@ -54,12 +53,9 @@ def get_club_invite(
 
 @router.get("/invites/{token}", response_model=InviteOut)
 def resolve_invite(token: str, db: Session = Depends(get_db)) -> InviteOut:
-    """What a shared join link points at — the "加入「晴光館」？" prompt
-    needs a name before anyone has joined or even signed in, which is
-    also why this needs no caller identity: the token itself, not an
-    account, is what makes a club findable here. Forging one is a
-    64-bit HMAC guess, which is a stronger gate than the LINE login this
-    replaced (see api/invites.py).
+    """The club a join link points at, for the "加入「晴光館」？" prompt. Needs
+    no sign-in: the token is the gate, and forging one means guessing
+    a 64-bit HMAC (see api/invites.py).
     """
     club_id = club_id_from_invite_token(token)
     if club_id is None:
@@ -77,21 +73,9 @@ def join_club(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> MemberOut:
-    """A player can only join a club as themselves — the verified
-    caller, never an arbitrary player_id someone else could sign up — and
-    only by holding that club's invite link.
-
-    The token used to be optional here. `?invite=` hid the club's id from
-    anyone reading a shared link, but this endpoint went on accepting a
-    bare id from any signed-in caller, so trying small integers still
-    joined every club in turn — and a member can read the whole roster.
-    Left open on purpose while the app ran one club;
-    closed on 2026-09-15, before other clubs were let
-    in, when tests/api/test_tenant_isolation.py sent every route at one
-    club as an outsider and this one let it straight in.
-
-    Checked before anything else, so a club that doesn't exist and a club
-    you have no link to get the same answer.
+    """Joins the verified caller to a club, only with that club's invite
+    token, so clubs cannot be joined by trying ids. Checked first, so
+    a missing club and a missing token get the same answer.
     """
     if club_id_from_invite_token(payload.invite) != club_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Invite link not recognised")
@@ -168,9 +152,10 @@ def approve_member(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> MemberOut:
-    """Lets somebody who asked to join into the club. Putting a fixed member
-    on a season's roster is the next request, the one the roster screen uses,
-    so the money is worked out in one place only."""
+    """Lets somebody who asked to join into the club. Putting them on a
+    season's roster is a separate request, so money is worked out in
+    one place.
+    """
     _get_club_or_404(db, club_id)
     _require_organizer(db, club_id, current_player)
     membership = db.get(ClubMemberRow, {"club_id": club_id, "player_id": player_id})
@@ -199,16 +184,12 @@ def set_membership_intent(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> MyClubOut:
-    """Someone who has just joined saying which kind of member they are.
+    """A new member saying whether they want to be a fixed member or play
+    single games.
 
-    A fixed member's season fee is a real obligation, so claiming to be
-    one can't put you on the roster by itself — it queues you for the
-    organizer, who is the one deciding what anybody owes. Saying you're
-    not opens up drop-in signups immediately, which commit you to one
-    game at a time and nothing more.
-
-    Self only, and always changeable: someone who dropped in all season
-    and now wants in properly says so the same way.
+    Wanting to be fixed queues them for the organizer, who decides
+    what anybody owes; single games open drop-in signups at once. Self
+    only, and changeable.
     """
     club = _get_club_or_404(db, club_id)
     membership = db.get(

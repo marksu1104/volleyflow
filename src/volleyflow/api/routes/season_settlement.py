@@ -58,9 +58,8 @@ def view_settlement(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> SettlementOut:
-    """Read-only preview — what settling right now would charge/refund.
-    Doesn't touch the ledger. See POST .../settle to actually record it.
-    Organizer-only: this exposes every member's fee and refund at once.
+    """What settling now would refund each member, without writing
+    anything. Organizer only.
     """
     season_row, settlements = _gather_member_settlements(db, season_id)
     _require_organizer(db, season_row.club_id, current_player)
@@ -77,19 +76,12 @@ def settle_season(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> SeasonSettleOut:
-    """Credits every member's absence refund to the ledger and locks the
-    season, once. Doesn't charge the season fee — that already happened
-    when each member joined the roster (see _sync_season_fee_ledger) —
-    so this is purely the refund half of the billing rules' settlement.
-    A season can't be settled twice.
+    """Credits each member's absence refund and locks the season, once.
+    The season fee was already charged when they joined the roster.
 
-    `payload.cash` records the money that actually changed hands while
-    the organizer was settling up, in the same pass. It used to be a
-    separate errand: settle, then go down the list tapping 退款 or 已收
-    one person at a time. Anyone left out of the list keeps their
-    balance, which is what carries into the next season — 「保留至下一季」
-    is the absence of a payment, not a payment of its own, so there is
-    nothing to write for it.
+    `payload.cash` records money that changed hands while settling, in
+    the same step. Anyone left out keeps their balance for next season
+    (保留至下一季), which needs no entry.
     """
     season_row, settlements = _gather_member_settlements(db, season_id)
     _require_organizer(db, season_row.club_id, current_player)
@@ -102,9 +94,7 @@ def settle_season(
     cash = payload.cash if payload is not None else []
     members = {ms.player.id for ms in settlements}
     for entry in cash:
-        # A club-mate who isn't in this season has no balance this
-        # settlement can square, and a stranger has no business in it at
-        # all. Refusing beats quietly writing money against the wrong id.
+        # Only members of this season can be settled in cash here.
         if entry.player_id not in members:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
@@ -126,9 +116,8 @@ def settle_season(
                 )
             )
 
-    # After the refunds, never before: what somebody hands over on the
-    # day is settled against a balance that already includes what this
-    # settlement just credited them.
+    # After the refunds, so cash is settled against a balance that includes
+    # them.
     for entry in cash:
         if entry.amount == 0:
             continue
@@ -154,8 +143,7 @@ def settle_season(
     )
     db.commit()
 
-    # Deliberately silent. What a member is owed or owes after this is
-    # told once, in the next season's 繳費通知 — see send_fee_notice.
+    # No message now: the result is told once, in the next season's 繳費通知.
 
     return SeasonSettleOut(
         season_id=season_id,
@@ -170,24 +158,14 @@ def unsettle_season(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> SeasonUnsettleOut:
-    """Takes a settlement back, for the tap that shouldn't have happened.
+    """Undoes a settlement: writes the opposite of each refund it
+    credited and unlocks the season. The originals stay, so the ledger
+    shows both. `reverses_entry_id` is unique, so each refund can be
+    reversed once.
 
-    Asked for on 2026-09-16: 「我覺得不小心按到帳務已結算也要可以復原」.
-    Settling writes one ABSENCE_REFUND per member owed one and locks the
-    season. This writes the opposite entry against each of those and
-    unlocks it again. The originals stay: the ledger is append-only, so
-    the books go on saying a settlement happened and was undone, which
-    is what actually occurred.
-
-    `reverses_entry_id` carries the link between the two, and its unique
-    index means one refund can be reversed exactly once however many
-    times this is tapped.
-
-    Cash already handed over is the one thing this cannot put right. A
-    refund paid out after settling is a PAYMENT entry of its own and
-    stays where it is; reversing the refund leaves that money reading as
-    owed back, which is the truth of it. Those people are named in the
-    answer so the organizer hears it from the app rather than from them.
+    Refunds already paid out in cash stay paid and now read as owed
+    back; those members are named in the response so the organizer
+    knows.
     """
     season = (
         db.query(SeasonRow).filter(SeasonRow.id == season_id).with_for_update().first()
@@ -215,8 +193,7 @@ def unsettle_season(
         )
     }
 
-    # Read before the lock comes off: which refunds were handed over in
-    # cash after this season was settled.
+    # Refunds paid out in cash after this season was settled.
     paid_out = (
         db.query(LedgerEntryRow, PlayerRow)
         .join(PlayerRow, LedgerEntryRow.player_id == PlayerRow.id)
@@ -284,10 +261,10 @@ def preview_fee_notice(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> FeeNoticePreviewOut:
-    """Exactly who the 繳費通知 would go to now and what each would read —
-    the server's own text, so the confirmation sheet cannot drift from
-    the message (a copy of the wording in the browser could, and the
-    message cannot be taken back)."""
+    """Who the 繳費通知 would go to now and exactly what each would read,
+    from the server's own text, so the confirmation cannot drift from
+    the message.
+    """
     season_row = db.get(SeasonRow, season_id)
     if season_row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
@@ -317,22 +294,14 @@ def send_fee_notice(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> FeeNoticeOut:
-    """Send this season's 繳費通知 to every member who owes and hasn't
-    had it yet.
+    """Sends this season's 繳費通知 to every member who owes something and
+    has not had it.
 
-    The one message about money. It replaced a notice sent at
-    settlement (2026-10-02): somebody keeping a refund for next season
-    was told one figure then and another when next season's fee came
-    due, and the organizer had two sends to remember. Last season's kept
-    balance is folded in here instead — so this waits until that season
-    is settled, and is not offered for a season already over.
-
-    A LINE message cannot be taken back, so each member gets this at
-    most once a season. The season row is locked and every recipient is
-    marked *before* anything is sent: a second tap, or the same tap
-    arriving twice, waits on the lock and then finds nobody left to
-    send to. Anyone LINE refuses is unmarked afterwards, so they can be
-    reached later without anybody else hearing twice.
+    Last season's kept balance is folded in, so this waits until that
+    season is settled. A LINE message cannot be taken back: the season
+    row is locked and recipients are marked before sending, so a
+    second tap finds nobody left; anyone LINE refuses is unmarked
+    afterwards so they can be sent it later.
     """
     season_row = (
         db.query(SeasonRow).filter(SeasonRow.id == season_id).with_for_update().first()

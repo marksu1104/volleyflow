@@ -47,15 +47,12 @@ def cancel_game(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> GameOut:
-    """Calls off one scheduled game entirely — distinct from a member
-    recording an absence, which leaves the game itself on. See
-    docs/billing-rules.md "Game cancellation": `refunded=True`
-    (CANCELLED_REFUNDED) lowers every current member's billable_games by
-    one and credits share_per_game back to each of them right away;
-    `refunded=False` (CANCELLED_UNREFUNDED) changes nobody's charge,
-    since the venue cost was already paid either way. Existing
-    absence/drop-in rows for this game are left alone — the refund
-    calculation already ignores CANCELLED_REFUNDED games.
+    """Calls off one scheduled game. `refunded=True`
+    (CANCELLED_REFUNDED): the venue returned the cost, so every member
+    is credited that game's share. `refunded=False`
+    (CANCELLED_UNREFUNDED): nobody's charge changes. Absences and
+    signups for the game stay; billing ignores refunded games. See
+    docs/billing-rules.md "Game cancellation".
     """
     game = _get_game_or_404(db, game_id)
     season = db.get(SeasonRow, game.season_id)
@@ -71,14 +68,9 @@ def cancel_game(
         if payload.refunded
         else GameStatus.CANCELLED_UNREFUNDED
     )
-    # A refunded cancellation means the venue handed back what this night
-    # cost — including whatever extra a replacement court added — so the
-    # delta goes back with it and the season total drops by the same
-    # amount. Leaving it behind would keep money subtracted from the base
-    # for a night nobody is charged for, which is money the club never
-    # collects. An unrefunded cancellation keeps it: that court was paid
-    # for whether or not anybody played on it. See docs/billing-rules.md,
-    # "A different venue for one night".
+    # A refunded cancellation returns this night's extra venue cost too, so
+    # the season total drops by it. An unrefunded one keeps it: that court
+    # was paid for.
     if payload.refunded and game.venue_cost_delta != 0:
         season.total_venue_cost -= game.venue_cost_delta
         game.venue_cost_delta = Decimal("0")
@@ -106,23 +98,12 @@ def set_game_air_conditioning(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> GameOut:
-    """Record whether the air conditioning actually ran for this game.
+    """Records whether the air conditioning actually ran for this game.
 
-    Which nights get cooled is a forecast when the season is booked and
-    a fact on the evening itself, so this is the one season parameter
-    that is expected to change mid-season. Flipping it moves the club's
-    real bill by `ac_surcharge` — the venue charges for the AC it ran —
-    so `total_venue_cost` moves with it, and every member's charge is
-    corrected by an adjustment entry rather than by editing what they
-    were originally charged. Same machinery as changing the venue cost
-    by hand; see _sync_season_fee_ledger and the billing rules.
-
-    A drop-in already charged for this game keeps the amount they were
-    charged. They pay the organizer in cash on the night, and chasing
-    someone for another $35 — or handing it back — because the AC
-    decision changed is worse than the small unfairness of leaving it.
-    The members absorb the difference, which is what the season fee is
-    for.
+    The venue charges for what it ran, so `total_venue_cost` moves by
+    `ac_surcharge` and every member's charge is corrected with an
+    adjustment entry. A drop-in already charged for the night keeps
+    what they paid; members absorb the difference.
     """
     game = _get_game_or_404(db, game_id)
     season = db.get(SeasonRow, game.season_id)
@@ -166,32 +147,14 @@ def update_game(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> GameOut:
-    """Change one game: its date, its venue, or its time.
+    """Changes one game's date, venue or time, keeping everything
+    recorded against it (absences, signups and the queue belong to the
+    game, not its date).
 
-    Asked for on 2026-09-17 — first 「有時候會有日期變動、時間更改的需求」,
-    then 「不應該只有改日期，要可以臨時更改場次資訊，像是場地名稱、時間」.
-    The venue shifts a booking a week, or one night runs at a different
-    court or a different hour, and until now the only way to say so was
-    to call the night off and lose everything recorded against it.
-
-    Nobody's charge moves. The season still has the same number of games
-    at the same share, and the venue and time are display-only — see
-    docs/billing-rules.md, where an edit that changes nobody's math
-    writes nothing. That is exactly why this is not cancelling a game
-    and booking another one. Absences, signups and the queue are keyed
-    by the game rather than by its date, so they travel with it, which
-    is the point.
-
-    Only the fields actually sent are touched, so putting this night
-    back on the season's own venue (`location` sent as null) is a
-    different request from leaving it alone. A *price* that differs
-    because the replacement court costs more is a separate question and
-    is deliberately not settled here.
-
-    The date is refused four ways: a settled season is closed; a
-    cancelled night is a fact about a date and moving it would rewrite
-    what happened; two games cannot share an evening; and a date already
-    past would make a night nobody played look played.
+    Only fields sent are touched; `location` sent as null puts the
+    night back on the season's venue. The date is refused for a
+    settled season, a cancelled game, a date another game already has,
+    and a date in the past.
     """
     game = _get_game_or_404(db, game_id)
     season = db.get(SeasonRow, game.season_id)
@@ -204,9 +167,8 @@ def update_game(
             status.HTTP_400_BAD_REQUEST,
             "This game is cancelled, so it cannot be moved",
         )
-    # Only what was actually sent. A field left out keeps its current
-    # value; a field sent as null is a request to clear it, which for
-    # the venue and the time means "back to the season's".
+    # Only fields actually sent; null clears a field (the season's venue and
+    # time).
     fields = payload.model_dump(exclude_unset=True)
     if "location" in fields:
         game.location = fields["location"]
@@ -215,14 +177,8 @@ def update_game(
     if "end_time" in fields:
         game.end_time = fields["end_time"]
 
-    # The one field here that moves money. A different court charges a
-    # different amount, so the club really transfers a different amount:
-    # the season total moves with the delta rather than the other nights
-    # being quietly re-priced to absorb it. Every current member's charge
-    # is then corrected by an adjustment entry, never by editing what
-    # they were already charged — the same machinery as flipping the air
-    # conditioning. See docs/billing-rules.md, "A different venue for one
-    # night".
+    # The one field here that moves money: the season total moves with the
+    # delta, and each member's charge is corrected with an adjustment entry.
     repriced = False
     if "venue_cost_delta" in fields:
         new_delta = fields["venue_cost_delta"]
@@ -264,10 +220,8 @@ def update_game(
 
     if repriced:
         db.flush()
-        # shares_by_game refuses a season whose surcharges and deltas
-        # together exceed the whole venue bill. That is a thing the
-        # organizer can type, so it answers as a refusal rather than
-        # escaping as a 500.
+        # Surcharges and deltas larger than the whole venue bill are a
+        # refusal, not a 500.
         try:
             _sync_season_fee_ledger(db, season)
         except ValueError as exc:

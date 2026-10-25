@@ -1,24 +1,16 @@
-"""The fixed panel under the chat in the club's LINE Official Account.
+"""The fixed menu under the chat in the club's LINE Official Account: the
+app's front door.
 
-A rich menu is the app's front door: members already live in LINE, and
-without one the only way back into VolleyFlow is to scroll the chat
-looking for a link somebody posted weeks ago.
-
-NOTHING HERE RUNS ON IMPORT, AND NOTHING PUBLISHES BY ACCIDENT. Setting
-a default rich menu changes what every member of the Official Account
-sees, so `publish` is reachable only by running this module with an
-explicit `--publish`. Building the definition and rendering the artwork
-are safe to do any number of times; sending it is one deliberate act.
-
-Three calls, in this order:
+Nothing runs on import and nothing publishes by accident. Setting the
+default menu changes what every follower sees, so `publish` runs only
+with an explicit `--publish`. Three calls, in order:
 
   1. POST /v2/bot/richmenu                     -> richMenuId
   2. POST /v2/bot/richmenu/{id}/content        the PNG
   3. POST /v2/bot/user/all/richmenu/{id}       make it everyone's default
 
-Step 2 goes to **api-data.line.me**, not api.line.me. That is the one
-part of this API that is easy to get quietly wrong: the wrong host
-answers 404 and the menu ends up published with no image on it.
+Step 2 goes to api-data.line.me, not api.line.me; the wrong host
+answers 404 and leaves the menu with no image.
 """
 
 from __future__ import annotations
@@ -35,9 +27,8 @@ from dotenv import load_dotenv
 _API = "https://api.line.me/v2/bot"
 _DATA_API = "https://api-data.line.me/v2/bot"
 
-# LINE accepts 2500x1686 (tall, up to six areas) or 2500x843 (compact,
-# up to three). Compact, because three honest destinations beat six
-# where half open the same page — and it takes far less of the screen.
+# LINE accepts 2500x1686 (up to six areas) or 2500x843 (compact, up to
+# three). Compact: three destinations, and less of the screen.
 MENU_WIDTH = 2500
 MENU_HEIGHT = 843
 
@@ -53,11 +44,9 @@ def _headers() -> dict[str, str]:
 
 
 def three_column_areas(urls: list[str]) -> list[dict[str, Any]]:
-    """Three equal columns across the compact menu, left to right.
-
-    The widths are 833 / 834 / 833 rather than three times 833: LINE
-    rejects a definition whose areas do not tile the image exactly, and
-    2500 does not divide by three.
+    """Three columns across the compact menu, 833 / 834 / 833 wide: LINE
+    requires the areas to tile the image exactly, and 2500 does not
+    divide by three.
     """
     if len(urls) != 3:
         raise ValueError("a compact menu has room for exactly three areas")
@@ -78,8 +67,9 @@ def three_column_areas(urls: list[str]) -> list[dict[str, Any]]:
 def build_definition(
     urls: list[str], chat_bar_text: str = "打開 VolleyFlow"
 ) -> dict[str, Any]:
-    """The menu LINE stores. `selected: True` means it starts open, which
-    is what makes it a front door rather than something to discover."""
+    """The menu definition LINE stores. `selected: True` means it starts
+    open.
+    """
     return {
         "size": {"width": MENU_WIDTH, "height": MENU_HEIGHT},
         "selected": True,
@@ -102,8 +92,9 @@ def create(definition: dict[str, Any]) -> str:
 
 
 def upload_image(rich_menu_id: str, png: bytes) -> None:
-    """The artwork. api-data.line.me, not api.line.me — see the module
-    docstring."""
+    """Uploads the artwork, to api-data.line.me (see the module
+    docstring).
+    """
     response = httpx.post(
         f"{_DATA_API}/richmenu/{rich_menu_id}/content",
         headers={**_headers(), "Content-Type": "image/png"},
@@ -114,7 +105,7 @@ def upload_image(rich_menu_id: str, png: bytes) -> None:
 
 
 def set_default(rich_menu_id: str) -> None:
-    """Every member of the Official Account sees this from now on."""
+    """Makes this menu every follower's default."""
     response = httpx.post(
         f"{_API}/user/all/richmenu/{rich_menu_id}",
         headers=_headers(),
@@ -131,9 +122,7 @@ def list_menus() -> list[dict[str, Any]]:
 
 
 def delete(rich_menu_id: str) -> None:
-    """Menus are kept per channel and there is a cap, so replacing one
-    without deleting the old leaves litter that eventually refuses new
-    ones."""
+    """Deletes a menu; LINE caps how many a channel keeps."""
     response = httpx.delete(
         f"{_API}/richmenu/{rich_menu_id}", headers=_headers(), timeout=10
     )
@@ -141,11 +130,8 @@ def delete(rich_menu_id: str) -> None:
 
 
 def publish(png_path: Path, urls: list[str], replace: bool = True) -> str:
-    """Create, upload, and make default — the whole outward-facing act.
-
-    `replace` deletes every menu that existed before, which is almost
-    always what is wanted: the alternative is a channel slowly filling
-    with unreferenced menus until LINE refuses to store another.
+    """Creates, uploads and sets the menu as default. `replace` deletes
+    every earlier menu first.
     """
     png = png_path.read_bytes()
     existing = [m["richMenuId"] for m in list_menus()] if replace else []
@@ -162,13 +148,8 @@ def publish(png_path: Path, urls: list[str], replace: bool = True) -> str:
 
 
 def main() -> int:
-    # Here rather than at import, so the module docstring's promise that
-    # nothing runs on import stays literally true. Without it the token
-    # is only found in a real environment variable: `.env` — which is
-    # where this project keeps it, and where `db.engine` reads it from —
-    # would be ignored, and the first sign of that is a KeyError at the
-    # exact moment `--publish` starts talking to LINE, after a dry run
-    # has already printed a perfectly correct-looking definition.
+    # Loaded here, not at import, so importing stays side-effect free; the
+    # token lives in .env.
     load_dotenv()
 
     parser = argparse.ArgumentParser(description=__doc__)

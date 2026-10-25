@@ -72,11 +72,9 @@ class MemberSettlement:
 def season_shares(season: Season) -> dict[int, Decimal]:
     """Each game's per-member share, keyed by game id.
 
-    One place computes this, and everything that touches money for a
-    single game goes through it — a member's fee, a drop-in's charge, an
-    absence refund. Games can cost different amounts once air
-    conditioning is modelled, so "the season's share" is no longer a
-    single number; see pricing.shares_by_game.
+    Every amount for a single game — a member's fee, a drop-in's charge,
+    an absence refund — comes from here. Games can cost different amounts
+    (see pricing.shares_by_game), so there is no single season share.
     """
     shares = shares_by_game(
         season.total_venue_cost,
@@ -98,10 +96,7 @@ def settle_member(
     shares = season_shares(season)
     billable = [g for g in season.games if g.status != GameStatus.CANCELLED_REFUNDED]
 
-    # The fee is the sum of the games they're being charged for, not a
-    # share times a count: with air conditioning the games differ, and a
-    # season where half the nights are cooled costs more than twice the
-    # cheap half.
+    # A sum, not share x count: games can cost different amounts.
     fee = sum((shares[g.id] for g in billable), Decimal("0"))
 
     refunded = [
@@ -120,12 +115,8 @@ def settle_member(
 
 
 def settle_drop_in(drop_in: DropIn, season: Season) -> Decimal:
-    """A drop-in's charge for the game they signed up for, 0 if cancelled.
-
-    Priced at that game's own share: a night with the air conditioning
-    on costs the club more, and a drop-in on a cool night should not be
-    subsidising one on a hot one.
-    """
+    """A drop-in's charge for the game they signed up for, at that game's
+    own share; 0 if cancelled."""
     if not drop_in.is_active:
         return Decimal("0")
     return season_shares(season)[drop_in.game.id]

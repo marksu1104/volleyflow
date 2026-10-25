@@ -50,9 +50,7 @@ def create_club(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> ClubOut:
-    """Whoever creates a club becomes its organizer.
-    The creator is the verified caller, not a client-supplied id.
-    """
+    """Creates a club; the verified caller becomes its organizer."""
     club = ClubRow(name=payload.name, created_at=_now())
     db.add(club)
     db.flush()
@@ -89,11 +87,8 @@ def list_clubs(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> list[ClubOut]:
-    """Only the caller's own clubs. This used to return every club that
-    existed, to anyone — which both leaked the club list and handed out
-    the ids that made the other reads enumerable. Joining a club you're
-    not in yet goes through its invite link, which carries the id; see
-    GET /clubs/{id} for the name lookup that link needs.
+    """Only the caller's own clubs, so club ids are not handed out. A
+    club one is not in yet is reached through its invite link.
     """
     rows = (
         db.query(ClubRow, ClubMemberRow.role)
@@ -104,13 +99,9 @@ def list_clubs(
     )
     if not is_developer(current_player):
         return [ClubOut(id=c.id, name=c.name, role=role) for c, role in rows]
-    # The developer may run any club (see _runs_club), so the management
-    # pages offer them all. Every club they don't organize themselves is
-    # marked developer_view — one they merely belong to included. Marking
-    # only the clubs they had no membership in at all left a club they
-    # had joined as a member listed as role "member", which the
-    # management pages filter out, so its 管理 opened their own club
-    # instead (reported 2026-10-12). `role` stays what they really are.
+    # The developer may run any club (see _runs_club). Every club they do
+    # not organize themselves, including one they merely belong to, is
+    # marked developer_view; `role` stays what they really are.
     role_in = {c.id: role for c, role in rows}
     listed = [
         ClubOut(
@@ -131,15 +122,9 @@ def get_club(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> ClubOut:
-    """A club's name — for its members.
-
-    It used to be readable by anyone signed in, for an invite prompt that
-    needed a name before the visitor had joined. That prompt reads
-    GET /invites/{token} now, and nothing in the app calls this for a club
-    it isn't in — so left open, all it still did was let anybody with a
-    LINE account read every club's name by trying ids in order, which is
-    exactly what the invite token was introduced to stop. Found on
-    2026-09-15 by tests/api/test_tenant_isolation.py.
+    """A club's name, for its members only. An invite prompt reads GET
+    /invites/{token} instead, so club names cannot be found by trying
+    ids.
     """
     club = _get_club_or_404(db, club_id)
     _require_club_access(db, club_id, current_player)
@@ -152,11 +137,8 @@ def list_player_clubs(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> list[MyClubOut]:
-    """Every club this player belongs to and their role in each — what a
-    profile page's club list needs, spanning clubs the way a single
-    club's member list (GET /clubs/{id}/members) can't. Self only: which
-    clubs someone else belongs to isn't this app's business to hand to a
-    third party, including another club's organizer.
+    """Every club this player belongs to, with their role and balance in
+    each, for the profile page. Self only.
     """
     if current_player.id != player_id:
         raise HTTPException(
@@ -177,19 +159,9 @@ def list_player_clubs(
         .group_by(ClubMemberRow.club_id)
         .all()
     }
-    # One grouped query for every club's balance, the same shape as the
-    # pending count above and as list_club_balances: a number per club,
-    # never a ledger per club. Reading the full entry history once per
-    # club to add up a single figure in the browser is the N+1 behind
-    # 「個人資料頁面的我的球隊，每次都會進入網頁後過很久才載入出現」.
-    #
-    # Safe to key on player_id alone: linking refuses when the LINE row
-    # already has ledger entries, and merging re-points them, so a
-    # player's money never sits under an id they no longer are.
-    #
-    # Up to each club's season in play, not the whole ledger: a season
-    # booked ahead has charged its fee already, and counting it here put
-    # a figure on 我的帳務 that no 繳費通知 had asked for.
+    # One grouped query for every club's balance, up to each club's season
+    # in play. Keyed on player_id alone: linking and merging never leave
+    # money under an id the player no longer has.
     owed = _club_balances_up_to_now(db, player_id, _today_in_taiwan())
     return [
         MyClubOut(
@@ -211,11 +183,9 @@ def delete_club(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> None:
-    """Deletes a club and every season in it. Same reasoning and the same
-    refusal as deleting a season: a settled season anywhere in the club
-    blocks it, because that's real closed books. Players themselves are
-    never deleted — a Player is global and outlives any one club;
-    only their membership of this club goes.
+    """Deletes a club and every season in it. Refused if any season is
+    settled, as for deleting a season. Players are global and are
+    never deleted; only their membership of this club goes.
     """
     _get_club_or_404(db, club_id)
     _require_organizer(db, club_id, current_player)

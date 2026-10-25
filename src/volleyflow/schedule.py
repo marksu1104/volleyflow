@@ -20,26 +20,15 @@ class Game:
     date: date
     status: GameStatus = GameStatus.SCHEDULED
     air_conditioned: bool = False
-    """Whether the air conditioning ran for this game.
-
-    Set from a forecast when the season is created, and corrected on the
-    day — whether the AC actually runs is decided that evening, not when
-    the season is booked. Flipping it changes what the club pays the
-    venue and therefore what every member owes; see
-    docs/billing-rules.md "Air conditioning".
+    """Whether the air conditioning ran for this game: a forecast when the
+    season is booked, corrected on the night. See docs/billing-rules.md
+    "Air conditioning".
     """
     venue_cost_delta: Decimal = Decimal("0")
-    """What this one night costs the club above (or below) a normal night.
-
-    A booking moves and the usual court is taken, so one night runs
-    somewhere that charges a different amount — 「有時候會換場地，那個場地
-    的價錢不同」. Priced exactly like `ac_surcharge`: taken out of the
-    season total before the even split, then added back on the night it
-    belongs to, so it lands on the people who played that night and
-    nobody else. Zero — the default, and what every game booked before
-    2026-09-17 holds — collapses the formula back to what it was.
-
-    See docs/billing-rules.md "A different venue for one night".
+    """What this night costs the club above (or below) a normal night,
+    when it runs at a different venue. Priced like `ac_surcharge`, so it
+    lands only on the people who played that night. See
+    docs/billing-rules.md "A different venue for one night".
     """
 
 
@@ -54,25 +43,13 @@ class Season:
     games: tuple[Game, ...]
     members: tuple[Player, ...]
     capacity: int
-    """How many people play one game — and, since 2026-09-10, what the
-    venue cost is divided between.
-
-    Deliberately not defaulted and deliberately not `len(members)`: the
-    price is fixed when the season is booked and never moves again, so
-    a roster change costs only the person joining or leaving. Splitting
-    by the roster instead meant one member leaving pushed everyone else
-    from $205 a night to $218, even when a drop-in had taken the empty
-    slot and paid the same $205. See pricing.share_per_game.
+    """How many people play one game, and what the venue cost is divided
+    between. Deliberately not `len(members)`; see pricing.share_per_game.
     """
     ac_surcharge: Decimal = Decimal("0")
-    """What one game's air conditioning adds to the venue bill.
-
-    Every venue's AC pricing collapses to this one number: bundled
-    venues charge 0, venues with a higher hourly rate when the AC is on
-    charge the difference times the hours, venues billing a flat AC fee
-    charge that. Zero — the default — makes every game cost the same and
-    the whole calculation collapses back to what it was before this
-    existed.
+    """What one game's air conditioning adds to the venue bill: 0 when
+    it is included, otherwise the extra the venue charges for it. Zero
+    makes every game cost the same.
     """
 
     @property

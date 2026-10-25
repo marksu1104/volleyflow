@@ -1,6 +1,4 @@
-"""Taking leave, signing up, the queue, and standing in for
-somebody.
-"""
+"""Taking leave, signing up, the queue, and standing in for somebody."""
 
 from fastapi import (
     APIRouter,
@@ -103,11 +101,9 @@ def record_absence(
     absence = AbsenceRow(player_id=player.id, game_id=game.id, recorded_at=_now())
     db.add(absence)
 
-    # Naming the substitute in the same request keeps the slot away from
-    # the queue. Done as two requests, the first offered it to whoever
-    # queued first and the second bumped them straight back out: a charge
-    # and a refund on their ledger for a place they never had. Anything
-    # the substitute is refused for rolls the absence back with it.
+    # Naming the substitute in the same request gives the slot straight to
+    # them, so nobody is promoted, charged and bumped a moment later. A
+    # refused substitute rolls the absence back too.
     substitute = None
     promoted = None
     if payload.substitute is not None:
@@ -133,8 +129,8 @@ def record_absence(
     db.commit()
     db.refresh(absence)
 
-    # Whoever came off the queue hears from the deadline job, not from
-    # here — see reminders.send_promotion_notices.
+    # Whoever came off the queue is told by the deadline job; see
+    # reminders.send_promotion_notices.
     return AbsenceOut(
         id=absence.id,
         player_id=absence.player_id,
@@ -153,21 +149,10 @@ def cancel_absence(
 ) -> AbsenceCancelOut:
     """The member is attending after all.
 
-    Anybody standing in the slot goes back to the queue, at the position
-    they originally held, and their fee comes off. That restores exactly
-    the state before the absence was recorded, which is the fair reading:
-    the slot only opened because this member released it, so taking the
-    release back closes it again. The stand-in is no worse off than if
-    the absence had never happened, and keeps their place ahead of anyone
-    who queued later.
-
-    This used to be refused outright — "someone is already covering,
-    ask the organizer" — which was a dead end, because the app offers no
-    way to ask. The member was simply stuck, on a game they had said
-    they could play. Changed 2026-09-10 after that was reported.
-
-    The change deadline still applies, and is what stops this being used
-    to shuffle people in and out on the night.
+    Whoever was standing in the slot goes back to the queue at their
+    original place, with their fee reversed: the slot opened only
+    because this member released it, so taking the release back closes
+    it. The change deadline still applies.
     """
     absence = db.get(AbsenceRow, absence_id)
     if absence is None:
@@ -204,23 +189,13 @@ def set_substitute(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> DropInOut:
-    """A member (or the organizer) personally arranging — or later
-    changing — who covers a specific absence, a "代打". Always
-    confirmed, never queued: filling your own slot with someone you
-    picked isn't competing with the waitlist for open capacity. See
-    attendance.DropIn.covers.
+    """Names (or replaces) the 代打 a member personally arranged for their
+    absence. Always confirmed, never queued: filling your own slot
+    does not compete with the queue.
 
-    "Self" here means the absent member — the one whose slot is being
-    covered, not the substitute being named — matching who's actually
-    allowed to arrange this per the attendance rules.
-
-    No change-deadline check here, on purpose: swapping who's covering
-    doesn't create the understaffed-at-the-last-minute risk the
-    deadline protects against, since a body still fills the slot
-    either way. Idempotent by design — call this again with a new name
-    to replace whoever's currently covering; the previous substitute's
-    charge is refunded first. Actually removing coverage (leaving the
-    absence uncovered) still goes through the ordinary
+    No change-deadline check, since the slot stays filled either way.
+    Calling it again replaces the previous substitute, whose charge is
+    reversed. Removing coverage altogether goes through
     /drop-ins/{id}/cancel, which does check the deadline.
     """
     absence = db.get(AbsenceRow, absence_id)
@@ -261,10 +236,10 @@ def _name_substitute(
     payload: SubstituteCreate,
 ) -> tuple[DropInRow, int | None, PlayerRow]:
     """Puts the named person on court in this absence's slot, replacing
-    whoever was arranged before. Shared by PUT /absences/{id}/substitute
-    and by POST /absences when the substitute comes with the absence.
+    whoever was arranged before. Shared by PUT
+    /absences/{id}/substitute and POST /absences with a substitute.
 
-    Returns the substitute's drop-in, whoever was sent back to the queue
+    Returns the substitute's drop-in, whoever went back to the queue
     to make room, and the substitute. The caller commits.
     """
     absence_id = absence.id
@@ -274,34 +249,21 @@ def _name_substitute(
         .first()
     )
     if existing is not None:
-        # They did not withdraw — somebody else was picked instead — so
-        # if they had left the queue to take this slot, they get that
-        # place back. See _off_the_court. Flushed inside it, before any
-        # new row below is added: SQLAlchemy orders pending INSERTs ahead
-        # of UPDATEs, and the new row would otherwise meet the old one
-        # still live and trip the one-row-per-person-per-game index.
+        # They did not withdraw, so they get back any queue place they left
+        # (see _off_the_court). Flushed inside it, before the new row below:
+        # SQLAlchemy inserts before it updates, and the old row would
+        # otherwise trip the one-row-per-person-per-game index.
         _off_the_court(db, existing, season)
 
     player = _get_or_create_player(db, season.club_id, payload.player_name)
-    # The same rule the ordinary signup applies, and it was missing here.
-    # A typed name resolves to an existing person when one in this club
-    # already has it, so naming somebody who has a LINE account put the
-    # real them on the roster — and on the hook for the fee — with no say
-    # in it. A guest with no account is still fair game: they cannot sign
-    # themselves up, so somebody has to.
+    # Nobody may sign up a person who has a LINE account but themselves.
     _require_may_sign_up(db, season.club_id, current_player, player)
     if player.gender is None and payload.gender is not None:
         player.gender = payload.gender
 
-    # A fixed member is expected at this game already, so
-    # they cannot also stand in for somebody — they would be on the court
-    # twice and pay for the night twice, once inside their season fee and
-    # once as a drop-in. The ordinary signup route refuses this
-    # (_reject_if_already_playing) and this one did not, which is how a
-    # random sweep in tests/api/test_fuzz.py landed the same name in the
-    # attending list twice. Being away themselves makes no difference: a
-    # member who wants to play cancels their own absence, which fills
-    # their own slot and leaves this one still open.
+    # A fixed member is already expected at this game, so they cannot also
+    # stand in for somebody; an absent member who wants to play cancels
+    # their own absence instead.
     if db.get(SeasonMemberRow, {"season_id": season.id, "player_id": player.id}):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -309,10 +271,8 @@ def _name_substitute(
             "expected — they can't stand in for somebody else",
         )
 
-    # Any active drop-in still on file for this player+game at this point
-    # can't be the one that covered this absence — that one was just
-    # cancelled (and flushed) above, if it existed. So a match here is
-    # necessarily a different signup.
+    # The previous substitute was taken off above, so any live signup here
+    # is a different one.
     other_drop_in = (
         db.query(DropInRow)
         .filter(
@@ -328,9 +288,8 @@ def _name_substitute(
             "That player is already signed up for this game",
         )
 
-    # A queued person named as the substitute leaves the queue: their own
-    # row moves onto the court, keeping when they queued — so cancelling
-    # the arrangement can hand that place back — and who signed them up.
+    # A queued person named as the substitute moves onto the court on their
+    # own row, keeping when they queued and who signed them up.
     queued = (
         db.query(DropInRow)
         .filter(
@@ -349,8 +308,8 @@ def _name_substitute(
         drop_in.signed_up_at = _now()
         drop_in.covers_absence_id = absence_id
     else:
-        # Who put them on the list: whoever is naming them now. Never the
-        # absent member as such — see DropInRow.brought_by_player_id.
+        # Brought by whoever is naming them, not the absent member; see
+        # DropInRow.brought_by_player_id.
         drop_in = DropInRow(
             player_id=player.id,
             game_id=game.id,
@@ -374,12 +333,8 @@ def sign_up(
     game = _get_game_or_404(db, payload.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
-    # Before anything is written: only a member of this club may sign
-    # anybody up in it. _get_or_create_player creates a player and a club
-    # membership for a name it hasn't seen, and it used to run first — so
-    # an outsider's refused request briefly created somebody inside a club
-    # they had no part in, undone only because the session happened to
-    # roll back. Found 2026-09-15 by tests/api/test_tenant_isolation.py.
+    # Checked before _get_or_create_player, which would otherwise create
+    # somebody inside a club the caller has no part in.
     _require_club_access(db, season.club_id, current_player)
     player = _get_or_create_player(db, season.club_id, payload.player_name)
     _require_may_sign_up(db, season.club_id, current_player, player)
@@ -390,11 +345,7 @@ def sign_up(
 
     _reject_if_already_playing(db, game, season, player)
 
-    # Who put them on the list, when it wasn't themselves — recorded the
-    # same way the batch signup does. Without it this endpoint left the
-    # column null, so the money screen couldn't say who to collect from
-    # and nothing could tell whose signup it was safe to offer a cancel
-    # for.
+    # Who to collect the fee from, and who may cancel this signup for them.
     brought_by = None if player.id == current_player.id else current_player.id
 
     if _has_open_slot(db, game, season):
@@ -436,38 +387,26 @@ def sign_up_several(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> DropInBatchOut:
-    """ "+1, and I'm bringing two friends" — the whole group in one go.
+    """Signs up a group ("+1, and two friends") in one transaction under
+    one game lock, so the group can neither overfill the game by
+    interleaving with other signups nor half-succeed.
 
-    Everything happens inside the one transaction and behind the one
-    `SELECT ... FOR UPDATE` that _get_game_or_404 takes, which is the
-    reason this exists rather than the caller looping over POST
-    /drop-ins: three separate requests can interleave with somebody
-    else's signup and push the game past capacity, and they can also
-    half-succeed, leaving some of a group charged and the rest not.
-
-    Capacity is spent in list order, so the people who overflow are the
-    ones the caller listed last — the app shows that before sending, so
-    nobody is surprised by which of their friends got the waitlist.
+    Capacity is spent in list order: whoever overflows is listed last,
+    and the app shows that before sending.
     """
     game = _get_game_or_404(db, game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
     _require_season_open(season)
     _require_within_change_deadline(db, game, season, current_player)
-    # Same rule as sign_up, for the same reason: _sign_up_each creates
-    # people as it goes, so who may do this is settled before it starts,
-    # not discovered halfway through and rolled back.
+    # Settled before _sign_up_each starts creating people.
     _require_club_access(db, season.club_id, current_player)
 
     try:
         results = _sign_up_each(db, game, season, payload.people, current_player)
     except Exception:
-        # Rows are flushed as we go, so that capacity sees each person as
-        # it's added. That makes "all or nothing" this route's own job:
-        # relying on the request-scoped session being closed to discard
-        # them would leave the guarantee resting on something outside
-        # the route, and any caller holding the session open — the tests
-        # do — would see a half-finished group.
+        # Rows are flushed as they are added so capacity sees each one,
+        # which makes rolling back on failure this route's own job.
         db.rollback()
         raise
 
@@ -507,8 +446,7 @@ def _sign_up_each(
         _require_may_sign_up(db, season.club_id, current_player, player)
         _reject_if_already_playing(db, game, season, player)
 
-        # Null for anyone signing themselves up: the field answers "who
-        # do I collect this from", and for yourself that's already you.
+        # Null when signing themselves up.
         brought_by = None if player.id == current_player.id else current_player.id
 
         if _has_open_slot(db, game, season):
@@ -520,8 +458,7 @@ def _sign_up_each(
             )
             db.add(drop_in)
             _record_drop_in_charge(db, drop_in, season, reverse=False)
-            # _has_open_slot counts rows, so the next person in this
-            # batch only sees the slot as taken once this one is flushed.
+            # Flushed so the next person sees this slot as taken.
             db.flush()
             results.append(
                 DropInOut(
@@ -560,18 +497,8 @@ def leave_waitlist(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> WaitlistCancelOut:
-    """Give up a place in the queue.
-
-    This did not exist, and the frontend was sending waitlist entry ids
-    to /drop-ins/{id}/cancel instead. `waitlist_entries.id` and
-    `drop_ins.id` are independent sequences, so that either 404'd, or —
-    when the numbers happened to line up — cancelled a completely
-    different person's confirmed signup. Queued people were stuck: they
-    could not leave, and signing up again was refused as a duplicate.
-
-    Marked cancelled, like any signup — it used to be deleted, when the
-    queue was a table of its own. No money moves: a queued signup was
-    never charged.
+    """Gives up a place in the queue. The row is marked cancelled; no
+    money moves, because a queued signup was never charged.
     """
     entry = db.get(DropInRow, entry_id)
     if entry is None or entry.status != QUEUED or entry.cancelled_at is not None:
@@ -581,7 +508,7 @@ def leave_waitlist(
     game = _get_game_or_404(db, entry.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
-    # Whoever queued a guest may take them back out, the same as a drop-in.
+    # Whoever queued a guest may take them back out.
     if entry.brought_by_player_id != current_player.id:
         _require_self_or_organizer(db, season.club_id, current_player, entry.player_id)
     _require_season_open(season)
@@ -600,27 +527,20 @@ def promote_from_waitlist(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> WaitlistPromoteOut:
-    """Put a specific queued person on the court. Organizer only.
+    """Puts a specific queued person on court. Organizer only.
 
-    The queue's order decides who gets a slot that opens by itself. It
-    can't decide who *should* play, because it doesn't know that the
-    first person in it is away this week — the organizer does, usually
-    from a message in the group chat. Without this the only way to act
-    on that was to cancel people one at a time until the automatic
-    promotion happened to land on the right person, charging and
-    refunding everyone it stepped through on the way.
-
-    The capacity cap still holds: with the game full, bringing somebody
-    in means naming who comes out, and both happen in this one
-    transaction.
+    The queue's order decides who gets a slot that opens by itself;
+    the organizer may know better (the first person in it is away this
+    week). On a full game they must name who comes out, and both
+    happen in one transaction.
     """
     entry = db.get(DropInRow, entry_id)
     if entry is None or entry.status != QUEUED or entry.cancelled_at is not None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, f"No waitlist entry with id {entry_id}"
         )
-    # Locks the game for the rest of the transaction, so the slot this
-    # decision is based on can't be taken by a concurrent signup.
+    # Locks the game, so a concurrent signup cannot take the slot decided on
+    # here.
     game = _get_game_or_404(db, entry.game_id)
     season = db.get(SeasonRow, game.season_id)
     assert season is not None  # game.season_id is a foreign key, always valid
@@ -642,16 +562,11 @@ def promote_from_waitlist(
         if replaced.cancelled_at is not None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Already cancelled")
         replaced_player_id = replaced.player_id
-        # Back into the queue, at the time they originally joined it.
-        # They did not withdraw — the organizer picked somebody else —
-        # so dropping them entirely would quietly delete a person who is
-        # still waiting to play, and would make the screen's "X 回到候補"
-        # a lie. Matches _make_room_for_substitute.
+        # Back into the queue at their original place: the organizer picked
+        # somebody else, they did not withdraw.
         _back_to_the_queue(db, replaced, season)
-        # Deliberately not _promote_from_waitlist here: that is the rule
-        # for a slot opening on its own, and this slot is already spoken
-        # for. Running it would put the queue's first person in the seat
-        # the organizer just chose somebody else for.
+        # Not _promote_from_waitlist: this slot is already given to the
+        # person the organizer chose.
     elif not _has_open_slot(db, game, season):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -663,8 +578,7 @@ def promote_from_waitlist(
     db.commit()
     db.refresh(drop_in)
 
-    # Promoted by hand, told the same way as by the queue: by the deadline
-    # job, if they are still on court when it runs.
+    # Told by the deadline job, like anyone promoted from the queue.
     return WaitlistPromoteOut(
         player_id=drop_in.player_id,
         game_id=game.id,
@@ -680,8 +594,7 @@ def cancel_drop_in(
     current_player: PlayerRow = Depends(get_current_player),
 ) -> DropInCancelOut:
     drop_in = db.get(DropInRow, drop_in_id)
-    # A queued signup shares this table now, but is left through
-    # /waitlist/{id}/cancel; this route only ever took a place on court.
+    # Queued signups are left through /waitlist/{id}/cancel.
     if drop_in is None or drop_in.status != PLAYING:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, f"No drop-in with id {drop_in_id}"
@@ -698,18 +611,10 @@ def cancel_drop_in(
 
     taken_at = _now()
 
-    # Cancelling an ordinary signup is a withdrawal, whoever is allowed
-    # to press the button on that person's behalf. In particular, a guest
-    # has no LINE account and the member who brought them is their only
-    # way to withdraw. Re-queuing that guest here immediately promoted
-    # them into the slot the cancellation had just opened, so 「移除」
-    # appeared to work and then put the same person straight back.
-    #
-    # An arranged substitute is different: cancelling the arrangement
-    # takes somebody else's assigned slot away from them; it does not say
-    # that the substitute has withdrawn their earlier request to play.
-    # If they came from the queue, give that place back. The substitute
-    # cancelling themselves is still an ordinary withdrawal.
+    # Cancelling an ordinary signup is a withdrawal, whoever presses the
+    # button for them. Cancelling an arranged substitute takes the slot away
+    # from them instead, so they get back any queue place they left; the
+    # substitute cancelling themselves is still a withdrawal.
     returning_arranged_substitute = (
         drop_in.covers_absence_id is not None and current_player.id != drop_in.player_id
     )
@@ -726,8 +631,8 @@ def cancel_drop_in(
 
     return DropInCancelOut(
         id=drop_in.id,
-        # When their place on court ended — the row itself may be back in
-        # the queue rather than cancelled, if they came from it.
+        # When their place on court ended; the row may be back in the queue
+        # rather than cancelled.
         cancelled_at=drop_in.cancelled_at or taken_at,
         promoted_from_waitlist=promoted,
     )

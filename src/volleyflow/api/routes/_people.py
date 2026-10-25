@@ -1,8 +1,8 @@
 """Who the caller is, and what they are allowed to do.
 
-The bottom layer: nothing here knows about a game, a season or a
-charge. It imports nothing else in this package, which is what keeps
-the dependency one-way.
+The bottom layer: nothing here knows about games, seasons or charges,
+and it imports nothing else in this package, which keeps the
+dependencies one-way.
 """
 
 import os
@@ -29,28 +29,22 @@ from volleyflow.db.models import (
     PlayerRow,
 )
 
-# How many previously-brought people the quick picker offers. Long enough
-# for the regulars, short enough to scan on a phone — the tail is
-# one-off visitors nobody will pick again, and a text field is still
-# there for anyone not on the list.
+# How many previously brought people the quick picker offers; anyone else
+# can still be typed in.
 _MY_GUESTS_LIMIT = 12
 
 
 def _now() -> datetime:
-    """Server-assigned, UTC, naive — never trust a client-supplied time
-    for anything that feeds FIFO ordering (see settlement.py).
+    """Server time, UTC, naive. Never trust a client-supplied time for
+    anything that feeds FIFO ordering.
     """
     return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _get_or_create_player(db: Session, club_id: int, name: str) -> PlayerRow:
-    """One Player per name within a club, not globally — the same name
-    in two different clubs is two different people (per the design rules:
-    Player is global, but name has no uniqueness constraint of its own
-    any more; ClubMembership is what's scoped). Creates the
-    ClubMemberRow too when this is a brand new player, so this is the
-    one place a name-typed player both exists and belongs to the club
-    at the same time.
+    """The player with this name in this club, created (with their club
+    membership) if there is none. Names are unique within a club, not
+    globally.
     """
     player = (
         db.query(PlayerRow)
@@ -76,20 +70,13 @@ def _unique_display_name(
     exclude_player_id: int | None = None,
     club_ids: list[int] | None = None,
 ) -> str:
-    """Keep names distinct only where the UI uses them as a club-local key.
+    """Keeps a renamed player's name distinct within the clubs in
+    `club_ids`, where some attendance routes still use the name as a
+    key.
 
-    Player names are not globally unique: two unrelated clubs can both have
-    a Mark, and a brand-new LINE account does not belong to any club yet.
-    Adding ``(2)`` merely because either of those people exists was both
-    surprising and inconsistent with the database model.
-
-    Within an active club, a few attendance routes still accept a name as
-    their human-readable identity, so an explicit profile rename does avoid
-    introducing an ambiguous label there. ``club_ids`` names exactly those
-    scopes. With no clubs there is no collision to resolve. Pending join
-    requests deliberately keep the original LINE name: that lets an organizer
-    explicitly link one to an existing accountless roster entry instead of the
-    server guessing that two equal strings are the same person.
+    Names are not unique globally, and a pending join request keeps
+    its LINE name so the organizer can link it to an existing roster
+    entry explicitly.
     """
     if not club_ids:
         return display_name
@@ -142,13 +129,9 @@ def _get_club_or_404(db: Session, club_id: int) -> ClubRow:
 
 
 def _require_dealings_with_club(db: Session, club_id: int, player_id: int) -> None:
-    """A member, or somebody whose money is on this club's books.
-
-    Payments used to require current membership, and somebody who had
-    played as a drop-in and was later taken out of the club could no
-    longer have their fee marked received — reported 2026-10-16 as 「○○
-    不是隊伍裡的人」 on a night they had played. What they owe is still
-    owed, so the books decide, not the member list."""
+    """A member, or somebody with money on this club's books: a drop-in
+    later removed from the club still owes for the nights they played.
+    """
     if db.get(ClubMemberRow, {"club_id": club_id, "player_id": player_id}):
         return
     on_the_books = (
@@ -176,15 +159,13 @@ def get_current_player(
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> PlayerRow:
-    """The verified caller, from a LINE ID token in the Authorization
-    header — never trust a client-supplied player_id/line_user_id in a
-    request body for anything that changes data. Every mutating
-    endpoint below takes this as a dependency instead.
+    """The verified caller, from the LINE ID token in the Authorization
+    header. Never trust a player id sent in a request body for
+    anything that changes data.
 
-    404s (not 401) if there's no Player for this line_user_id yet: that
-    can only mean the caller never called POST /players/identify, which
-    is the one endpoint that verifies a token itself and doesn't depend
-    on this — everything else assumes identify already ran once.
+    404, not 401, when no Player exists for this LINE user yet: the
+    caller never called POST /players/identify, the one endpoint that
+    verifies a token itself.
     """
     if authorization is None or not authorization.startswith("Bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
@@ -204,10 +185,9 @@ def get_current_player(
 
 def _runs_club(db: Session, club_id: int, player: PlayerRow) -> bool:
     """Whether `player` may act as this club's organizer: they organize
-    it, or they are the developer, who may step into any club to look or
-    to put something right (decided 2026-10-09 — "必要時可以介入任何資料
-    的操作"). Every organizer check goes through here, so the developer's
-    reach is one line to read and one line to take away."""
+    it, or they are the developer, who may step into any club. Every
+    organizer check goes through here.
+    """
     if is_developer(player):
         return True
     membership = db.get(ClubMemberRow, {"club_id": club_id, "player_id": player.id})
@@ -215,12 +195,8 @@ def _runs_club(db: Session, club_id: int, player: PlayerRow) -> bool:
 
 
 def _require_club_access(db: Session, club_id: int, current_player: PlayerRow) -> None:
-    """You may read a club's roster, seasons and games only if you belong
-    to it. The design rules: "clubs never see each other's members, seasons,
-    or books." These reads were public until now, which meant every
-    member's name, gender and LINE profile picture — plus who took leave
-    and who dropped in — were readable by anyone who knew a club or
-    season id, and GET /clubs handed out the ids.
+    """Only members may read a club's roster, seasons and games: clubs
+    never see each other's members, seasons or books.
     """
     if is_developer(current_player):
         return
@@ -241,11 +217,8 @@ def _organizes_a_club_of(
     db: Session, current_player: PlayerRow, target: PlayerRow
 ) -> bool:
     """Whether `current_player` organizes any club `target` belongs to.
-
-    Split out of _may_edit_accountless_player on 2026-09-30: the gender
-    field opened up to organizers for everyone in their club, while
-    renaming stayed narrow. Both used to call the same helper, so
-    loosening one would have loosened the other by accident.
+    Kept separate from _may_edit_accountless_player so loosening one
+    rule cannot loosen the other.
     """
     if is_developer(current_player):
         return True
@@ -271,10 +244,9 @@ def _organizes_a_club_of(
 def _may_edit_accountless_player(
     db: Session, current_player: PlayerRow, target: PlayerRow
 ) -> bool:
-    """Whether `current_player` organizes a club that `target` belongs to,
-    and `target` has no LINE identity to speak for themselves with. The
-    narrow case where acting on someone else's profile is legitimate:
-    they only exist because an organizer typed their name in.
+    """Whether `current_player` organizes a club of `target`, and
+    `target` has no LINE account to act for themselves: they exist
+    only because somebody typed their name.
     """
     if target.line_user_id is not None:
         return False
@@ -291,10 +263,8 @@ def _require_organizer(db: Session, club_id: int, current_player: PlayerRow) -> 
 def _require_self_or_organizer(
     db: Session, club_id: int, current_player: PlayerRow, target_player_id: int
 ) -> None:
-    """Lets a member act on their own attendance/substitute, and lets
-    the club's organizer act on anyone's — the same "self, or the
-    organizer" shape the attendance and billing rules describe for absences, signups,
-    and substitutes throughout.
+    """A member may act on their own attendance and substitutes; the
+    club's organizer may act on anyone's.
     """
     if current_player.id == target_player_id:
         return
@@ -308,18 +278,10 @@ def _require_self_or_organizer(
 def _require_may_sign_up(
     db: Session, club_id: int, current_player: PlayerRow, target: PlayerRow
 ) -> None:
-    """Signing up is deliberately looser than the rest of
-    _require_self_or_organizer, because "+1, I'm bringing a friend" is
-    how drop-ins actually happen — the friend isn't in LINE, has no way
-    to tap anything, and the member bringing them is the one who pays
-    and vouches for them.
-
-    So a club member may sign up anyone who has no LINE identity of
-    their own, on the same reasoning as _may_edit_accountless_player:
-    an accountless player exists only because somebody typed their
-    name, and can't act for themselves. Signing up someone who *does*
-    have an account stays restricted to that person or the organizer —
-    a drop-in costs money, and nobody may commit a real user to it.
+    """A club member may sign up anyone without a LINE account (a friend
+    they bring cannot act for themselves). Somebody with an account
+    may only be signed up by themselves or the organizer: a drop-in
+    costs money, and nobody may commit a real user to it.
     """
     if current_player.id == target.id:
         return
@@ -341,9 +303,8 @@ def _require_may_sign_up(
 
 
 def _gender(value: str | None) -> Gender | None:
-    """`PlayerRow.gender` is a plain column; every write to it goes
-    through `Gender`-typed input (GenderUpdate, SubstituteCreate), so
-    this narrows the read side back to that same type for callers.
+    """Narrows the plain `gender` column back to `Gender`; every write
+    goes through Gender-typed input.
     """
     if value == "male" or value == "female":
         return cast(Gender, value)
@@ -354,27 +315,23 @@ _TAIWAN = timezone(timedelta(hours=8))
 
 
 def _now_in_taiwan() -> datetime:
-    """Wall-clock time where the club plays, without a zone — the same
-    terms a game's date and start time are stored in."""
+    """Wall-clock time where the clubs play, without a zone: the terms
+    game dates and start times are stored in.
+    """
     return datetime.now(UTC).astimezone(_TAIWAN).replace(tzinfo=None)
 
 
 def _today_in_taiwan() -> date:
-    """A change deadline is about calendar days from the group's own
-    perspective, not the server's UTC clock — using UTC for "today"
-    would flip the day boundary 8 hours too early every night.
+    """Today in the clubs' own time zone; UTC would turn the day over
+    eight hours early.
     """
     return datetime.now(UTC).astimezone(_TAIWAN).date()
 
 
 def is_developer(player: PlayerRow) -> bool:
-    """Whether this person may read everybody's problem reports.
-
-    One environment variable, `DEVELOPER_LINE_USER_ID`, rather than a role
-    in the database: the developer need not belong to any club, and a role
-    that can be granted through the app is a role that can be granted by
-    mistake. Unset means nobody — routes/reports.py answers 503 rather than
-    guessing, the same rule the invite secret follows.
+    """Whether this person is the developer, set by
+    `DEVELOPER_LINE_USER_ID` rather than a database role, so it cannot
+    be granted through the app. Unset means nobody.
     """
     developer = os.environ.get("DEVELOPER_LINE_USER_ID")
     return bool(developer) and player.line_user_id == developer

@@ -40,24 +40,14 @@ router = APIRouter()
 def identify_player(
     payload: PlayerIdentify, db: Session = Depends(get_db)
 ) -> PlayerIdentifyOut:
-    """Called once per LIFF page load, right after LIFF resolves. The
-    one endpoint that verifies a token itself rather than depending on
-    get_current_player: there's no Player row to look up yet on a first
-    visit, so identity has to come from the token directly. Two cases:
+    """Called on every LIFF page load. The one endpoint that verifies the
+    ID token itself, since a first visit has no Player yet.
 
-    1. This line_user_id has been seen before — this is a returning
-       player. Sync their avatar, but preserve the name they chose in
-       VolleyFlow. LINE's display name is only the initial suggestion.
-    2. Never seen before — a genuinely new person. Create them; they
-       exist but aren't a fixed member of any season until the organizer
-       promotes them from a season's join-pool (see list_join_pool).
-
-    Deliberately does not try to auto-claim an existing name-only Player
-    by matching display_name — the organizer's own account of who's who
-    is more trustworthy than a name-string guess, and a wrong guess
-    would silently hand someone else's ledger history to a stranger.
-    Reconciling a real person's pre-LIFF record with their LINE identity
-    is a manual, organizer-driven action.
+    A known LINE user gets their avatar refreshed and keeps the name
+    they chose in the app. A new one is created, belonging to no
+    season until the organizer adds them. Never matched to an existing
+    typed-in player by name: a wrong guess would hand somebody's
+    ledger to a stranger, so linking is the organizer's decision.
     """
     try:
         line_user_id = auth.verify_id_token(payload.id_token)
@@ -101,30 +91,16 @@ def identify_player(
 def check_line_reachable(
     current_player: PlayerRow = Depends(get_current_player),
 ) -> LineReachableOut:
-    """Whether LINE would actually deliver a push to the caller.
+    """Whether LINE would deliver a push to the caller (whether they
+    added the Official Account).
 
-    Only ever about the caller themselves, and that is the design, not
-    a limitation. The obvious alternative — reporting this for every
-    organizer of a club — would tell organizer A something only
-    organizer B can act on, while exposing B's account state to A for
-    no benefit.
-
-    Deliberately not folded into POST /players/identify, which runs on
-    every LIFF page load and is otherwise pure database work. This
-    makes an outbound call to LINE; putting it there would charge every
-    page open a network round trip to answer a question only the
-    management screen asks.
-
-    `line_client` is imported as a module and called through it, so a
-    test can replace is_reachable — the same reason `auth` is imported
-    that way, and for the same failure if it isn't (tests/api/conftest).
+    Kept out of POST /players/identify, which runs on every page load,
+    because it calls LINE. `line_client` is called through the module
+    so tests can replace it.
     """
     if current_player.line_user_id is None:
-        # A name-only player, added by hand and with no LINE account to
-        # reach. get_current_player needs a token, so this is close to
-        # unreachable in practice — but "no account" is not "not a
-        # friend", and answering false would offer them a fix that
-        # would not help.
+        # No LINE account: "cannot be reached" is not "has not added the
+        # friend", so the answer is unknown, not false.
         return LineReachableOut(reachable=None)
     return LineReachableOut(
         reachable=line_client.is_reachable(current_player.line_user_id)
@@ -138,20 +114,9 @@ def set_player_gender(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> MemberOut:
-    """Self-reported by the player — never billing-relevant, only shown
-    on the roster so a game's expected male/female split is visible.
-
-    Yours to set, and an organizer may set it for anyone in their club.
-
-    It used to be restricted to players with no LINE account, on the
-    reasoning that anyone who can open the app should own their own
-    profile. In practice the roster's male/female split is what the
-    organizer plans a night around, and a member who never filled theirs
-    in left it wrong with no way for the organizer to correct it. Opened
-    up on 2026-09-30 at the organizer's request. Renaming is deliberately
-    *not* included: a name is how a person is addressed, and the two
-    stopped sharing a permission helper so that loosening this one could
-    not loosen that one by accident.
+    """Sets a player's gender, shown on the roster; never used by
+    billing. The player may set their own, and an organizer may set
+    anyone's in their club.
     """
     player = _get_player_or_404(db, player_id)
     if current_player.id != player_id and not _organizes_a_club_of(
@@ -179,24 +144,17 @@ def set_player_name(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> MemberOut:
-    """What a player is called on the roster is theirs to set, same
-    self-only reasoning as set_player_gender. Ledger entries and season
-    membership key off player_id, never off this string, so renaming
-    never touches billing history — the domain model's "one person, one
-    name, for life" tracks the id; this is just the label. Runs through
-    Names only need disambiguating inside clubs the player actively belongs
-    to. A same-named person elsewhere in VolleyFlow is unrelated and must not
-    force a global ``(2)`` suffix.
+    """Renames a player. Billing keys off the player id, never the name.
+    A player may rename themselves, and an organizer may rename
+    somebody without a LINE account. Names are kept distinct only
+    within the clubs the player belongs to.
     """
     player = _get_player_or_404(db, player_id)
     if current_player.id != player_id and not _may_edit_accountless_player(
         db, current_player, player
     ):
-        # Same rule as set_player_gender, which allowed this from the
-        # start. Without it an organizer who mistypes a guest's name can
-        # never correct it — the guest has no account to fix it from
-        # themselves — while the gender on the very same row stays
-        # editable, which is an arbitrary place to draw the line.
+        # An organizer may rename somebody without an account, who cannot
+        # fix it themselves.
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "You can only rename yourself, or someone you added who has no account",

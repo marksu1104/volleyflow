@@ -1,8 +1,7 @@
-"""Pydantic request/response models — the API's wire format.
+"""Pydantic request and response models: the API's wire format.
 
-Kept separate from db/models.py on purpose: what a client sends and
-receives isn't the same shape as a database row (a request has no id
-yet; a response doesn't need every internal column).
+Separate from db/models.py because what a client sends and receives is
+not the shape of a database row.
 """
 
 from datetime import date, datetime, time
@@ -26,11 +25,9 @@ ClubName = Annotated[
 
 class ClubCreate(BaseModel):
     name: ClubName
-    """Whoever creates the club becomes its organizer — see
-    routes.create_club. Who "whoever" is comes from the caller's
-    verified LINE identity (routes._get_current_player), not a
-    client-supplied id: letting the body name an arbitrary player_id
-    would let anyone make anyone else the organizer of a new club."""
+    """The caller becomes the club's organizer, identified by their
+    verified LINE token, never by an id in the body.
+    """
 
 
 class ClubUpdate(BaseModel):
@@ -44,19 +41,16 @@ class JoinApproval(BaseModel):
 
 class ClubJoin(BaseModel):
     invite: str
-    """The token from the club's invite link. Required: without it any
-    signed-in caller could join any club by trying ids in order — see
-    routes/clubs.join_club."""
+    """The token from the club's invite link. Required, so nobody can
+    join clubs by trying ids.
+    """
     wants_fixed_membership: bool | None = None
     """What they ask to be: a fixed member, or here for single games."""
 
 
 class ClubGuestAdd(BaseModel):
     """An accountless person the organizer wants to keep in the club.
-
-    This deliberately does not name a season. A visitor can later be put
-    on a fixed roster, but creating them must not create a season-fee
-    charge as a side effect.
+    Names no season, so creating them never charges a season fee.
     """
 
     name: str
@@ -68,26 +62,19 @@ class ClubOut(BaseModel):
     name: str
     developer_view: bool = False
     """True when the caller sees this club only because they are the
-    developer — the management pages say so, so nobody mistakes another
-    club's books for their own."""
+    developer; the management pages say so.
+    """
     role: str | None = None
-    """The caller's role in this club — "organizer" or "member".
-
-    Carried so the management pages can list only the clubs the caller
-    actually organizes. Without it their club picker offered every club
-    they merely belong to, which put a management screen in front of an
-    ordinary member. None on GET /clubs/{id}, the invite-link name
-    lookup, where the caller has no role yet by definition.
+    """The caller's role in this club, "organizer" or "member", so the
+    management pages list only clubs they organize. None on the invite
+    lookup, where the caller has no role yet.
     """
 
 
 class InviteOut(BaseModel):
-    """The join-link token for a club, and what it resolves to.
-
-    `token` is only present on GET /clubs/{id}/invite (the organizer
-    generating a link to share); GET /invites/{token} (a visitor opening
-    that link) only needs to answer "whose invite is this", not echo the
-    token back. See routes.get_club_invite and routes.resolve_invite.
+    """A club's invite token and the club it opens. `token` is only
+    returned to the organizer generating the link (GET
+    /clubs/{id}/invite).
     """
 
     club_id: int
@@ -101,26 +88,17 @@ class MyClubOut(BaseModel):
     role: str
     """"organizer" or "member" in this specific club."""
     wants_fixed_membership: bool | None = None
-    """See ClubMemberRow.wants_fixed_membership — null means this person
-    was never asked, which is what the member page uses to decide whether
-    to ask them."""
+    """See ClubMemberRow.wants_fixed_membership; null means they were
+    never asked.
+    """
     status: str = "active"
     """'pending' until the organizer approves them; see ClubMemberRow.status."""
     pending_count: int = 0
     """For an organizer: how many people are waiting to be approved."""
     balance: Decimal = Decimal(0)
-    """This player's money in this club. Positive: the organizer owes
-    them. Negative: they owe.
-
-    Carried on the club row so that "where do I stand everywhere" is one
-    request rather than one per club. The profile page used to fetch a
-    whole entry history per club to display a single number each, which
-    is what made 我的球隊 take so long to appear.
-
-    Deliberately one figure per club and never a total: balances do not
-    flow between clubs (docs/billing-rules.md, "Ledger"), so a summed
-    number would describe money that does not exist. Any adding up is
-    the screen's business, and only as a display.
+    """This player's money in this club; positive means the organizer
+    owes them. One figure per club and never a total, since balances
+    do not move between clubs.
     """
 
 
@@ -138,25 +116,23 @@ class ClubMemberOut(BaseModel):
     role: str
     """"organizer" or "member" — see ClubMemberRow."""
     status: Literal["active", "pending"] = "active"
-    """Active club members are returned normally; pending rows only appear
-    for an organizer who explicitly requests them."""
+    """Pending members appear only when an organizer asks for them."""
     wants_fixed_membership: bool | None = None
-    """See ClubMemberRow.wants_fixed_membership. Shown to the organizer so
-    the join pool distinguishes "waiting to be put on the roster" from
-    "here for the odd game"."""
+    """See ClubMemberRow.wants_fixed_membership: tells "waiting for the
+    roster" apart from "here for the odd game".
+    """
 
 
 class SeasonCreate(BaseModel):
     total_venue_cost: Decimal
     ac_surcharge: Decimal = Decimal("0")
     """What one game's air conditioning adds, on the same terms as
-    total_venue_cost — both are what the club actually pays, so a
-    discounted season takes the discounted surcharge. Zero means the
-    venue bundles it, and every game then costs the same."""
+    total_venue_cost. Zero when the venue includes it.
+    """
     air_conditioned_dates: list[date] = Field(default_factory=list)
-    """Which of `game_dates` are forecast to need the air conditioning.
-    A forecast only: each game can be corrected on the day — see
-    routes.set_game_air_conditioning."""
+    """Which of `game_dates` are forecast to need the air conditioning;
+    each game can be corrected on the night.
+    """
     game_dates: list[date] = Field(min_length=1)
     member_names: list[str] = Field(min_length=1)
     capacity: int = 18
@@ -168,10 +144,9 @@ class SeasonCreate(BaseModel):
 
 
 class SeasonUpdate(BaseModel):
-    """A partial update — only fields actually present in the request
-    body are touched (see routes.update_season's use of
-    `exclude_unset`), so e.g. clearing `location` back to null and
-    leaving it alone are distinguishable requests.
+    """A partial update: only fields present in the body are touched
+    (`exclude_unset`), so clearing `location` and leaving it alone are
+    different requests.
     """
 
     total_venue_cost: Decimal | None = None
@@ -187,10 +162,9 @@ class SeasonUpdate(BaseModel):
 class MemberAdd(BaseModel):
     player_name: str
     gender: Gender | None = None
-    """Only used when this name is new to the club. Someone added by name
-    has no account to set it from themselves, and the roster's male/female
-    count needs it — so it's offered at the one moment the organizer is
-    already typing them in."""
+    """Used only when the name is new to the club, so the roster's
+    male/female count has it.
+    """
 
 
 class AirConditioningUpdate(BaseModel):
@@ -199,15 +173,11 @@ class AirConditioningUpdate(BaseModel):
 
 class AirConditionedDatesUpdate(BaseModel):
     dates: list[date] = Field(default_factory=list)
-    """Which of this season's games are down as needing the air
-    conditioning. The whole set is replaced, so a date left out is turned
-    off.
-
-    This corrects what was *forecast* when the season was set up, and so
-    deliberately leaves `total_venue_cost` alone: the club's bill has not
-    changed, only which nights the air-conditioning part of it belongs
-    to. routes.set_game_air_conditioning is the other case — the AC
-    really did run, or really didn't, and the bill moves with it."""
+    """The games forecast to need the air conditioning; the whole set is
+    replaced. Corrects the forecast only, so `total_venue_cost` stays
+    the same (unlike routes.set_game_air_conditioning, for what
+    actually ran).
+    """
 
 
 class AirConditionedPreviewGame(BaseModel):
@@ -218,9 +188,9 @@ class AirConditionedPreviewGame(BaseModel):
 
 
 class AirConditionedPreviewOut(BaseModel):
-    """What a corrected forecast would cost: every game's per-person
-    share before and after, and a member's season fee before and after.
-    Nothing is written — see seasons.preview_air_conditioned_dates."""
+    """What a corrected forecast would cost: each game's share and a
+    member's season fee, before and after. Nothing is written.
+    """
 
     season_fee_before: Decimal
     season_fee_after: Decimal
@@ -247,8 +217,9 @@ class SeasonOut(BaseModel):
 
 
 class SeasonSummaryOut(BaseModel):
-    """One row in the season picker — enough to label a season without
-    fetching its full detail (dates, not an opaque id)."""
+    """One row in the season picker: enough to label a season without its
+    detail.
+    """
 
     id: int
     first_game_date: date
@@ -262,8 +233,9 @@ class AbsenceCreate(BaseModel):
     player_name: str
     game_id: int
     substitute: "SubstituteCreate | None" = None
-    """Who covers, named with the absence. The slot then goes straight to
-    them and is never offered to the waitlist."""
+    """A substitute named with the absence; the slot goes straight to
+    them and is never offered to the queue.
+    """
 
 
 class AbsenceOut(BaseModel):
@@ -282,9 +254,8 @@ class AbsenceCancelOut(BaseModel):
     cancelled_at: datetime
     released_player_id: int | None = None
     """Who went back to the queue because this member is playing after
-    all. The slot only opened because it was released, so taking that
-    back closes it — but the screen has to name the person, or they
-    disappear off the roster with no explanation."""
+    all, so the screen can name them.
+    """
 
 
 class SubstituteCreate(BaseModel):
@@ -295,9 +266,7 @@ class SubstituteCreate(BaseModel):
 class DropInCreate(BaseModel):
     player_name: str
     game_id: int
-    # Only ever fills a gender in, never overwrites one — a guest being
-    # brought by a member is usually a brand new name, and the roster
-    # shows 男/女 because team balance is decided off it.
+    # Only ever fills a gender in, never overwrites one.
     gender: Gender | None = None
 
 
@@ -307,22 +276,15 @@ class DropInOut(BaseModel):
     player_id: int
     game_id: int
     displaced_player_id: int | None = None
-    """Who went back to the waitlist to make room for a named substitute.
-
-    Only ever set by PUT /absences/{id}/substitute: recording an absence
-    hands the empty slot straight to the queue, so naming the person you
-    actually wanted usually means somebody has to step back out. The
-    screen has to be able to say who, or a player simply vanishes off
-    the roster with no explanation."""
+    """Who went back to the queue to make room for a named substitute, so
+    the screen can name them.
+    """
 
 
 class DropInBatchEntry(BaseModel):
-    """One person in a "+1, and I'm bringing two friends" signup.
-
-    Within a club a name is one person (decided 2026-09-16): a bare name
-    that already exists is that person, and two real people who share a
-    name are told apart by what's typed, e.g. 小明（高）. `player_id`
-    picks somebody from the list explicitly.
+    """One person in a group signup. Within a club a name is one person;
+    two people who share a name are told apart by what is typed, e.g.
+    小明（高）. `player_id` picks somebody explicitly.
     """
 
     player_name: str
@@ -331,9 +293,8 @@ class DropInBatchEntry(BaseModel):
 
     @model_validator(mode="after")
     def _gender_required_for_new_people(self) -> "DropInBatchEntry":
-        # The roster's 男/女 tags are what the team is picked from, so a
-        # blank is a hole someone has to chase later. An existing player
-        # is exempt: theirs is already on file.
+        # New names need a gender for the roster's male/female count;
+        # existing players already have one.
         if self.player_id is None and self.gender is None:
             raise ValueError("gender is required when signing up a new person")
         if not self.player_name.strip():
@@ -342,12 +303,9 @@ class DropInBatchEntry(BaseModel):
 
 
 class DropInBatchCreate(BaseModel):
-    """Signing several people up is one request, not several.
-
-    Capacity has to be decided for the whole group at once, under the
-    same row lock: three sequential requests can interleave with someone
-    else's and let the game go over capacity, and they can also half-
-    succeed, which is the worst state to leave money in.
+    """Several people signed up in one request, so capacity is decided
+    for the whole group under one lock and the group cannot
+    half-succeed.
     """
 
     people: list[DropInBatchEntry] = Field(min_length=1, max_length=10)
@@ -358,9 +316,9 @@ class DropInBatchOut(BaseModel):
 
 
 class WaitlistCancelOut(BaseModel):
-    """A queue place is deleted outright, not marked cancelled — it
-    carries no money and no history worth keeping, so there is no
-    cancelled_at to report."""
+    """A queue place given up. Queued signups were never charged, so no
+    money moves.
+    """
 
     id: int
     player_id: int
@@ -368,20 +326,11 @@ class WaitlistCancelOut(BaseModel):
 
 
 class WaitlistPromote(BaseModel):
-    """The organizer putting a specific queued person on the court.
+    """The organizer putting a specific queued person on court,
+    overriding the queue's order.
 
-    Automatic promotion is strictly first-queued-first,
-    and stays that way. This is the manual override, because the person
-    at the front of the queue is often the one who can't make it
-    tonight — the organizer knows that and the queue doesn't.
-
-    `replacing_drop_in_id` is what makes the choice possible without
-    breaking the capacity cap. Once a game is full the only way to bring
-    somebody in is to take somebody out, and doing that as two requests
-    means the cancellation's own automatic promotion fills the slot with
-    the wrong person first: each of those is a real charge and a real
-    refund on somebody's ledger. One request swaps them directly, so the
-    only money that moves belongs to the two people actually swapping.
+    `replacing_drop_in_id` names who comes off a full game, so the
+    swap is one request and only those two ledgers move.
     """
 
     replacing_drop_in_id: int | None = None
@@ -423,11 +372,9 @@ class MemberOut(BaseModel):
     gender: Gender | None = None
     avatar_url: str | None = None
     linked: bool
-    """Whether this player has claimed a LINE identity. False means the
-    organizer typed their name in and they've never opened the app — so
-    they can't record their own absence, sign themselves up, or set their
-    own gender, and somebody has to do it for them. Worth showing on a
-    roster rather than leaving the organizer to guess."""
+    """Whether this player has a LINE account. False means somebody typed
+    their name in, so others have to act for them.
+    """
     fee_notice_sent_at: datetime | None = None
     """When this member was sent this season's 繳費通知, if they were."""
 
@@ -441,9 +388,9 @@ class DisplacedDropInOut(BaseModel):
 
 class SeasonMemberAddOut(MemberOut):
     displaced_drop_ins: list[DisplacedDropInOut] = Field(default_factory=list)
-    """Future signups moved back to the waitlist because this fixed member
-    took priority. Returned so the organizer sees who moved instead of a
-    row silently disappearing from a later game's attendance list."""
+    """Signups moved back to the queue because this fixed member took
+    priority, so the organizer sees who moved.
+    """
 
 
 class GenderUpdate(BaseModel):
@@ -457,41 +404,30 @@ class NameUpdate(BaseModel):
 class PlayerLink(BaseModel):
     line_player_id: int
     """The Player row created when this person opened the app with LINE,
-    to be folded into the roster entry the organizer typed in earlier —
-    see routes.link_player."""
+    to be folded into their roster entry; see routes.link_player.
+    """
 
 
 class GameCancel(BaseModel):
     refunded: bool
-    """True: CANCELLED_REFUNDED — the venue returned this game's cost, so
-    billable_games drops by one and every current member is credited
-    share_per_game back. False: CANCELLED_UNREFUNDED — the venue cost
-    was already paid regardless, so nobody's charge changes. See
-    docs/billing-rules.md "Game cancellation"."""
+    """True: CANCELLED_REFUNDED, the venue returned this game's cost, so
+    every member is credited that game's share. False:
+    CANCELLED_UNREFUNDED, nobody's charge changes. See
+    docs/billing-rules.md "Game cancellation".
+    """
 
 
-# `date` is a field name on GameUpdate below, and a field *with a
-# default* binds that name in the class body — which leaves Pydantic
-# resolving the annotation `date | None` against None instead of the
-# type, and raises `unsupported operand type(s) for |` at import time.
-# GameDateUpdate before it had no default, so `date: date` only
-# annotated and never bound, which is why this never came up. Aliased
-# here so the field can keep the name the API actually sends.
+# `date` is also a field name on GameUpdate below; with a default, the field
+# would shadow the type in the class body and break `date | None`.
 _DateType = date
 
 
 class GameUpdate(BaseModel):
-    """A partial update to one game — only the fields actually present in
-    the request body are touched (see routes.games.update_game's use of
-    `exclude_unset`), so putting this night back on the season's own
-    venue (`location` sent as null) and leaving it alone stay
-    distinguishable requests. Same shape, and the same reason, as
-    SeasonUpdate.
+    """A partial update to one game: only fields present in the body are
+    touched, as with SeasonUpdate.
 
-    None of these move money. A date change is a move, not a
-    cancellation: the season keeps the same number of games at the same
-    share, so nobody's charge goes with it. Location and time are
-    display-only, like the season's own pair.
+    A date change is a move, not a cancellation, so it moves no money;
+    location and time are display-only.
     """
 
     date: _DateType | None = None
@@ -499,24 +435,21 @@ class GameUpdate(BaseModel):
     location: str | None = None
     start_time: time | None = None
     end_time: time | None = None
-    """This one night's venue and time. Null puts it back on the
-    season's."""
+    """This night's own venue and time; null puts it back on the
+    season's.
+    """
     venue_cost_delta: Decimal | None = None
-    """What this night costs the club above (or below) a normal one.
-
-    The only field here that moves money: it shifts the season's
-    `total_venue_cost` and re-prices every member through adjustment
-    entries. Null clears it back to zero. See
-    docs/billing-rules.md, "A different venue for one night"."""
+    """What this night costs above (or below) a normal one. The only
+    field here that moves money: it changes the season's total and
+    re-prices every member. Null clears it. See docs/billing-rules.md
+    "A different venue for one night".
+    """
 
 
 class PlayerIdentify(BaseModel):
-    """What the LIFF page sends right after LIFF resolves. id_token
-    (from liff.getIDToken()) is verified server-side — see
-    api.auth.verify_id_token — and is the only source of line_user_id;
-    display_name/picture_url stay client-reported, since spoofing your
-    own displayed name isn't an identity problem the way spoofing whose
-    account you become would be.
+    """What a LIFF page sends after LIFF starts. The ID token is verified
+    with LINE and is the only source of the LINE user id; the display
+    name and picture are as the client reports them.
     """
 
     id_token: str
@@ -527,37 +460,28 @@ class PlayerIdentify(BaseModel):
 class PlayerIdentifyOut(BaseModel):
     id: int
     name: str
-    """The player's VolleyFlow name. LINE supplies the initial value, but a
-    name edited in the app remains authoritative on later visits."""
+    """The player's name in the app. LINE supplies the first value; a
+    name edited in the app wins afterwards.
+    """
     avatar_url: str | None = None
     gender: Gender | None = None
     is_developer: bool = False
-    """Whether this person may read everybody's problem reports — what the
-    profile page reads to decide whether to show the way in at all. The
-    server checks again on every report request; this only hides a link."""
+    """Whether to show the way into problem reports. The server checks
+    again on every report request.
+    """
 
 
 class LineReachableOut(BaseModel):
     reachable: bool | None = None
-    """Whether LINE would actually deliver a push to this person: true if
-    they have added the Official Account as a friend, false if they have
-    not, and null when the question could not be asked at all — no
-    token, or LINE itself unreachable.
-
-    Three states rather than two, on purpose. The screen offers to add
-    the friend only on a definite false; prompting somebody who added
-    it months ago would read as the app being broken, and "we couldn't
-    check" is not evidence that they haven't."""
+    """Whether LINE would deliver a push: true if they added the Official
+    Account, false if not, null if it could not be checked. The screen
+    prompts only on a definite false.
+    """
 
 
 class GuestOut(BaseModel):
-    """Somebody the caller has brought to this club before.
-
-    `times` and `last_played` are there to tell two people with the same
-    name apart — the whole reason this list exists is that retyping a
-    name creates a second person, and a picker that shows "王小明 · 打過
-    6 次 · 上次 9/15" beside "王小明 · 打過 1 次 · 上次 7/2" makes the
-    right one obvious.
+    """Somebody the caller has brought before. `times` and `last_played`
+    tell two people with the same name apart.
     """
 
     id: int
@@ -575,12 +499,11 @@ class DropInSummary(BaseModel):
     signed_up_by_me: bool = False
     """Themselves, or a guest they queued — whether they may take it back."""
     avatar_url: str | None = None
-    """Their LINE profile picture, refreshed each time they sign in; None
-    for anybody without a LINE account. Shown on the roster in place of
-    their initial — only to people in the same club, like the name."""
+    """Their LINE profile picture, or None without a LINE account. Shown
+    only to people in the same club.
+    """
     brought_by_name: str | None = None
-    """Who queued this person, when it wasn't themselves — the same tag
-    the confirmed drop-ins carry (DropInDetailOut.brought_by_name)."""
+    """Who queued this person, when it was not themselves."""
 
 
 class AbsenceDetailOut(BaseModel):
@@ -588,23 +511,17 @@ class AbsenceDetailOut(BaseModel):
     """Pass this to /absences/{id}/cancel or /absences/{id}/substitute."""
     player_name: str
     covered_by: str | None
-    """The 代打 this member personally arranged, by name — set only when
-    somebody used /absences/{id}/substitute. Never filled in by the FIFO
-    match: that is a billing fact, not a person's arrangement, and
-    presenting it as one told a member that a stranger who happened to
-    sign up was "their" substitute. See `refunded`."""
+    """The 代打 this member personally arranged, by name. Never set by the
+    FIFO match, which is a billing fact, not an arrangement. See
+    `filled_by`.
+    """
     avatar_url: str | None = None
-    """Their LINE profile picture, refreshed each time they sign in; None
-    for anybody without a LINE account. Shown on the roster in place of
-    their initial — only to people in the same club, like the name."""
+    """Their LINE profile picture, or None without a LINE account."""
     filled_by: str | None = None
-    """Whoever is standing in this slot, by name — the arranged 代打 when
-    there is one, otherwise whichever 臨打 the FIFO match landed on.
-
-    Having a name here is what makes the share come back (settlement.py),
-    so this doubles as "is this refunded". Reported separately from
-    `covered_by` on purpose: both name a person, but only `covered_by`
-    means that person was asked."""
+    """Whoever is standing in this slot: the arranged 代打, else the
+    drop-in the FIFO match landed on. A name here means the absence is
+    refunded.
+    """
 
 
 class DropInDetailOut(BaseModel):
@@ -613,31 +530,18 @@ class DropInDetailOut(BaseModel):
     player_name: str
     gender: Gender | None = None
     avatar_url: str | None = None
-    """Their LINE profile picture, refreshed each time they sign in; None
-    for anybody without a LINE account. Shown on the roster in place of
-    their initial — only to people in the same club, like the name."""
+    """Their LINE profile picture, or None without a LINE account."""
     covering: str | None
-    """The absent member this drop-in was personally named to stand in
-    for — only for an explicit 代打. Somebody who signed themselves up is
-    a 臨打 and covers nobody in particular, even when their fee is what
-    refunds an absence."""
+    """The absent member this drop-in was named to stand in for; only for
+    an explicit 代打.
+    """
     signed_up_by_me: bool = False
-    """Whether the caller is the one who put this person on the list —
-    themselves, or a guest they brought. What the screen uses to decide
-    whether to offer them a cancel button; the server checks the same
-    thing again before allowing it."""
+    """Whether the caller put this person on the list (themselves or a
+    guest they brought), so the screen knows whether to offer cancel.
+    The server checks again.
+    """
     brought_by_name: str | None = None
-    """Who signed this person up, when it wasn't themselves — null for
-    somebody who signed up on their own account.
-
-    The money screen has shown this since it was built (see
-    money._who_brought), on the reasoning that it answers "who do I
-    collect this from" and belongs nowhere else. The roster was
-    deliberately left without it as noise. Reversed 2026-09-23 at the
-    organizer's request: on a night with several guests, "who is this
-    person and why are they here" is a question the roster gets asked
-    too, and the name answers it in the place people are already
-    looking."""
+    """Who signed this person up, when it was not themselves."""
 
 
 class GameDetailOut(BaseModel):
@@ -645,39 +549,28 @@ class GameDetailOut(BaseModel):
     date: date
     status: GameStatus
     locked: bool
-    """Whether *the caller* can still change this game: past the season's
-    change deadline, absences, signups and their cancellations are all
-    rejected. False for the club's organizer whatever the date, since the
-    deadline exists to stop the roster shifting under them and they're
-    the one who has to record what actually happened — so this is
-    answered per caller, not per game."""
+    """Whether the caller can no longer change this game. Never true for
+    the club's organizer, so it is per caller, not per game.
+    """
     past_deadline: bool = False
-    """Whether the game is past its change deadline, whoever is asking.
-    The member screen locks on this, so the organizer using it as a
-    member is held to the same deadline as everybody else (2026-10-16);
-    the management screen, which reads `locked`, is where they correct
-    a night after the fact."""
+    """Whether the game is past its change deadline, whoever asks. The
+    member screen locks on this, holding the organizer to the deadline
+    there too.
+    """
     air_conditioned: bool
-    """Whether the air conditioning ran (or is forecast to). Set when the
-    season is created and corrected on the day — see
-    routes.set_game_air_conditioning."""
+    """Whether the air conditioning ran, or is forecast to."""
     share: Decimal
-    """What this particular game costs one person. Differs between games
-    once air conditioning is priced, which is why an absence refund and
-    a drop-in's charge both key off the game rather than the season."""
+    """What this game costs one person; games can cost different amounts."""
     location: str | None = None
     start_time: time | None = None
     end_time: time | None = None
-    """This night's own venue and time, or null when it is the same as
-    the rest of the season's — which is the normal case. The screen
-    falls back to the season's pair on null rather than showing a gap;
-    see describeGameWhen in member.html. Display-only: billing never
-    reads them."""
+    """This night's own venue and time, or null when they are the
+    season's. Display only.
+    """
     venue_cost_delta: Decimal = Decimal("0")
-    """What this night cost the club above (or below) a normal one — 0
-    for almost every game. Unlike the three fields above it, this one is
-    priced: `share` already includes it. Sent so the screen can say which
-    nights carry an extra cost and warn before changing one."""
+    """What this night costs above (or below) a normal one, already
+    included in `share`.
+    """
     absences: list[AbsenceDetailOut]
     confirmed_drop_ins: list[DropInDetailOut]
     waitlist_entries: list[DropInSummary]
@@ -693,23 +586,17 @@ class SeasonDetailOut(BaseModel):
     location: str | None
     change_deadline_hours: int
     share_per_game: Decimal
-    """What one game costs one person, for a game with no air
-    conditioning. Computed here, not on the frontend: rounding happens
-    in exactly one place (pricing.shares_by_game).
-
-    No longer the only figure in play — a cooled game costs
-    `ac_surcharge / capacity` more, and each game carries its own
-    `share` below. This stays as the headline number a season is
-    described by."""
+    """What one game without air conditioning costs one person: the
+    figure a season is described by. Each game carries its own
+    `share`.
+    """
     ac_surcharge: Decimal
-    """What one game's air conditioning adds to the venue bill; 0 when
-    the venue bundles it or the club doesn't use it."""
+    """What one game's air conditioning adds to the venue bill."""
     settled_at: datetime | None
     previous_season_settled: bool = True
-    """Whether the season before this one (by first game) is settled;
-    True when there is none. The 繳費通知 waits for it, because until
-    then last season's refunds aren't on the books and the figure it
-    would send isn't final."""
+    """Whether the season before this one is settled (True when there is
+    none). The 繳費通知 waits for it.
+    """
     members: list[MemberOut]
     games: list[GameDetailOut]
 
@@ -723,13 +610,9 @@ class CashAtSettlement(BaseModel):
 
 class SeasonSettleRequest(BaseModel):
     cash: list[CashAtSettlement] = Field(default_factory=list)
-    """Whose balance is being squared in cash as part of this settlement.
-
-    Anyone left out simply keeps their balance, and a balance is already
-    club-wide rather than per-season — so "leave it for next season" is
-    the absence of an entry, not an entry of its own. That is why this
-    list is normally short: it holds only the people actually handing
-    money over or taking it back on the day."""
+    """Balances squared in cash during settlement. Anyone left out keeps
+    their balance for next season, which needs no entry.
+    """
 
 
 class FeeNoticeRecipientOut(BaseModel):
@@ -748,9 +631,9 @@ class FeeNoticeOut(BaseModel):
     sent: int
     """How many members the 繳費通知 reached."""
     unreachable: int
-    """How many it was meant for but LINE refused — no LINE account, or
-    the Official Account never added. They stay un-notified, so a later
-    send reaches them and nobody else."""
+    """How many LINE refused (no account, or the Official Account not
+    added). They stay unsent, so a later send reaches only them.
+    """
 
 
 class SeasonSettleOut(BaseModel):
@@ -760,10 +643,10 @@ class SeasonSettleOut(BaseModel):
 
 
 class PaidOutMemberOut(BaseModel):
-    """Somebody whose refund was handed over in cash after the season was
-    settled. Undoing the settlement takes the refund off their ledger, so
-    what they were paid now reads as owed back — correct bookkeeping, and
-    the one thing the organizer has to be told about by name."""
+    """Somebody whose refund was paid in cash after the season was
+    settled. Undoing the settlement makes that payment read as owed
+    back, so the organizer is told by name.
+    """
 
     player_id: int
     player_name: str
@@ -785,14 +668,14 @@ class PaymentCreate(BaseModel):
     season_id: int | None = None
     note: str | None = None
     game_id: int | None = None
-    """The night this pays for, when taken on 當天臨打 — so paying for one
-    night doesn't read as paying for the rest. Sets the season too."""
+    """The night this pays for, when taken from 當天臨打. Sets the season
+    too.
+    """
     client_token: str | None = None
-    """Generated once per intended payment by the caller. Sending the
-    same token again returns the entry already recorded instead of
-    recording a second one — so a double tap, or a retry after a request
-    that timed out on a bad connection, can't book the money twice. See
-    routes.record_payment."""
+    """Generated once per intended payment. Sending the same token again
+    returns the entry already recorded, so a double tap or a retry
+    cannot book the money twice.
+    """
 
 
 class LedgerEntryOut(BaseModel):
@@ -830,9 +713,7 @@ class ProblemReport(BaseModel):
     user_agent: str | None = None
     club_id: int | None = None
     screenshot: str | None = None
-    """A data URL (`data:image/jpeg;base64,...`). The page shrinks the
-    picture before sending — a raw phone screenshot is several megabytes,
-    and a bad connection is exactly the situation someone reports from."""
+    """A data URL. The page shrinks the picture before sending."""
 
 
 class ProblemReportOut(BaseModel):
@@ -863,14 +744,9 @@ class DeveloperClubOut(BaseModel):
 
 
 class DeveloperOverviewOut(BaseModel):
-    """What the whole installation looks like right now, for the one
-    person who maintains it.
-
-    Counts rather than rows, and no money: the job of this screen is to
-    notice something odd — a club with no season, a queue of people
-    waiting to be approved, reports piling up unread — and then go and
-    look at it properly. Anything that would show a particular person's
-    balance belongs to their own club's organizer, not here.
+    """Counts across the whole installation, for the developer: enough to
+    notice something odd and go look. No money and no individual's
+    balance.
     """
 
     clubs: int
@@ -889,8 +765,7 @@ class DeveloperOverviewOut(BaseModel):
     reports: int
     unread_reports: int
     newest_clubs: list[str]
-    """Names only, newest first, so a club created minutes ago is
-    recognisable without opening anybody's books."""
+    """Names only, newest first."""
     active_clubs: int = 0
     """Clubs with a game on within 30 days either side of today — in
     use, as against the test clubs that never got going."""
@@ -928,12 +803,8 @@ class AuditEventOut(BaseModel):
 
 
 class PlayerBalanceOut(BaseModel):
-    """One player's money in one club, summed three ways at once.
-
-    The ledger page needs all three per person, and used to fetch a whole
-    entry history per member to add them up in the browser — one request
-    each, forty on a page load for a normal-sized club. The database can
-    do the same arithmetic for everyone in a single pass.
+    """One player's money in one club, summed several ways at once in a
+    single query for everyone on the ledger page.
     """
 
     player_id: int
@@ -947,20 +818,18 @@ class PlayerBalanceOut(BaseModel):
     """Just the season-fee entries for that season, before any payment,
     which is what "本季季費" means on screen."""
     through_season: Decimal
-    """What is due by the season asked about: its own entries and every
-    earlier season's, never a season that starts later. What 季費 and
-    季末結算 act on. Equal to `balance` when no season is asked about."""
+    """What is due by the season asked about: its own and earlier
+    seasons' entries, never a later season's. Equal to `balance` when
+    no season is asked about.
+    """
     nights: list[DropInNightOut] = []
-    """Each night of the season asked about that they're on court as a
-    drop-in — what it cost and what was taken for it. Empty when no
-    season is asked about."""
+    """Each night of the season asked about that they play as a drop-in,
+    with what it cost and what was paid. Empty when no season is asked
+    about.
+    """
     brought_by: str | None = None
-    """Who signed this player up, when they're a guest somebody brought.
-
-    Only meaningful on the money screen: the fee is on this player's
-    ledger but a guest has no account to pay from, so this names the
-    member who actually hands over the cash. None for anyone who signed
-    themselves up.
+    """Who signed this guest up: the member who hands over the cash. None
+    for anyone who signed themselves up.
     """
 
 
@@ -970,10 +839,9 @@ class PlayerLedgerOut(BaseModel):
     balance: Decimal
     """Positive: the organizer owes the player. Negative: the player owes."""
     season_starts: dict[int, date] = {}
-    """First game date of every season these entries belong to. The member
-    screen leaves out seasons that start after the one it is showing —
-    their fees are charged when they are booked, but are not due yet —
-    and switches season without asking the server again."""
+    """First game date of each season these entries belong to, so the
+    member screen can leave out seasons starting after the one shown.
+    """
     entries: list[LedgerEntryOut]
 
 

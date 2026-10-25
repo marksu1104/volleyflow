@@ -1,23 +1,10 @@
-"""Problem reports: sent by anybody, read by the developer.
+"""Problem reports: sent by anybody signed in, read by the developer.
 
-Stored, not pushed. Until 2026-09-15 every report went to the developer as
-a LINE message — one push for the words and another for any screenshot —
-out of the free tier's 200 a month, the same allowance the short-roster
-alert depends on. A quiet month of use was fine; a bad week, which is
-exactly when reports arrive, would have spent the alerts' budget on
-reports about the same bug. The organizer asked whether it had to be
-LINE at all, and it didn't.
-
-The trade, stated plainly: nothing pings anybody now. `reports.html` and
-the unread count on the developer's profile page are the whole signal —
-the same choice made for crash reports on 2026-09-12, for the same reason.
-
-Most of what makes a report actionable isn't the sentence someone types,
-it's who and where — so the caller's identity, screen and browser are
-attached here rather than asked for. They are stored as text, not as
-foreign keys: a report is a snapshot of what somebody saw, and it must
-neither block deleting the club it mentions nor change if that club is
-later renamed.
+Stored rather than pushed over LINE, so they do not spend the free
+tier's messages; reports.html and the unread count on the developer's
+profile are the signal. The caller's identity, club, screen and
+browser are attached automatically and stored as text, so a report
+neither blocks deleting a club nor changes when it is renamed.
 """
 
 import base64
@@ -37,9 +24,8 @@ from volleyflow.db.models import ClubRow, PlayerRow, ProblemReportRow
 
 router = APIRouter()
 
-# Long enough to still be there when somebody gets round to reading them;
-# short enough that a free-tier database doesn't quietly fill with
-# screenshots of bugs fixed months ago.
+# Long enough to be read, short enough not to fill a free-tier database with
+# old screenshots.
 _KEEP_FOR = timedelta(days=90)
 _MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024
 _MAX_MESSAGE_CHARS = 4000
@@ -106,8 +92,7 @@ def list_reports(
     _require_developer(current_player)
     rows = (
         db.query(ProblemReportRow)
-        # Rows from before 2026-09-15 are screenshots kept only for LINE
-        # to fetch, with no words attached; there is nothing to read.
+        # Old rows with only a screenshot have nothing to read.
         .filter(ProblemReportRow.message.is_not(None))
         .order_by(ProblemReportRow.created_at.desc())
         .limit(200)
@@ -134,9 +119,9 @@ def mark_reports_read(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> None:
-    """Marks every unread report as read. Called by the reading page once
-    it has actually drawn them — a report the page failed to show hasn't
-    been read."""
+    """Marks every unread report as read. Called by the reading page
+    after it has drawn them.
+    """
     _require_developer(current_player)
     db.query(ProblemReportRow).filter(ProblemReportRow.read_at.is_(None)).update(
         {ProblemReportRow.read_at: _now()}, synchronize_session=False
@@ -150,12 +135,8 @@ def problem_report_image(
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> Response:
-    """Developer only, like the reports themselves.
-
-    This used to be public, and had to be: LINE's servers fetched it to
-    draw an image message and arrived with none of our credentials. Now
-    nothing outside the app fetches it, and a screenshot can show a name
-    and a balance, so the reason to leave it open went with LINE.
+    """A report's screenshot. Developer only: a screenshot can show a
+    name and a balance.
     """
     _require_developer(current_player)
     row = db.get(ProblemReportRow, token)
@@ -167,10 +148,8 @@ def problem_report_image(
 
 
 def _decode_screenshot(data_url: str | None) -> tuple[bytes | None, str | None]:
-    """The picture's bytes and type, or (None, None) when there isn't one.
-
-    The page shrinks it before sending — a raw phone screenshot is several
-    megabytes, and a bad connection is exactly what people report from.
+    """The picture's bytes and type, or (None, None) when there is none.
+    The page shrinks it before sending.
     """
     if not data_url:
         return (None, None)
