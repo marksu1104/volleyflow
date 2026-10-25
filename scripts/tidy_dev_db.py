@@ -1,42 +1,19 @@
-"""Delete the people that repeated seeding leaves behind in the dev
+"""Deletes the players repeated seeding leaves behind in the dev
 database.
 
-Deleting a club deliberately never deletes players: a Player is global
-and outlives any one club, so somebody who played in a
-club that closed is still the same person with the same ledger history
-next season. That is right for the product and wrong for a script that
-deletes and rebuilds the same club twenty times in an afternoon — every
-run leaves its whole cast behind, attached to nothing.
-
-Found by counting, 2026-09-12: 2,223 players in the dev branch, of which
-2,162 belonged to no club at all. Harmless for storage at that size, but
-it made a real question ("are there duplicate people in here?")
-impossible to answer by looking.
-
-Only ever removes a player who is in no club AND has no ledger entry, no
-signup, no absence and no queue place anywhere. Anything with a trace of
-having taken part is left alone and reported, because a player row that
-money points at is not litter.
+Deleting a club never deletes players (a player is global), which is
+right for the product but leaves every seed run's cast behind. Only
+removes a player in no club with no ledger entry, signup, absence or
+queue place; anything with a trace is reported and kept.
 
     uv run python scripts/tidy_dev_db.py          # count them
     uv run python scripts/tidy_dev_db.py --yes    # delete them
 
-`--drop-club "<name>"` removes a whole club and everything under it,
-which `seed_dev.py` cannot always do for itself: the API refuses to
-delete a club holding a **settled** season, correctly — those are real
-closed books — and anything that settles a season while testing leaves
-the seed club stuck, so every later seed run dies on the same refusal.
-The product rule stays as it is; this is the dev-only escape hatch for
-a database whose whole purpose is to be thrown away.
+`--drop-club "<name>"` removes a whole club, for a seed club stuck
+behind a settled season the API rightly refuses to delete.
 
-Deleting needs `VOLLEYFLOW_DEV_LOGIN=1` — the flag this project already
-uses to mean "this is a development environment", set by dev-api.ps1 and
-never set in production. A first attempt tried to recognise the dev
-branch by its hostname; Neon names every branch something like
-`ep-dawn-pine-azbsvr6x`, so there is nothing in the URL to recognise, and
-a guard that cannot tell the two apart is worse than no guard because it
-reads like one. The host is printed instead, so the person running it can
-see which database they are about to tidy.
+Deleting requires VOLLEYFLOW_DEV_LOGIN=1 (set by dev-api.ps1, never in
+production); the host is printed so you can see which database it is.
 """
 
 from __future__ import annotations
@@ -49,9 +26,8 @@ from sqlalchemy.engine import Connection
 
 from volleyflow.db.engine import database_url, get_engine
 
-# Every table that can point at a player. Listed rather than derived, so
-# adding one to the schema without thinking about this file shows up as a
-# failing count here rather than as a silently deleted person.
+# Every table that can point at a player, listed so a new one shows up here
+# instead of a person being deleted silently.
 REFERENCES = [
     ("club_members", "player_id"),
     ("ledger_entries", "player_id"),
@@ -68,12 +44,8 @@ UNREFERENCED = "SELECT id FROM players p WHERE " + " AND ".join(
 
 
 def drop_club(conn: Connection, name: str) -> None:
-    """Removes a club and everything hanging off it, children first.
-
-    Written out table by table rather than leaning on cascades, because
-    the schema deliberately has none: every delete in the product is an
-    explicit one so that "what does removing this take with it" is a
-    question the code answers rather than the database.
+    """Removes a club and everything under it, children first, table by
+    table: the schema has no cascades, so every delete is explicit.
     """
     ids = [
         row[0]

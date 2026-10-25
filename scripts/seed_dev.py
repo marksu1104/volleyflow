@@ -1,27 +1,18 @@
-"""Fill the dev database with a club that looks like a real one.
-
-The dev branch is empty, so opening the app locally shows "no club yet"
-and there is nothing to click. This puts a full season in it: a roster,
-games, leave, substitutes, a waitlist, and money owed in three different
+"""Fills the dev database with a club that looks like a real one: a
+roster, games, leave, substitutes, a queue, and money owed in three
 directions.
 
-**It goes through the HTTP API, not the database.** Ledger entries are
-written by the route handlers — charging a season fee, refunding a
-covered absence, correcting everyone when the air conditioning changes.
-Inserting rows directly would mean reimplementing all of that here, and
-the moment the copy drifted you would be developing against a set of
-books the real code would never produce. Slower, and worth it.
-
-It also doubles as a smoke test: if any of this fails, an endpoint the
-app depends on is broken.
+Goes through the HTTP API, not the database, so every ledger entry is
+written by the real route handlers rather than a copy of their logic.
+That also makes it a smoke test of the endpoints the app needs.
 
     VOLLEYFLOW_DEV_LOGIN=1 uv run uvicorn volleyflow.api.main:app --port 8000
     uv run python scripts/seed_dev.py
 
 Then open http://localhost:5500/member.html?as=周恆
 
-Refuses to run against anything but a local server, and deletes only the
-club it created — see CLUB_NAME.
+Runs only against a local server, and deletes only the club it created
+(CLUB_NAME).
 """
 
 from __future__ import annotations
@@ -57,9 +48,9 @@ MEMBERS = [
     ("宗翰", "male"),
 ]
 
-# The club's real numbers, so the ledger shows figures worth recognising:
-# 13 games, 8 of them cooled, 52290 transferred, 540 a night for the air
-# conditioning — which prices at 235 cooled and 205 plain, exactly.
+# Realistic figures: 13 games, 8 of them cooled, 52290 in total, 540 a night
+# for the air conditioning, which prices at exactly 235 cooled and 205
+# plain.
 TOTAL_VENUE_COST = "52290"
 AC_SURCHARGE = "540"
 COOLED_GAMES = 8
@@ -67,8 +58,9 @@ TOTAL_GAMES = 13
 
 
 def token_for(name: str) -> dict[str, str]:
-    """The dev-login header. See auth.verify_id_token — the name is
-    percent-encoded because HTTP headers are ASCII."""
+    """The dev-login header; the name is percent-encoded because header
+    values are ASCII.
+    """
     return {"Authorization": f"Bearer dev:{quote(name)}"}
 
 
@@ -84,8 +76,7 @@ def call(
 
 
 def join(club_id: int, name: str) -> None:
-    """Joins the way a real person does: with the club's invite link. A
-    bare club id stopped being enough on 2026-09-15."""
+    """Joins the way a real person does, with the club's invite link."""
     token = call("GET", f"/clubs/{club_id}/invite", ORGANIZER)["token"]
     member = call("POST", f"/clubs/{club_id}/join", name, {"invite": token})
     call(
@@ -121,8 +112,7 @@ def main() -> int:
     print(f"signing in as {ORGANIZER}")
     sign_in(ORGANIZER)
 
-    # Start clean, but only ever remove this script's own club — anything
-    # else in the dev database belongs to whoever put it there.
+    # Start clean, removing only this script's own club.
     for club in call("GET", "/clubs", ORGANIZER):
         if club["name"] == CLUB_NAME:
             print(f"removing the previous {CLUB_NAME} (id {club['id']})")
@@ -132,8 +122,7 @@ def main() -> int:
     club_id = club["id"]
     print(f"created club {club_id}")
 
-    # Half the season behind us and half ahead, so both a past game with
-    # settled money and a future one you can still act on are visible.
+    # Half the season past and half to come.
     dates = tuesdays_from(date.today() - timedelta(weeks=6), TOTAL_GAMES)
     season = call(
         "POST",
@@ -190,16 +179,9 @@ def main() -> int:
     )
     print("翔 took leave, uncovered — not refunded")
 
-    # Somebody in the club but not on this season's roster, bringing a
-    # friend — the ordinary drop-in case, and the one that puts a
-    # brought-by name on the money screen.
-    #
-    # Two things had to be learned here by running it. Signing in as a
-    # name that is already on the roster creates a *second* player: a
-    # roster entry is a name the organizer typed, with no identity behind
-    # it, and the app has a whole feature for joining the two up. And
-    # signing in isn't joining — an identity with no membership gets 403,
-    # which is the right answer.
+    # A club member not on the roster brings a friend: the ordinary drop-in,
+    # with a brought-by name on the money screen. Signing in creates a new
+    # player and gives no membership; joining is a separate step.
     visitor = "阿凱"
     sign_in(visitor)
     join(club_id, visitor)
@@ -216,14 +198,9 @@ def main() -> int:
     )
     print(f"{visitor} joined the club and signed up with a guest")
 
-    # Two roster entries get a sign-in of their own, because the links
-    # printed at the end of this script promised them and didn't deliver:
-    # ?as=林書妤 opened on 尚未加入任何球隊, since signing in by that name
-    # makes a *second* player rather than becoming the one on the roster.
-    # Doing it properly is the same three steps the organizer does in the
-    # app — sign in, join the club, then have the organizer say the two
-    # are the same person — so this also exercises that endpoint on every
-    # seed, which is the point of building the data through the API.
+    # Two roster entries get a LINE-style identity of their own, so the ?as=
+    # links printed at the end work: sign in, join, then the organizer links
+    # the two, which also exercises that endpoint.
     for name in ("林書妤", "詠晴"):
         identity = sign_in(name)
         join(club_id, name)
@@ -235,16 +212,9 @@ def main() -> int:
         )
     print("林書妤 and 詠晴 can sign in as themselves")
 
-    # The organizer has brought the same friend a few times, so the
-    # quick-pick list on the signup and substitute sheets has something
-    # in it — otherwise that whole feature is invisible locally until
-    # somebody has played several weeks.
-    #
-    # A member takes leave first on each of those nights, because the
-    # roster fills the court exactly: without a gap the friend lands on
-    # the waitlist, and a queue place carries no "who brought them", so
-    # the quick-pick list stayed empty. Which is also how it happens for
-    # real — somebody can't make it, somebody else brings a friend.
+    # The organizer brings the same friend a few times, so the quick-pick
+    # list has entries. A member takes leave first each night, since the
+    # roster fills the court and a queued signup records no bringer.
     for game, absentee in zip(games[3:6], ["Kevin", "Nathan", "Momo"], strict=True):
         call(
             "POST",
@@ -260,8 +230,8 @@ def main() -> int:
         )
     print(f"{ORGANIZER} has brought 老王 three times — quick-pick has entries")
 
-    # The forecast was wrong for one night: turn it off and watch every
-    # member's charge get corrected by an adjustment entry.
+    # One night's forecast was wrong: turning it off corrects every member's
+    # charge with an adjustment entry.
     call(
         "PUT",
         f"/games/{games[2]['id']}/air-conditioning",

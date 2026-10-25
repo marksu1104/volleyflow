@@ -1,23 +1,15 @@
 """Dumps every row in the database to one JSON file.
 
-The restore drill this exists for: "Neon keeps backups; nobody has ever
-tried restoring one". Neon's own point-in-time restore
-is the first line of defence and needs no script — but on the free plan
-it only reaches 6 hours back (and only 1GB of changes), which is not
-long enough for a mistake found the next day. This is the second line:
-a plain logical dump, restorable with restore_db.py regardless of how
-long ago it was taken.
-
-Reads every table from the ORM's own metadata (volleyflow.db.models.Base)
-rather than reflecting the schema at runtime, so what gets dumped is
-exactly what the models say exists — no drift between the two.
+A second line of defence after Neon's point-in-time restore, which on
+the free plan reaches only 6 hours back: a plain dump that
+restore_db.py can restore however old it is. Tables come from the
+ORM's own metadata, so the dump is exactly what the models define.
 
     uv run python scripts/backup_db.py                    # ./backups/
     uv run python scripts/backup_db.py --out somewhere.json
 
-DATABASE_URL decides which database this reads — .env's is the Neon dev
-branch; production is only ever reached through Render's own environment,
-never from here. This only reads; see restore_db.py for writing back.
+Reads whichever database DATABASE_URL names (.env holds the dev
+branch). Read-only; restore_db.py writes back.
 """
 
 from __future__ import annotations
@@ -49,13 +41,7 @@ def _json_default(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, bytes):
-        # A screenshot attached to a problem report — the one binary
-        # column. It went unnoticed until 2026-09-15 because no database
-        # this had ever been pointed at held a screenshot; CI's restore
-        # drill met the first one and the whole backup refused to write.
-        # reset_db.py backs up before it deletes, so on a production
-        # database with a single screenshot in it, emptying it for launch
-        # would have been refused too.
+        # Screenshots on problem reports are the one binary column.
         return {"__bytes__": base64.b64encode(value).decode("ascii")}
     raise TypeError(f"Don't know how to back up a {type(value).__name__}")
 
@@ -67,10 +53,8 @@ def dump(out_path: Path) -> None:
 
     data: dict[str, list[dict[str, Any]]] = {}
     with engine.connect() as conn:
-        # Base.metadata.sorted_tables is topologically ordered — parents
-        # before the children that foreign-key to them. Dumping in that
-        # order is what lets restore_db.py insert in the same order
-        # without disabling foreign key checks.
+        # Parents before children, so restore_db.py can insert in the same
+        # order without disabling foreign keys.
         for table in Base.metadata.sorted_tables:
             rows = [dict(row._mapping) for row in conn.execute(table.select())]
             data[table.name] = rows

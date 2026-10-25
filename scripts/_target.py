@@ -1,17 +1,10 @@
-"""Which database is this script about to touch, and how do we know?
+"""Which database a script is about to touch, and where that URL came
+from.
 
-Every script here reads `DATABASE_URL`, and until 2026-09-13 they each
-printed the host and left it at that. Neon names every branch something
-like `ep-dawn-pine-azbsvr6x`, so that line looks precise and tells you
-nothing: the organizer ran `find_duplicates.py` expecting to learn
-something about production and read a report about the dev branch
-without either of us noticing for a message.
-
-So the question a destructive script has to answer is not "what host"
-but "where did this URL come from". `.env` is the dev branch by this
-project's convention, and production is only ever reached by setting
-`DATABASE_URL` in the shell on purpose. That distinction is knowable,
-so it gets printed.
+Neon host names (`ep-dawn-pine-azbsvr6x`) look precise and say little,
+so the useful fact is the source: `.env` holds the dev branch by
+convention, and production is reached only by setting DATABASE_URL in
+the shell on purpose.
 """
 
 from __future__ import annotations

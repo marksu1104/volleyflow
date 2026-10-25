@@ -1,14 +1,10 @@
-"""Restores a database from a backup_db.py dump. Destructive.
+"""Restores a database from a backup_db.py dump. Destructive: every row
+is deleted and replaced with the dump's, not merged.
 
-Every row currently in the database is deleted and replaced with what
-the dump file holds — this is a *restore*, not a merge. Refuses to run
-without --yes, and prints which host it's about to do this to before it
-does anything, since DATABASE_URL is the only thing standing between
-"restore the dev branch" and "restore production."
+Refuses to run without --yes and prints the target host first, since
+DATABASE_URL is all that separates the dev branch from production.
 
     uv run python scripts/restore_db.py backups/volleyflow-20260912-090000.json --yes
-
-See backup_db.py for the dump format this reads.
 """
 
 from __future__ import annotations
@@ -38,25 +34,16 @@ def _json_object_hook(obj: dict[str, Any]) -> Any:
         return date.fromisoformat(obj["__date__"])
     if "__time__" in obj:
         return time.fromisoformat(obj["__time__"])
-    # The other half of backup_db's bytes encoding. One without the other
-    # is worse than neither: a backup that writes and then can't be
-    # restored is only discovered on the day it's needed.
+    # The other half of backup_db's bytes encoding.
     if "__bytes__" in obj:
         return base64.b64decode(obj["__bytes__"])
     return obj
 
 
 def _restore_enums(table: Any, rows: list[dict[str, Any]]) -> None:
-    """Puts a game's status and a ledger entry's type back into the form
-    SQLAlchemy's Enum type expects to bind: an actual member of the
-    Python enum, not the plain string backup_db.py had to serialize it
-    as.
-
-    Found by actually running this restore against the dev branch: the
-    column stores each label as the enum member's *name* ("SCHEDULED"),
-    but the dump holds its *value* ("scheduled") — the form the rest of
-    the app uses — so inserting the raw string back verbatim reached
-    Postgres as a label the enum type doesn't have.
+    """Turns enum columns back into enum members for SQLAlchemy: the dump
+    holds each enum's value ("scheduled"), while the column stores its
+    name ("SCHEDULED").
     """
     for column in table.columns:
         enum_class = getattr(column.type, "enum_class", None)
@@ -69,20 +56,11 @@ def _restore_enums(table: Any, rows: list[dict[str, Any]]) -> None:
 
 
 def _defer_self_references(table: Any, rows: list[dict[str, Any]]) -> list[Any]:
-    """Empties the columns that point back into this same table, and
-    returns the updates that fill them in again after the insert.
-
-    `sorted_tables` orders the tables against each other; nothing orders
-    the rows *within* one. So a ledger entry that reverses another one
-    can be handed to Postgres before the entry it reverses exists, and
-    the foreign key refuses it. Found on 2026-09-16 by the restore
-    drill, against a dev branch that had an undone payment in it: the
-    backup wrote perfectly well and could not be read back, which is
-    precisely the failure a backup exists to prevent.
-
-    Nulled and refilled rather than sorted into a safe order: an order
-    only exists while the references form no cycle, and nothing about a
-    self-reference promises that.
+    """Empties columns that point into the same table and returns the
+    updates that refill them after the insert. Tables are ordered
+    against each other but rows within one are not, so a reversing
+    ledger entry could arrive before the entry it reverses. Refilling
+    works even if references form a cycle.
     """
     columns = [fk.parent.name for fk in table.foreign_keys if fk.column.table is table]
     if not columns:
@@ -101,14 +79,10 @@ def _defer_self_references(table: Any, rows: list[dict[str, Any]]) -> list[Any]:
 
 
 def _from_before_one_signup_table(data: dict[str, list[dict[str, Any]]]) -> None:
-    """Reads a dump taken before 2026-10-07, when the queue was a table of
-    its own, into today's shape: each queued row becomes a queued signup
-    in drop_ins, and a drop-in's `from_waitlist_at` is its `queued_at`.
-
-    Restoring goes table by table from today's models, so without this
-    an older dump would restore every table it still recognises and
-    silently skip `waitlist_entries` — everybody who was waiting, gone,
-    from the one script whose job is to lose nothing. In place.
+    """Converts a dump taken when the queue was its own table
+    (`waitlist_entries`) into today's shape: queued rows become queued
+    signups in drop_ins. Otherwise an old dump would silently lose
+    everybody waiting. Changes `data` in place.
     """
     queue = data.pop("waitlist_entries", None)
     drop_ins = data.setdefault("drop_ins", [])
@@ -162,16 +136,10 @@ def restore(dump_path: Path) -> None:
                     conn.execute(update)
             print(f"  {table.name}: restored {len(rows)} rows")
 
-            # An IDENTITY column's own counter doesn't know rows were just
-            # inserted with explicit ids — left alone, the next ordinary
-            # insert (no id given) would collide with the highest id just
-            # restored. Not every table's "id" is one, though —
-            # problem_reports.id is an unguessable text token, not a
-            # sequence — so this asks Postgres what the sequence actually
-            # is rather than assuming every "id" column has one; a null
-            # answer means there's nothing to resync. Postgres-only: the
-            # concept doesn't exist on SQLite, which is what the test
-            # suite's non-postgres tests restore against.
+            # Resync each IDENTITY sequence past the restored ids, or the
+            # next insert collides. Asks Postgres which column has a
+            # sequence (problem_reports.id is a text token). SQLite has no
+            # sequences.
             if engine.dialect.name == "postgresql" and "id" in table.columns:
                 sequence = conn.execute(
                     text("SELECT pg_get_serial_sequence(:t, 'id')"), {"t": table.name}

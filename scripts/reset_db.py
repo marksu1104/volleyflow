@@ -1,30 +1,13 @@
-"""Empties every table, keeping the schema, so a database can be handed
-to real users with nothing in it.
-
-Written for launch day: the production database was carrying a season's
-worth of testing — half-finished clubs, a member removed and stuck, guests
-typed in three different ways — and the organizer's decision was to start
-clean rather than repair any of it.
-
-It deletes rows. It does not touch the schema, and it does not touch
-`alembic_version`, so the database stays exactly as migrated and the app
-comes back up on an empty database rather than a broken one.
+"""Empties every table but keeps the schema (and alembic_version), so a
+database can be handed to real users empty.
 
     uv run python scripts/reset_db.py            # counts what would go
     uv run python scripts/reset_db.py --yes      # backs up, then deletes
 
-**It always takes a backup first**, to ./backups/, and refuses to delete
-anything if that backup fails. That is not politeness: this is the one
-script here whose whole purpose is to destroy real money records, and
-`restore_db.py` is the only way back. Neon's point-in-time restore
-reaches six hours on the free plan, which covers a mistake noticed the
-same afternoon and nothing longer.
-
-Against anything other than the dev branch it also asks you to type the
-host name. A flag is something you can paste from history without
-reading; typing the host means looking at which database you are
-actually pointed at, which is exactly the check that failed the day
-before this was written (see _target.py).
+Always takes a backup to ./backups/ first and refuses to delete if
+that fails: restore_db.py is the only way back beyond Neon's six-hour
+window. Against anything but the dev branch it also asks for the host
+name to be typed (see _target.py).
 """
 
 from __future__ import annotations
@@ -94,9 +77,8 @@ def main() -> int:
         return 1
     print(f"  {backup.stat().st_size:,} bytes")
 
-    # Children before parents, which is what sorted_tables gives in
-    # reverse — the same order restore_db.py relies on, and the reason
-    # this doesn't need the schema to carry cascades.
+    # Children before parents (sorted_tables reversed), as restore_db.py
+    # does.
     with engine.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):
             conn.execute(text(f"DELETE FROM {table.name}"))
