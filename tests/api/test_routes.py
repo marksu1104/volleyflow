@@ -1,10 +1,12 @@
 """Tests for the API routes."""
 
+import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 import pytest
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -12,6 +14,7 @@ from sqlalchemy.orm import Session
 from tests.api.factories import auth_headers, create_club, identify, join_club
 from tests.api.factories import start_season as _start_season
 from volleyflow.api.invites import invite_token
+from volleyflow.api.main import app
 from volleyflow.api.routes import reports
 from volleyflow.api.routes._people import _today_in_taiwan
 from volleyflow.db.models import AbsenceRow, DropInRow, PlayerRow
@@ -3590,3 +3593,31 @@ def test_a_date_added_later_still_sorts_by_when_it_is(client: TestClient) -> Non
     got = [g["date"] for g in client.get(f"/seasons/{later['id']}").json()["games"]]
 
     assert got == ["2026-12-01", "2026-12-08"]
+
+
+def test_no_route_can_swallow_a_later_one() -> None:
+    # FastAPI matches in registration order, so an earlier `/seasons/{id}`
+    # would answer a later `/seasons/current`. Expanding each parameter to
+    # one path segment and matching it against every later route with a
+    # method in common finds any such pair.
+    def walk(routes: list[Any]) -> list[APIRoute]:
+        found: list[APIRoute] = []
+        for route in routes:
+            if isinstance(route, APIRoute):
+                found.append(route)
+            elif hasattr(route, "original_router"):
+                found.extend(walk(route.original_router.routes))
+        return found
+
+    routes = walk(app.routes)
+    shadowed = [
+        (a.path, b.path)
+        for i, a in enumerate(routes)
+        for b in routes[i + 1 :]
+        if a.methods & b.methods
+        and a.path != b.path
+        and re.fullmatch(re.sub(r"\{[^}]+\}", "[^/]+", a.path), b.path)
+    ]
+
+    assert len(routes) > 50
+    assert shadowed == []
