@@ -1,21 +1,10 @@
 // Feedback while something is happening: busy controls, the saving marker,
 // loading and empty states, and toasts.
 
-/** Disables a button and swaps its label while an async action runs,
- * restoring it on failure (a successful action usually re-renders the
- * whole page anyway). Makes a tap feel acknowledged immediately instead
- * of sitting dead until the network call resolves. */
-/* ---- "this is working" ----
- *
- * Every control that waits on the network says so, and none of them had
- * to be changed one at a time to do it. Marking them by hand meant
- * remembering at twenty-odd call sites, and the ones that got forgotten
- * are exactly the ones reported as unresponsive.
- *
- * Instead: note which control was pressed, and let the request itself
- * mark it. Every write in this app goes through postJson or deleteJson,
- * so that is the one place that knows a wait has begun and the one place
- * that knows it has ended.
+/* "This is working": every control that waits on the network shows it.
+ * Rather than marking controls by hand, the pressed control is noted here
+ * and every request (all writes go through postJson or deleteJson) marks
+ * it busy.
  */
 let _pressed = null;
 
@@ -30,16 +19,19 @@ if (typeof document !== "undefined" && document.addEventListener) {
   );
 }
 
-/** Held so a control stays busy through several requests from one tap
- * (adding a drop-in also sets their gender, for instance) and only
- * clears when the last of them finishes. */
+/** Counts requests per control, so one tap that sends several stays busy
+ * until the last finishes.
+ */
 const _busyDepth = new WeakMap();
 
-/** Long enough that a fast action just happens, short enough that a slow
- * one never feels ignored. Without it every request flashed a spinner
- * for 40ms, which reads as a glitch rather than as progress. */
+/** A fast action shows no spinner at all; a slow one never looks ignored.
+ */
 const BUSY_AFTER_MS = 140;
 
+/** Shows a control as busy while its requests run: disabled, with a
+ * spinner in place of its label. Cleared when the last request from that
+ * tap finishes.
+ */
 function markBusy(el) {
   if (!el || !el.classList) return () => {};
   const depth = (_busyDepth.get(el) || 0) + 1;
@@ -58,39 +50,21 @@ function markBusy(el) {
   };
 }
 
-/** Says "still saving" once, for the page, for changes that are already
- * on screen.
+/** One small "still saving" marker for the whole page, for changes already
+ * shown on screen.
  *
- * An optimistic action cannot use markBusy and never could: the repaint
- * that makes the tap feel instant replaces the button in the same frame,
- * so by the time the spinner is due, 140ms later, it is being put on a
- * node that has been off the page for 138ms. That is why the busy state
- * was invisible on exactly the two controls it was being judged by,
- * 請假 and 取消請假.
- *
- * Marking the *replacement* button instead would be worse: it would grey
- * out 取消請假 for half a second immediately after 請假 succeeded, which
- * says the opposite of what happened. The honest signal is that the
- * change is made and the server is still being told, so that is what
- * this shows — small, out of the way, and only once however many
- * requests are outstanding.
+ * An optimistic action replaces its button in the same frame, so markBusy
+ * cannot mark it, and marking the replacement would grey out the opposite
+ * action right after this one succeeded. The marker says what is true:
+ * the change is made, and the server is still being told.
  */
 let _pendingWrites = 0;
 let _pendingTimer = null;
 
-/** Long enough that the common case — a change that saves in under half
- * a second — never mentions itself at all. */
-/** A write that finishes in about a second needs no announcement at all
- * — the change is already on screen, and saying "儲存中" after the fact
- * reads as "that hasn't taken effect yet", which is the opposite of what
- * happened. At 450ms this appeared on nearly every action and vanished
- * ~300ms later: too brief to read, long enough to notice, and reported
- * as exactly that noise.
- *
- * So it now waits for a wait worth mentioning, and once it does appear
- * it stays long enough to be read rather than blinking. The pair is what
- * matters: a high threshold alone would still flash when a write happens
- * to land just past it. */
+/** Short saves never show the marker. */
+/** A save that finishes within about a second needs no announcement; once
+ * shown, the marker stays long enough to read rather than blinking.
+ */
 const PENDING_AFTER_MS = 1200;
 const PENDING_MIN_VISIBLE_MS = 700;
 let _pendingShownAt = 0;
@@ -130,8 +104,7 @@ function beginPendingWrite() {
     _pendingTimer = null;
     const el = document.getElementById("vf-pending");
     if (!el || !el.classList.contains("shown")) return;
-    // Shown for at least long enough to read. Hiding it the instant the
-    // write lands is what turned it into a blink on every action.
+    // Shown for at least long enough to read.
     const shownFor = Date.now() - _pendingShownAt;
     const remaining = PENDING_MIN_VISIBLE_MS - shownFor;
     if (remaining <= 0) {
@@ -139,15 +112,16 @@ function beginPendingWrite() {
       return;
     }
     setTimeout(() => {
-      // Another write may have started while this one was finishing;
-      // that one owns the chip now.
+      // Another write may have started meanwhile; that one owns the
+      // marker now.
       if (_pendingWrites === 0) el.classList.remove("shown");
     }, remaining);
   };
 }
 
-/** Runs something with a named control showing the wait — for the few
- * places that know better than the click does which element to mark. */
+/** Runs an action with a named control showing the wait, where the click
+ * does not identify the right element.
+ */
 async function whileBusy(el, action) {
   const done = markBusy(el);
   try {
@@ -159,11 +133,10 @@ async function whileBusy(el, action) {
 
 let _loadingEscalation = null;
 
-/** Says "still loading" in the same box that will later hold either the
- * content or the empty state, so those three states are never confusable.
- * Escalates its wording after a few seconds: the backend is on a free
- * tier that sleeps, and a silent 30-second wait is indistinguishable
- * from a broken app unless the page says what's happening. */
+/** Shows "loading" in the box that will later hold the content or the
+ * empty state. The wording escalates after a few seconds, because the
+ * free-tier backend sleeps and a silent wait looks broken.
+ */
 function showPageLoading(container) {
   if (!container) return;
   container.innerHTML = `
@@ -179,6 +152,9 @@ function showPageLoading(container) {
   }, 4000);
 }
 
+/** What one section shows while its own request is still out: a small
+ * spinner, rather than a blank space that later pushes everything down.
+ */
 function blockLoadingHtml(text) {
   return (
     '<div class="block-state"><i class="spinner sm"></i>' +
@@ -186,6 +162,7 @@ function blockLoadingHtml(text) {
   );
 }
 
+/** The request failed: say so and offer to retry. */
 function showPageError(container, detail) {
   clearTimeout(_loadingEscalation);
   if (!container) return;
@@ -202,11 +179,10 @@ function stopLoadingEscalation() {
   clearTimeout(_loadingEscalation);
 }
 
-/** The "there's nothing here yet, and here's what to do about it" block.
- * Every page that can legitimately have no data (a club with no season,
- * a player in no club) renders one of these instead of leaving its
- * styled-but-empty cards on screen, which reads as a broken page rather
- * than an empty one. `action` is optional: {label, href}. */
+/** "Nothing here yet, and what to do about it": shown instead of empty
+ * cards, which read as a broken page. `action` is optional: {label, href}
+ * or {label, onclick}.
+ */
 function emptyStateHtml(title, body, action) {
   return `
     <div class="empty-state">
@@ -223,20 +199,8 @@ function emptyStateHtml(title, body, action) {
   `;
 }
 
-/** What a management screen shows when there is no season to show, which
- * is two different situations wearing the same shape:
- *
- *   - this club hasn't started a season yet. Each page says what *it*
- *     would show once one exists, so that copy stays on the page;
- *   - there is no club at all — a brand new person, and on launch day,
- *     everybody.
- *
- * The second was only handled on two of the four management screens.
- * Emptying the database to open the app to real users (2026-09-13) is
- * what made that obvious: 帳務 and 名單 both said 「這個球隊尚未開季」
- * and offered to copy an invite link, for a club that did not exist.
- * Saying the wrong thing confidently is worse on somebody's first
- * screen than anywhere else.
+/** What a management screen shows when there is no club at all (a new
+ * user). A club without a season is each page's own empty state.
  */
 function noClubYetHtml() {
   return emptyStateHtml(
@@ -246,10 +210,9 @@ function noClubYetHtml() {
   );
 }
 
-/** What to show when initLiffIdentity came back falsy. Its two failures
- * need different words: one is the reader's to fix by opening the page
- * in LINE, the other is the server being asleep and fixes itself. Every
- * page shows the same thing, so it's written once here. */
+/** What to show when sign-in failed: open the page in LINE, or wait for a
+ * sleeping server, depending on the cause.
+ */
 function signInFailureHtml(identified) {
   if (identified === false) {
     return emptyStateHtml(
@@ -258,9 +221,8 @@ function signInFailureHtml(identified) {
       { label: "重新載入", onclick: "location.reload()" }
     );
   }
-  // On a laptop that advice is impossible to follow — LINE cannot open
-  // localhost — and it's what a page with no ?as= showed. Say the thing
-  // that actually works here instead.
+  // On a laptop LINE cannot open localhost, so explain local sign-in
+  // instead.
   if (isLocalDev()) {
     return emptyStateHtml(
       "尚未選擇身分",
@@ -273,17 +235,8 @@ function signInFailureHtml(identified) {
   );
 }
 
-/** A short message that doesn't take the screen away from you.
- *
- * Every failure used to be an alert(), 48 of them, and inside a LIFF
- * webview that is a system modal: it covers the page, it has to be
- * dismissed before anything else can happen, and it looks like the app
- * crashed rather than like a form needing another go. This says the same
- * thing over the page and gets out of the way.
- *
- * Kept for messages, not decisions — confirm() still blocks, because
- * "are you sure you want to remove this member" genuinely must be
- * answered before anything proceeds.
+/** A short message over the page that does not block it, unlike alert()
+ * inside the LINE webview. Messages only; decisions still use confirm().
  */
 function toast(message, kind, action) {
   let host = document.getElementById("vf-toasts");
@@ -308,7 +261,7 @@ function toast(message, kind, action) {
     el.appendChild(button);
   }
   host.appendChild(el);
-  // Long enough to read a failure reason, short enough not to stack up; longer when there's something to tap.
+  // Long enough to read; longer when there is something to tap.
   setTimeout(() => {
     el.classList.add("out");
     setTimeout(() => el.remove(), 220);

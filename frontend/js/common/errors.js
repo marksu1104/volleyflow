@@ -1,21 +1,11 @@
 // The API's error messages, said the way a person using the app would say them.
 
-/** Turns the API's own error detail — deliberately English; see
- * the project's language policy — into something a Chinese-speaking
- * organizer or member can actually read.
+/** Turns the API's English error detail into Chinese for the reader.
  *
- * Matched against fixed phrases in the message, not a code the backend
- * doesn't send: giving every one of forty routes a stable error code
- * would be a far larger change than this project's size calls for, and
- * would touch code that a hard-won test suite already covers. What
- * matters in practice is the handful of refusals an ordinary tap can
- * actually reach — a duplicate signup, a season already settled, a
- * roster at capacity — and those are what this covers.
- *
- * Anything not recognised still reaches the reader wrapped in a Chinese
- * sentence, with the original reason attached rather than replacing it —
- * a category this hasn't been taught yet is not the same as no reason at
- * all.
+ * Matched on fixed phrases rather than error codes, which the API does
+ * not send. Anything unrecognised is still wrapped in a Chinese sentence
+ * with the original reason attached. tests/api/test_error_catalogue.py
+ * checks every refusal the API can raise has an entry.
  */
 function translateApiError(detail) {
   const text = String(detail == null ? "" : detail).trim();
@@ -27,11 +17,8 @@ function translateApiError(detail) {
 }
 
 const _API_ERROR_PATTERNS = [
-  // Identity. By the time one of these is on screen, restarting the
-  // session has already been tried and couldn't help, so each says what
-  // to do next rather than what went wrong. Before these existed they all
-  // arrived as 「操作失敗（…）」 with the English in brackets — which is
-  // how creating a club "just failed" on the production site.
+  // Identity. Restarting the session has already been tried by the time
+  // these show, so each says what to do next.
   [/^LINE rejected this ID token$/, () => "登入已過期，請關閉頁面後從 LINE 重新開啟"],
   [/^Missing bearer token$/, () => "尚未登入，請從 LINE 開啟這個頁面"],
   [/^No player identified for this LINE account yet$/, () => "找不到你的帳號資料，請重新開啟頁面"],
@@ -122,14 +109,8 @@ const _API_ERROR_PATTERNS = [
 
   // Capacity and the roster.
   //
-  // ⚠️ Nothing in the API raises the message below any more: `seasons.py`
-  // now says "No room for another member on {date}, and there is no
-  // drop-in to move back to the waitlist." (the pattern after this one).
-  // Kept rather than deleted because `games.py:255` and two other sites
-  // re-raise a ValueError's own text through `str(exc)`, and a wording
-  // that isn't in the source today can still arrive from one of those.
-  // If you are confident it can't, delete it — but check those three
-  // first. Noted 2026-09-25.
+  // The first pattern below is no longer raised directly, but a few
+  // routes pass a ValueError's own text through, so it is kept.
   [
     /^No room for another member: (.+) already \d+ on court\. Mark somebody absent or cancel a drop-in on those games first\.$/,
     (m) => `無法加入固定名單：${m[1]}已經額滿。請先將一位固定成員設為請假，或移除該場臨打`,
@@ -181,13 +162,8 @@ const _API_ERROR_PATTERNS = [
     /^Season is already settled — venue cost can't change now$/,
     () => "本季已結算，場地費無法再修改",
   ],
-  // Both spellings. seasons.py says "Season is already settled" in most
-  // places and "Season already settled" in one (seasons.py:974). The
-  // previous pattern tried to cover both with `i?s?` — but with both
-  // optionals dropped that asks for *two* spaces, so it matched neither
-  // wording of that route and the English reached the screen. Found
-  // 2026-09-25 by running every HTTPException in the API through this
-  // table, which is not something reading it could have caught.
+  // Both spellings occur: "Season is already settled" and "Season already
+  // settled".
   [/^Season (is )?already settled$/, () => "本季已結算"],
   [/^Season is not settled$/, () => "本季尚未結算，無需復原"],
   [/^This settlement has already been undone$/, () => "這次結算已經復原過了"],
@@ -226,10 +202,8 @@ const _API_ERROR_PATTERNS = [
   // Everything else that's actually reachable from ordinary use.
   [/^Name can't be empty$/, () => "名字不能空白"],
   [/^Game is already cancelled$/, () => "本場已取消"],
-  // The developer-only screens. An ordinary member never reaches these,
-  // but an untranslated string is an untranslated string — and leaving
-  // them out means the audit can never reach zero, which is how a
-  // catalogue stops being maintained.
+  // The developer-only screens, translated too so the catalogue check can
+  // stay at zero.
   [
     /^(The developer overview|Reading reports) isn't configured on this server$/,
     () => "這個功能在伺服器上尚未設定",

@@ -10,19 +10,9 @@ function isGameFull(season, game) {
   return expectedAttendance(season, game) >= season.capacity;
 }
 
-/** This game's time and venue: its own when it has them, the season's
- * otherwise.
- *
- * A booking really does move — 「有時候會換場地」, 2026-09-17 — so a game
- * carries `location`, `start_time` and `end_time` of its own. Null on
- * any of them means "the same as every other night", which is what
- * every game booked before that date holds, so the season stays the
- * answer unless one night overrides it.
- *
- * Shared rather than written per page for the same reason acPill and
- * isGameFull are: the member's screen and the organizer's show the same
- * game and have to say the same thing about it. Display only — billing
- * never reads any of this. See docs/billing-rules.md.
+/** This game's time and venue: its own when it has them (a night at
+ * another court), otherwise the season's. Display only; billing never
+ * reads them.
  */
 function gameStartTime(season, game) {
   return (game && game.start_time) || season.game_start_time || null;
@@ -36,22 +26,13 @@ function gameLocation(season, game) {
   return (game && game.location) || season.location || null;
 }
 
-/** Whether the first game has already happened — the line the roster
- * change rules are drawn on: free and
- * silent before it, a confirmation after, because a mid-season change
- * moves money on somebody's ledger right away. `games` is assumed sorted
- * by date, which is how every season detail response already orders it. */
-/** Everything still waiting for the organizer, most urgent first.
- *
- * A pure function of what the page already has, so the rule is testable
- * without a browser — see tests/frontend/todos.test.js. */
+/** Everything still waiting for the organizer, most urgent first. Pure, so
+ * it is tested without a browser (tests/frontend/todos.test.js).
+ */
 function buildTodos(season, requests, balances, lineReachable) {
-  // Up to the season on screen. `balance` is club-wide and includes
-  // seasons booked for *later* (their fees are charged when they are
-  // created), which put people on the 待辦 list over money not yet due.
-  // Callers fetch /balances?season_id=…, whose through_season is this
-  // season plus whatever earlier ones left. Same rule as the 帳務 page's
-  // splitLedger; season_total is the fallback for an older cached answer.
+  // Money due up to the season on screen (through_season), not the
+  // club-wide balance, which includes seasons booked ahead. season_total
+  // is the fallback for an older cached answer.
   const owing = new Set(
     balances
       .filter((b) => Number(b.through_season ?? b.season_total) < 0)
@@ -115,12 +96,8 @@ function buildTodos(season, requests, balances, lineReachable) {
       action: "收款",
     });
   }
-  // Strictly false, never merely falsy. `undefined` means the caller
-  // never asked, `null` means LINE could not answer, and both have to
-  // stay silent: telling somebody to add a friend they added months ago
-  // reads as the app being broken, which is worse than saying nothing.
-  // The fourth argument is optional for the same reason — every other
-  // caller passes three and must keep getting no todo from this.
+  // Strictly false: undefined (not asked) and null (LINE could not
+  // answer) both stay silent.
   if (lineReachable === false) {
     list.push({
       kind: "warn",
@@ -133,24 +110,25 @@ function buildTodos(season, requests, balances, lineReachable) {
   return list;
 }
 
+/** Whether the first game has happened. Roster changes before it are free
+ * and silent; after it they move money at once, so they ask for
+ * confirmation. `games` is sorted by date.
+ */
 function seasonHasStarted(season) {
   const first = season.games[0];
   return !!first && describeDate(first.date).isPast;
 }
 
-/** What the air conditioning adds to one person's share of this game,
- * or nothing when it isn't running or the season doesn't charge for it.
- *
- * Shared because both pages show the same game: this lived in
- * member.html only, so opening one game as a member and as the
- * organizer reported different facts about it — and the organizer is
- * the person who gets asked "why is tonight more expensive". */
+/** What the air conditioning adds to one person's share of this game, or
+ * nothing when it is off or not charged. Shared so both pages describe a
+ * game the same way.
+ */
 function acPill(season, game) {
   if (!game.air_conditioned || !(Number(season.ac_surcharge) > 0)) return "";
   return `<span class="meta-pill ac">${snowIcon(12)}含冷氣 +$${acExtraEach(season, game)}</span>`;
 }
 
-// The server's own prices where a cooled game has one, so this matches the ledger.
+// The server's own prices where it has them, so this matches the ledger.
 function acExtraEach(season, game) {
   const cooled =
     game && game.air_conditioned && game.share != null
@@ -162,6 +140,13 @@ function acExtraEach(season, game) {
   return Math.ceil(Number(season.ac_surcharge) / season.capacity);
 }
 
+/** The game card at the top of the home screen and inside a game's sheet:
+ * date, expected headcount with the male/female split, and a row of small
+ * facts. Returns markup so callers can place it above their own content.
+ *
+ * `opts.metaPills`: extra `<span class="meta-pill">` HTML after the
+ * per-game share, such as a change deadline.
+ */
 function renderGameHero(season, game, opts) {
   const o = opts || {};
   const info = describeDate(game.date);
@@ -170,9 +155,7 @@ function renderGameHero(season, game, opts) {
   const capacity = season.capacity;
   const full = expected >= capacity;
 
-  // This night's own time and venue when it has them — see
-  // gameStartTime. Identical to the season's for every game that does
-  // not override, which is nearly all of them.
+  // This night's own time and venue when it has them; see gameStartTime.
   const startsAt = gameStartTime(season, game);
   const endsAt = gameEndTime(season, game);
   const where = gameLocation(season, game);
@@ -201,10 +184,8 @@ function renderGameHero(season, game, opts) {
       </div>
       <div class="hero-meta">
         ${
-          // Guarded, because "每人 $undefined" is what this printed when
-          // a game arrived without its share — a season still being set
-          // up, or an older cached response. Saying nothing about the
-          // price is far better than saying something that isn't a price.
+          // A game without a share (a season being set up, an old cached
+          // answer) shows no price rather than $undefined.
           game.share === null || game.share === undefined
             ? ""
             : `<span class="meta-pill">每人 <strong>$${game.share}</strong></span>`
@@ -218,10 +199,9 @@ function renderGameHero(season, game, opts) {
   `;
 }
 
-/** The game named in one line, for a sheet opened from a card that
- * already shows the rest. The organizer's 名單 drew the whole hero card a
- * second time above the tabs, pushing the first name half a screen down
- * (proposal 7, 2026-10-17). */
+/** The game named in one line, for a sheet opened from a card that already
+ * shows the rest.
+ */
 function renderGameHeadLine(season, game, opts) {
   const o = opts || {};
   const info = describeDate(game.date);
@@ -241,37 +221,11 @@ function renderGameHeadLine(season, game, opts) {
   `;
 }
 
-/** What a member's money looks like right now, not a journal of every
- * entry.
- *
- * The first version listed raw ledger rows newest-first — 季費 −$3055,
- * 收付款 +$3055, 臨打費 −$235 — which is the accountant's view and
- * answers a question nobody asked. What a member wants to know is how
- * many games they signed up for, how many they took leave from, and
- * therefore what they owe or are owed.
- *
- * So the counts come from the season (what actually happened to you) and
- * the amounts come from the ledger (what it cost). Anything on the
- * ledger these lines don't account for shows as 其他 rather than being
- * silently dropped — the lines have to add up to the headline, or the
- * screen is lying about money.
- *
- * Lives here rather than on member.html because the all-clubs money page
- * shows the same breakdown per club. Everything it needs is an argument,
- * so the rule can be tested without a browser — see
- * tests/frontend/my_ledger.test.js.
- *
- * `season` may be null, and the result is then honest but nearly
- * useless: every entry falls into 其他季別, because nothing is known
- * about which games this person played. Callers that have a season
- * should pass it.
+/** A member's ledger up to `season`: everything except seasons that start
+ * after it, whose fees are charged when booked but are not due.
+ * `season_starts` comes with the ledger, so switching season needs no
+ * request.
  */
-/** A member's ledger up to `season`: everything except seasons that
- * start after it. Their fees are charged the moment they are booked, so
- * with next season already set up the whole ledger read as owing it
- * now. `season_starts` comes with the ledger, so switching season needs
- * no second request. Without a season, or for a season the ledger knows
- * nothing about, nothing counts as later. */
 function ledgerUpTo(ledger, season) {
   const starts = ledger.season_starts || {};
   const own = season ? starts[season.id] || (season.games[0] && season.games[0].date) : null;
@@ -281,6 +235,15 @@ function ledgerUpTo(ledger, season) {
   return { later, total: Number(ledger.balance) - laterTotal };
 }
 
+/** A member's money as a summary rather than a list of ledger rows: games
+ * played, absences taken, and what that costs or refunds. Counts come
+ * from the season, amounts from the ledger, and anything unaccounted for
+ * shows as 其他, so the lines always add up to the total.
+ *
+ * Shared with the all-clubs money page and tested without a browser
+ * (tests/frontend/my_ledger.test.js). With no season, every entry falls
+ * under 其他季別.
+ */
 function summaryRows(ledger, season, name) {
   const here = (e) => !!season && e.season_id === season.id;
   const sum = (pred) =>
@@ -313,33 +276,30 @@ function summaryRows(ledger, season, name) {
       sum((e) => here(e) && e.entry_type === "drop_in_fee_charged"));
     add("已收付款", null, sum((e) => here(e) && e.entry_type === "payment"));
   }
-  // What earlier seasons left. A season starting later is left out
-  // altogether rather than shown here — see ledgerUpTo. With no season
-  // on screen there is no "earlier", only other seasons.
+  // What earlier seasons left; later seasons are left out (see
+  // ledgerUpTo).
   const upTo = ledgerUpTo(ledger, season);
   const earlier = sum((e) => !here(e) && !upTo.later(e));
   add(!season ? "其他季別" : earlier > 0 ? "上季餘額" : "上季未繳", null, earlier);
 
-  // The lines and the headline must never disagree: an entry type this
-  // screen doesn't know about still has to appear somewhere.
+  // Lines and total must agree, so unknown entry types still appear.
   const rest = upTo.total - accounted;
   if (Math.abs(rest) >= 1) add("其他", null, rest);
 
   return rows.length ? rows : [{ label: "尚無任何費用", detail: null, amount: 0 }];
 }
 
-/**
- * A real month-grid calendar. Opens on the month of the nearest
- * upcoming game, marks every day that has one, and lets you page
- * between months. Tapping a marked day calls onPick(gameId).
- */
-/** `opts.stateOf(game)` returns "", "short", "full" or "away", which
- * colours that day's dot; `opts.selectedId` draws the ring. A dot rather
- * than a label on purpose — a calendar cell on a phone is about 40px
- * across, and anything with words in it is unreadable at that size. */
-// The month each calendar is showing, so a repaint doesn't jump back to the next game's.
+// The month each calendar is showing, so a repaint keeps it.
 const calendarViews = new WeakMap();
 
+/** A month-grid calendar. Opens on the month of the nearest upcoming game,
+ * marks each day that has one, and pages between months; tapping a marked
+ * day calls onPick(gameId).
+ *
+ * `opts.stateOf(game)` returns "", "short", "full" or "away", which
+ * colours that day's dot (a dot, because a phone's cell is too small for
+ * words); `opts.selectedId` draws the ring.
+ */
 function renderMonthCalendar(container, games, onPick, opts) {
   const { stateOf = () => "", selectedId = null, awayLabel = "你請假", viewKey = null } = opts || {};
   const gamesByDate = {};
@@ -385,11 +345,7 @@ function renderMonthCalendar(container, games, onPick, opts) {
         <span>${d}</span>${game ? `<div class="mcal-dot ${stateOf(game)}"></div>` : ""}
       </div>`;
     }
-    // Six rows every month, padded at the end as well as the start. A
-    // month needs five or six depending on which weekday it opens on,
-    // so without this the card was 288px in September and 330px in
-    // January: paging a month resized it and shoved everything under it
-    // up or down. Reported as 「切換月份可能會變形」.
+    // Always six rows, so paging between months never resizes the card.
     for (let i = firstWeekday + daysInMonth; i < 42; i++) {
       cells += `<div class="mcal-cell empty"></div>`;
     }
@@ -406,9 +362,7 @@ function renderMonthCalendar(container, games, onPick, opts) {
     `;
   }
 
-  /** Only the states this season actually contains. A legend entry for
-   * "人數不足" on a season where every game is full is noise, and on a
-   * phone every row of it is a row of dates pushed off the screen. */
+  /** Only the states this season actually contains. */
   function legendHtml() {
     const labels = { "": "有場次", short: "人數不足", full: "已滿", away: awayLabel };
     const present = [];
@@ -438,23 +392,14 @@ function renderMonthCalendar(container, games, onPick, opts) {
   draw();
 }
 
-/**
- * A *preview* of each member's cost for one game, mirroring
- * pricing.share_per_game — see docs/billing-rules.md "Core formula".
- *
- * The server stays authoritative: this only exists so the 開新一季 wizard
- * can show the effect of adding a date or a member as you type, which is
- * the whole point of that screen. Anything actually written to a ledger
- * is computed in Python, and the page re-reads the server's number right
- * after creating the season. Integer inputs divide exactly in IEEE754
- * below 2^53, so ceil here agrees with ROUND_CEILING on Decimal.
+/** A preview of one game's share, mirroring pricing.share_per_game, so the
+ * 開新一季 wizard can show prices as they are typed. The server stays
+ * authoritative; the page re-reads its figure after creating the season.
+ * Integer inputs divide exactly below 2^53, so ceil agrees with
+ * ROUND_CEILING.
  */
 function previewSharePerGame(totalVenueCost, totalGames, capacity, acSurcharge, cooledGames) {
-  // capacity, not the number of members picked: the price is what one
-  // slot costs, and a season with room for 18 charges 18ths whether or
-  // not the eighteenth person has been found yet. Dividing by the
-  // roster instead made the quoted price fall every time a name was
-  // added in the wizard, and then jump the first time somebody left.
+  // Divided by capacity, not the members picked: the price of one slot.
   if (!(totalGames > 0) || !(capacity > 0)) return null;
   const ac = Number(acSurcharge) || 0;
   const cooled = Number(cooledGames) || 0;
@@ -467,25 +412,11 @@ function previewSharePerGame(totalVenueCost, totalGames, capacity, acSurcharge, 
   };
 }
 
-/** A member's whole-season fee: the sum of the games they're charged
- * for, not a share times a count.
- *
- * Those stopped being the same number once air conditioning made games
- * cost different amounts — a season where half the nights are cooled is
- * not twice the cheap half. Mirrors settlement.settle_member.
+/** A member's season fee: the sum of the games they are charged for (games
+ * can cost different amounts). Mirrors settlement.settle_member.
  */
 function seasonFeeFor(season) {
   return season.games
     .filter((g) => g.status !== "cancelled_refunded")
     .reduce((total, g) => total + Number(g.share), 0);
 }
-
-// --- stale-while-revalidate -------------------------------------------
-//
-// Every page transition re-runs the whole chain (identify -> clubs ->
-// seasons -> season detail), and the last three are strictly sequential
-// because each needs the previous one's id. That's a visible pause on
-// every tap. So: paint from whatever this device saw last time, then
-// correct it when the network answers. Only structural data is cached —
-// money is always fetched fresh, because a stale balance is worse than a
-// slow one.
