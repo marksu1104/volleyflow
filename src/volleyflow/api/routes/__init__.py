@@ -8,7 +8,8 @@ tell which half broke something.
 
 The layering runs one way and is worth knowing before adding anything:
 
-    clubs, seasons, games, attendance, players, money, reports
+    clubs, club_joining, club_members, seasons, season_roster,
+    season_settlement, games, attendance, players, money, reports, developer
         |  (routes: request in, response out, one resource each)
         v
     _attendance     the rules about who is on court
@@ -36,12 +37,16 @@ from fastapi import APIRouter
 
 from volleyflow.api.routes import (
     attendance,
+    club_joining,
+    club_members,
     clubs,
     developer,
     games,
     money,
     players,
     reports,
+    season_roster,
+    season_settlement,
     seasons,
 )
 
@@ -49,7 +54,20 @@ router = APIRouter()
 # `developer` sits at the end for the same reason the others sit where
 # they do: order only matters where one path could swallow another, and
 # /developer/overview is a literal path no parameterised route reaches.
-for _module in (clubs, seasons, games, attendance, players, money, reports, developer):
+for _module in (
+    clubs,
+    club_joining,
+    club_members,
+    seasons,
+    season_roster,
+    season_settlement,
+    games,
+    attendance,
+    players,
+    money,
+    reports,
+    developer,
+):
     router.include_router(_module.router)
 
 __all__ = ["router"]

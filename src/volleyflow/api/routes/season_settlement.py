@@ -1,0 +1,380 @@
+"""The end of a season: its settlement, settling and undoing it, and the
+fee notice for the next one."""
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    status,
+)
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from volleyflow.api.dependencies import get_db
+from volleyflow.api.routes._audit import _audit, _season_span
+from volleyflow.api.routes._money import (
+    _fee_notice_plan,
+    _gather_member_settlements,
+    _member_settlement_out,
+    _previous_season,
+    _why_not_settleable,
+)
+from volleyflow.api.routes._people import (
+    _now,
+    _require_organizer,
+    _today_in_taiwan,
+    get_current_player,
+)
+from volleyflow.api.schemas import (
+    FeeNoticeOut,
+    FeeNoticePreviewOut,
+    FeeNoticeRecipientOut,
+    PaidOutMemberOut,
+    SeasonSettleOut,
+    SeasonSettleRequest,
+    SeasonUnsettleOut,
+    SettlementOut,
+)
+from volleyflow.db.models import (
+    GameRow,
+    LedgerEntryRow,
+    PlayerRow,
+    SeasonMemberRow,
+    SeasonRow,
+)
+from volleyflow.ledger import EntryType
+from volleyflow.notify.reminders import (
+    fee_notice_text,
+    notify_fee_due,
+)
+
+router = APIRouter()
+
+
+@router.get("/seasons/{season_id}/settlement", response_model=SettlementOut)
+def view_settlement(
+    season_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> SettlementOut:
+    """Read-only preview — what settling right now would charge/refund.
+    Doesn't touch the ledger. See POST .../settle to actually record it.
+    Organizer-only: this exposes every member's fee and refund at once.
+    """
+    season_row, settlements = _gather_member_settlements(db, season_id)
+    _require_organizer(db, season_row.club_id, current_player)
+    return SettlementOut(
+        season_id=season_id,
+        members=[_member_settlement_out(ms) for ms in settlements],
+    )
+
+
+@router.post("/seasons/{season_id}/settle", response_model=SeasonSettleOut)
+def settle_season(
+    season_id: int,
+    payload: SeasonSettleRequest | None = None,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> SeasonSettleOut:
+    """Credits every member's absence refund to the ledger and locks the
+    season, once. Doesn't charge the season fee — that already happened
+    when each member joined the roster (see _sync_season_fee_ledger) —
+    so this is purely the refund half of the billing rules' settlement.
+    A season can't be settled twice.
+
+    `payload.cash` records the money that actually changed hands while
+    the organizer was settling up, in the same pass. It used to be a
+    separate errand: settle, then go down the list tapping 退款 or 已收
+    one person at a time. Anyone left out of the list keeps their
+    balance, which is what carries into the next season — 「保留至下一季」
+    is the absence of a payment, not a payment of its own, so there is
+    nothing to write for it.
+    """
+    season_row, settlements = _gather_member_settlements(db, season_id)
+    _require_organizer(db, season_row.club_id, current_player)
+    if season_row.settled_at is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season already settled")
+    not_yet = _why_not_settleable(db, season_id, _today_in_taiwan())
+    if not_yet is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, not_yet)
+
+    cash = payload.cash if payload is not None else []
+    members = {ms.player.id for ms in settlements}
+    for entry in cash:
+        # A club-mate who isn't in this season has no balance this
+        # settlement can square, and a stranger has no business in it at
+        # all. Refusing beats quietly writing money against the wrong id.
+        if entry.player_id not in members:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Player {entry.player_id} is not a member of this season",
+            )
+
+    now = _now()
+    for ms in settlements:
+        if ms.refund > 0:
+            db.add(
+                LedgerEntryRow(
+                    player_id=ms.player.id,
+                    club_id=season_row.club_id,
+                    entry_type=EntryType.ABSENCE_REFUND,
+                    amount=ms.refund,
+                    recorded_at=now,
+                    season_id=season_id,
+                    note=f"Season {season_id} absence refund",
+                )
+            )
+
+    # After the refunds, never before: what somebody hands over on the
+    # day is settled against a balance that already includes what this
+    # settlement just credited them.
+    for entry in cash:
+        if entry.amount == 0:
+            continue
+        db.add(
+            LedgerEntryRow(
+                player_id=entry.player_id,
+                club_id=season_row.club_id,
+                entry_type=EntryType.PAYMENT,
+                amount=entry.amount,
+                recorded_at=now,
+                season_id=season_id,
+                note=f"Season {season_id} settlement",
+            )
+        )
+
+    season_row.settled_at = now
+    _audit(
+        db,
+        current_player,
+        "season_settled",
+        season_row.club_id,
+        detail=_season_span(db, season_row),
+    )
+    db.commit()
+
+    # Deliberately silent. What a member is owed or owes after this is
+    # told once, in the next season's 繳費通知 — see send_fee_notice.
+
+    return SeasonSettleOut(
+        season_id=season_id,
+        settled_at=now,
+        members=[_member_settlement_out(ms) for ms in settlements],
+    )
+
+
+@router.post("/seasons/{season_id}/unsettle", response_model=SeasonUnsettleOut)
+def unsettle_season(
+    season_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> SeasonUnsettleOut:
+    """Takes a settlement back, for the tap that shouldn't have happened.
+
+    Asked for on 2026-09-16: 「我覺得不小心按到帳務已結算也要可以復原」.
+    Settling writes one ABSENCE_REFUND per member owed one and locks the
+    season. This writes the opposite entry against each of those and
+    unlocks it again. The originals stay: the ledger is append-only, so
+    the books go on saying a settlement happened and was undone, which
+    is what actually occurred.
+
+    `reverses_entry_id` carries the link between the two, and its unique
+    index means one refund can be reversed exactly once however many
+    times this is tapped.
+
+    Cash already handed over is the one thing this cannot put right. A
+    refund paid out after settling is a PAYMENT entry of its own and
+    stays where it is; reversing the refund leaves that money reading as
+    owed back, which is the truth of it. Those people are named in the
+    answer so the organizer hears it from the app rather than from them.
+    """
+    season = (
+        db.query(SeasonRow).filter(SeasonRow.id == season_id).with_for_update().first()
+    )
+    if season is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    _require_organizer(db, season.club_id, current_player)
+    if season.settled_at is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season is not settled")
+
+    refunds = (
+        db.query(LedgerEntryRow)
+        .filter(
+            LedgerEntryRow.season_id == season_id,
+            LedgerEntryRow.entry_type == EntryType.ABSENCE_REFUND,
+            # Not itself an undo of something else.
+            LedgerEntryRow.reverses_entry_id.is_(None),
+        )
+        .all()
+    )
+    reversed_already = {
+        entry_id
+        for (entry_id,) in db.query(LedgerEntryRow.reverses_entry_id).filter(
+            LedgerEntryRow.reverses_entry_id.in_([r.id for r in refunds] or [0])
+        )
+    }
+
+    # Read before the lock comes off: which refunds were handed over in
+    # cash after this season was settled.
+    paid_out = (
+        db.query(LedgerEntryRow, PlayerRow)
+        .join(PlayerRow, LedgerEntryRow.player_id == PlayerRow.id)
+        .filter(
+            LedgerEntryRow.season_id == season_id,
+            LedgerEntryRow.entry_type == EntryType.PAYMENT,
+            # Negative: the organizer paid the member, not the other way.
+            LedgerEntryRow.amount < 0,
+            LedgerEntryRow.recorded_at >= season.settled_at,
+        )
+        .all()
+    )
+
+    now = _now()
+    undone = 0
+    for refund in refunds:
+        if refund.id in reversed_already:
+            continue
+        db.add(
+            LedgerEntryRow(
+                player_id=refund.player_id,
+                club_id=refund.club_id,
+                entry_type=EntryType.ABSENCE_REFUND,
+                amount=-refund.amount,
+                recorded_at=now,
+                season_id=season_id,
+                note=f"Season {season_id} settlement undone",
+                reverses_entry_id=refund.id,
+            )
+        )
+        undone += 1
+
+    season.settled_at = None
+    _audit(
+        db,
+        current_player,
+        "season_unsettled",
+        season.club_id,
+        detail=_season_span(db, season),
+    )
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two taps on 復原結算 at once; the unique index caught the loser.
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "This settlement has already been undone"
+        ) from None
+
+    return SeasonUnsettleOut(
+        season_id=season_id,
+        reversed_entries=undone,
+        already_paid_out=[
+            PaidOutMemberOut(
+                player_id=player.id, player_name=player.name, amount=-entry.amount
+            )
+            for entry, player in paid_out
+        ],
+    )
+
+
+@router.get("/seasons/{season_id}/fee-notice", response_model=FeeNoticePreviewOut)
+def preview_fee_notice(
+    season_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> FeeNoticePreviewOut:
+    """Exactly who the 繳費通知 would go to now and what each would read —
+    the server's own text, so the confirmation sheet cannot drift from
+    the message (a copy of the wording in the browser could, and the
+    message cannot be taken back)."""
+    season_row = db.get(SeasonRow, season_id)
+    if season_row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    _require_organizer(db, season_row.club_id, current_player)
+    names: dict[int, str] = {
+        player_id: name
+        for player_id, name in db.query(PlayerRow.id, PlayerRow.name)
+        .join(SeasonMemberRow, SeasonMemberRow.player_id == PlayerRow.id)
+        .filter(SeasonMemberRow.season_id == season_id)
+    }
+    return FeeNoticePreviewOut(
+        recipients=[
+            FeeNoticeRecipientOut(
+                player_id=due.player_id,
+                name=names.get(due.player_id, ""),
+                due=due.due,
+                text=fee_notice_text(db, season_row, due),
+            )
+            for _, due in _fee_notice_plan(db, season_row)
+        ]
+    )
+
+
+@router.post("/seasons/{season_id}/fee-notice", response_model=FeeNoticeOut)
+def send_fee_notice(
+    season_id: int,
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> FeeNoticeOut:
+    """Send this season's 繳費通知 to every member who owes and hasn't
+    had it yet.
+
+    The one message about money. It replaced a notice sent at
+    settlement (2026-10-02): somebody keeping a refund for next season
+    was told one figure then and another when next season's fee came
+    due, and the organizer had two sends to remember. Last season's kept
+    balance is folded in here instead — so this waits until that season
+    is settled, and is not offered for a season already over.
+
+    A LINE message cannot be taken back, so each member gets this at
+    most once a season. The season row is locked and every recipient is
+    marked *before* anything is sent: a second tap, or the same tap
+    arriving twice, waits on the lock and then finds nobody left to
+    send to. Anyone LINE refuses is unmarked afterwards, so they can be
+    reached later without anybody else hearing twice.
+    """
+    season_row = (
+        db.query(SeasonRow).filter(SeasonRow.id == season_id).with_for_update().first()
+    )
+    if season_row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No season with id {season_id}")
+    _require_organizer(db, season_row.club_id, current_player)
+
+    last_game = (
+        db.query(func.max(GameRow.date)).filter(GameRow.season_id == season_id).scalar()
+    )
+    if last_game is None or last_game < _today_in_taiwan():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Season has ended")
+    previous = _previous_season(db, season_row)
+    if previous is not None and previous.settled_at is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "The previous season is not settled"
+        )
+
+    plan = _fee_notice_plan(db, season_row)
+    pending = [member for member, _ in plan]
+    dues = [due for _, due in plan]
+    owing = {d.player_id for d in dues}
+    now = _now()
+    for member in pending:
+        if member.player_id in owing:
+            member.fee_notice_sent_at = now
+    _audit(
+        db,
+        current_player,
+        "fee_notice_sent",
+        season_row.club_id,
+        detail=str(sum(1 for m in pending if m.player_id in owing)),
+    )
+    db.commit()
+
+    told = notify_fee_due(db, season_row, dues)
+    missed = owing - told
+    if missed:
+        for member in pending:
+            if member.player_id in missed:
+                member.fee_notice_sent_at = None
+        db.commit()
+
+    return FeeNoticeOut(sent=len(told), unreachable=len(missed))
