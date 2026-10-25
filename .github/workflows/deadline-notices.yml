@@ -30,7 +30,7 @@ jobs:
         run: uv sync --locked
 
       - name: Send deadline notices
-        # PRODUCTION_DATABASE_URL, not DATABASE_URL — see reminders.yml.
+        # PRODUCTION_DATABASE_URL: the DATABASE_URL secret is the Neon dev branch.
         run: uv run python -m volleyflow.notify.reminders deadline
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}

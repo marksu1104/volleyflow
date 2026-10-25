@@ -34,50 +34,26 @@ jobs:
       - name: Test
         run: uv run pytest --cov --cov-report=term-missing
 
-      # Billing is the part of this project that must not be wrong, so its
-      # three modules are held to every line run by a test. The rest of
-      # the codebase is reported above but not gated: one threshold for
-      # everything would either let billing slip or block unrelated work.
-      # Reads the data the Test step just wrote; it runs no tests itself.
+      # The billing modules must stay at 100% line coverage; the rest of the
+      # codebase is reported above but not gated. Reads the data the Test
+      # step just wrote.
       - name: Billing coverage
         run: >-
           uv run coverage report --fail-under=100
           --include="src/volleyflow/pricing.py,src/volleyflow/settlement.py,src/volleyflow/ledger.py"
 
-      # The frontend has no build step and no framework, so its checks
-      # run on the Node that's already on the runner — no dependencies to
-      # install. They guard the parts that would be expensive to get
-      # wrong: the billing preview the wizard shows, who the game sheet
-      # says is playing, and what the cache is allowed to overrule.
+      # The frontend has no build step, so its tests run on the Node already
+      # on the runner, with no dependencies.
       - name: Frontend tests
         run: node --test tests/frontend/*.test.js
 
-      # A workflow file that doesn't parse doesn't run, and GitHub
-      # reports it under its filename rather than its name — easy to miss
-      # beside a green CI. That is how a broken deploy-pages.yml shipped:
-      # CI passed, the deploy never ran, and the site quietly stayed on
-      # the previous build while the app looked fine.
+      # A workflow file that does not parse silently never runs.
       - name: Workflow files parse
         run: uv run python scripts/check_workflows.py
 
-      # The Postgres tests below run against the Neon *dev* branch — a
-      # real database, not an in-memory one — so its schema has to be
-      # current before they do. Nothing used to bring it up to date:
-      # only production was ever migrated, and dev drifted quietly until
-      # a model change started selecting a column that had never been
-      # added there. That happened on 2026-09-17, when three new columns
-      # on `games` turned four Postgres tests red with "column
-      # games.location does not exist" — a perfectly good migration, a
-      # green local suite, and a red CI.
-      #
-      # Green locally because the in-memory tests build their schema
-      # from the models with create_all, so they neither exercise a
-      # migration nor notice a missing one. Only a real database can
-      # tell you, and this is the only step that talks to one.
-      #
-      # Alembic is idempotent, so this is a no-op on the majority of
-      # pushes that change no schema. It runs before the tests for the
-      # same reason production's runs before the deploy.
+      # The Postgres tests run against the Neon dev branch, so its schema is
+      # brought up to date first. The in-memory tests build their schema
+      # from the models and would not notice a missing migration.
       - name: Migrate dev
         run: |
           if [ -z "$DATABASE_URL" ]; then
@@ -95,19 +71,9 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-      # Migrations run here, against production, *before* the deploy that
-      # needs them. They were applied by hand until now because Render's
-      # pre-deploy command is a paid feature — which took production down
-      # once already (deploy first, SQL second), and
-      # since then every schema change has needed a human to paste SQL at
-      # exactly the right moment. Nothing about that was ever going to
-      # get more reliable with practice.
-      #
-      # Alembic is idempotent: a run with nothing to do is a no-op, so
-      # this is harmless on the majority of pushes that change no schema.
-      # Skipped entirely when the secret isn't set, so a fork or a
-      # misconfigured repo fails loudly on the deploy rather than
-      # silently running migrations somewhere unexpected.
+      # Production is migrated here, after every test passes and before the
+      # deploy that needs the new schema. A no-op when nothing is pending.
+      # Refuses to continue without the secret rather than deploying anyway.
       - name: Migrate production
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
@@ -121,11 +87,8 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
 
-      # GitHub's push webhook to Render's auto-deploy stopped firing
-      # after the repo got deleted and recreated (on
-      # 2026-09-05) — several attempts to fix the GitHub App connection
-      # itself didn't hold, so deploys are triggered explicitly here
-      # instead of depending on that integration.
+      # Deploys are triggered explicitly with Render's deploy hook, only
+      # after everything above has passed.
       - name: Deploy to Render
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"

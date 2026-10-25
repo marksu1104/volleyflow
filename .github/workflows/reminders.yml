@@ -2,10 +2,8 @@ name: Send join request digests
 
 on:
   schedule:
-    # 01:00 UTC = 09:00 Taiwan time, once a day: one message per club
-    # with people waiting to join. The roster status that used to be
-    # checked here now goes out at each game's change deadline — see
-    # deadline-notices.yml.
+    # 01:00 UTC = 09:00 Taiwan time, once a day: one message per club with
+    # people waiting to join. Deadline notices are in deadline-notices.yml.
     - cron: "0 1 * * *"
   workflow_dispatch: {}
 
@@ -24,16 +22,10 @@ jobs:
         run: uv sync --locked
 
       - name: Send join request digests
-        # PRODUCTION_DATABASE_URL, not DATABASE_URL — that secret is the
-        # Neon dev branch (see ci.yml's Postgres-tests step). Pointed at
-        # dev since this workflow was created, so every run "succeeded"
-        # against seed data and no reminder had ever reached a real game.
+        # PRODUCTION_DATABASE_URL: the DATABASE_URL secret is the Neon dev branch.
         run: uv run python -m volleyflow.notify.reminders
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          # No LINE_GROUP_ID: there is no group message. And no
-          # LINE_ORGANIZER_USER_ID any more: that named one person for
-          # every club's alert, which stopped being right the day the app
-          # became multi-tenant. Each alert now goes to the organizers of
-          # the club the game is in, looked up in the database.
+          # Nothing is sent to a group, and each notice goes to the organizers of
+          # the club concerned, looked up in the database.
