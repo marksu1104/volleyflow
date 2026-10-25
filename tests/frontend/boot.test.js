@@ -417,3 +417,18 @@ test("one tap firing several requests clears only when the last returns", () => 
   second();
   assert.equal(btn.disabled, false);
 });
+
+test("a page cached from before the scripts moved reloads itself once", () => {
+  // The old HTML loads frontend/shared.js, now a forwarding stub.
+  const { sourceOf, installGlobals } = require("./harness.js");
+  installGlobals();
+  const replaced = [];
+  globalThis.location = { href: "https://x/member.html?as=a", replace: (u) => replaced.push(u) };
+  const stub = new Function(sourceOf("shared.js"));
+
+  stub();
+  stub();
+
+  assert.equal(replaced.length, 1);
+  assert.match(replaced[0], /member\.html\?as=a&v=\d+$/);
+});
