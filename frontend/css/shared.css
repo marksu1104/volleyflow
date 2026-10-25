@@ -1,14 +1,9 @@
-/* Design tokens — mirrors the phone's own light/dark setting rather than
-   forcing one look, per the redesign review. Component classes below are
-   named for what they show (hero, roster, money), not what page uses
-   them, so member.html, the organizer pages, and profile.html can all
-   draw from the same vocabulary. */
+/* Design tokens, following the phone's light or dark setting. Classes are
+named for what they show (hero, roster, money), not the page that uses
+them. */
 :root {
-  /* Declares that this page renders correctly in both schemes. Without
-     it, an embedded webview (LINE's LIFF browser among them) can stay on
-     light regardless of the device setting, and form controls keep their
-     light-mode chrome — the same page in a normal browser follows the
-     system fine, which is exactly the asymmetry this fixes. */
+  /* Declares both schemes, so LINE's in-app browser and form controls
+  follow the device setting too. */
   color-scheme: light dark;
 
   --ground: #eef1f5;
@@ -60,13 +55,8 @@
 }
 
 * { box-sizing: border-box; }
-/* This has bitten the project twice now: any component class that sets
-   its own `display` (`.balance{display:flex}`, `.fold{display:block}`,
-   ...) has higher specificity than the browser's own `[hidden]{display:
-   none}` default, so a plain `hidden` attribute on that element quietly
-   stops working — the element still renders. One global, !important
-   rule makes `hidden` win unconditionally, for every class, including
-   ones added later, instead of chasing this class by class. */
+/* A class that sets its own `display` outranks the browser's [hidden]
+rule, so `hidden` would stop working; this makes it always win. */
 [hidden] { display: none !important; }
 body {
   font-family: var(--font-cjk);
@@ -79,35 +69,19 @@ body {
 }
 .wrap { max-width: 520px; margin: 0 auto; }
 
-/* One bar shape on every page: something contextual on the left, the
-   app's name centred and tappable (always the way home), your own avatar
-   on the right. Being identical everywhere is the point — it's how you
-   can tell at a glance that 管理 and 會員 are the same app. */
+/* The same bar on every page: context on the left, the app's name centred
+(always the way home), the user's avatar on the right. */
 .app-bar {
-  /* minmax(0, 1fr), not 1fr: a bare 1fr is minmax(auto, 1fr), whose
-     floor is the column's min-content width. Removing that floor is
-     necessary but on its own does nothing visible, and it is worth
-     saying why, because the obvious reading is wrong: the track shrank
-     to 121.75px exactly as asked, and the club chip — inline-flex, so
-     sized shrink-to-fit from its own content — stayed 180px and simply
-     overflowed it into the VolleyFlow wordmark.
-
-     Three things have to hold together, and each is useless alone: this
-     track must be allowed to shrink, .app-bar-left must be *bound* to
-     the track (justify-self:stretch — start sizes it to its content
-     instead), and .club-chip must be capped at that. Capping the chip
-     while its parent still sized to content meant 100% of 180px, which
-     constrains nothing. Measured, after three wrong guesses: check.js,
-     「標題列的球隊名、品牌、頭像不會疊在一起」. */
+  /* minmax(0, 1fr), not 1fr, so the side tracks may shrink below their
+  content. Together with .app-bar-left stretching to its track and
+  .club-chip's max-width, this keeps a long club name from running into
+  the wordmark (checked by tests/visual/check.js). */
   display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 8px; margin-bottom: 12px; min-height: 36px;
 }
-/* stretch, not start: justify-self:start makes a grid item size to its
-   own content, so this stayed 180px inside a 121.75px track and hung
-   58px out of it. Stretching binds it to the track, which is what gives
-   .club-chip's max-width something real to resolve against. The chip is
-   inline-flex, so it still sits against the left edge either way. */
+/* stretch binds this to its track, which gives .club-chip's max-width
+something to resolve against. */
 .app-bar-left { justify-self: stretch; min-width: 0; }
 .app-bar-right { justify-self: end; display: flex; align-items: center; gap: 8px; }
 .brand {
@@ -120,9 +94,7 @@ body {
   font-weight: 600; cursor: pointer; padding: 4px 2px; white-space: nowrap;
 }
 
-/* 會員 / 管理 — where you are, and the way to the other one. Only shown
-   to a club's organizer; everyone else never learns it exists, which is
-   also honest, since there's nothing there for them. */
+/* 會員 / 管理: where you are and the way to the other half. Organizers only. */
 .context-switch { display: flex; gap: 3px; background: var(--surface-2); padding: 3px; border-radius: 10px; margin-bottom: 8px; }
 .context-switch a {
   flex: 1; text-align: center; padding: 7px 4px; border-radius: 8px; font-size: .82rem;
@@ -142,27 +114,15 @@ h2 { font-size: .9rem; margin: 28px 0 10px; color: var(--ink-soft); font-weight:
   font-size: .74rem; color: var(--ink-soft); font-weight: 700; margin: 14px 0 7px;
   text-transform: uppercase; letter-spacing: .04em;
 }
-/* Only the label at the very top of the page loses its space. This used
-   to be every `.section-label:first-child`, which meant any section
-   opening with one — and on the roster page that is all of them — sat
-   flush against whatever came before it. Reported 2026-09-18 about
-   新增訪客, though 待核准, 重複的名字, 等待加入本季 and 加入連結 all had
-   it; the dense roster row directly above 新增訪客 just made it obvious
-   there first. Sections that deliberately want no gap set it inline. */
+/* Only the label at the very top of the page loses its top margin. */
 .wrap > .section-label:first-child { margin-top: 0; }
-/* A count riding along on a section's label — how many of the thing the
-   section is about. Set apart from the label rather than shouting with
-   it: the label is uppercase and bold, and a number inherits neither
-   well. */
+/* A count beside a section label, quieter than the label itself. */
 .section-label .section-note {
   float: right; font-weight: 400; letter-spacing: 0;
   text-transform: none; color: var(--ink-faint); font-family: var(--font-num);
 }
-/* A section-label that also opens and closes what's under it — the
-   roster page's "其他成員", collapsed by default because 本季固定成員
-   is what the organizer actually came here to read, and a long tail of
-   people not on this season used to sit above it. Same look as a plain
-   section-label; only the pointer and the chevron say it does anything. */
+/* A section label that also folds what is under it (其他成員 on the roster
+page). Looks like a plain label; the pointer and chevron say it opens. */
 .collapse-toggle {
   display: flex; align-items: center; gap: 6px; width: 100%;
   background: none; border: none; padding: 0; cursor: pointer;
@@ -173,7 +133,7 @@ h2 { font-size: .9rem; margin: 28px 0 10px; color: var(--ink-soft); font-weight:
 .collapse-count { color: var(--ink-faint); font-weight: 500; text-transform: none; letter-spacing: 0; }
 .hint { font-size: .76rem; color: var(--ink-faint); margin-top: 6px; line-height: 1.5; }
 
-/* buttons — instant-feeling press state everywhere */
+/* Buttons: an immediate press state everywhere. */
 button { transition: transform .08s ease, opacity .15s ease, background-color .15s ease; font-family: var(--font-cjk); }
 button:active:not(:disabled) { transform: scale(.96); }
 button:disabled { opacity: .6; cursor: default; }
@@ -184,9 +144,8 @@ button:disabled { opacity: .6; cursor: default; }
 
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes slideUp { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-/* Switching season replaces everything below the picker. Reusing fadeIn
-   rather than inventing a second one keeps every "this just changed" on
-   the same 4px rise. See flashSeasonContent. */
+/* Switching season replays the same fadeIn as every other change; see
+flashSeasonContent. */
 .season-swap { animation: fadeIn .18s ease both; }
 @media (prefers-reduced-motion: reduce) { .season-swap { animation: none; } }
 
@@ -202,19 +161,13 @@ button:disabled { opacity: .6; cursor: default; }
 .btn-row { display: flex; gap: 8px; }
 .btn-row .btn { margin-top: 0; }
 
-/* A text field with its own action beside it — 開新一季 的「不在球隊裡的
-   人」. The class sat on the markup with no rule anywhere to match it, so
-   the field and its button stacked and the button kept the browser's
-   default grey (reported 2026-09-28 with a screenshot). .btn is
-   width:100% with a top margin, which is right for a page-wide action
-   and wrong inside a row — hence the same two overrides .btn-row needs
-   above. */
+/* A text field with its action beside it. .btn is full width with a top
+margin, so both are overridden here. */
 .add-member-row { display: flex; gap: 8px; align-items: center; }
 .add-member-row .control { flex: 1; min-width: 0; }
 .add-member-row .btn { width: auto; margin-top: 0; flex: none; }
 
-/* 待辦: one line above the game card. A row of coloured chips read as a
-   wall of warnings and needed a scrollbar; colour now lives in the dot. */
+/* 待辦: one line above the game card, coloured by its dot. */
 .todo-line {
   display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
   padding: 11px 12px; margin-bottom: 10px; font-size: .84rem; font-family: var(--font-cjk);
@@ -235,8 +188,7 @@ button:disabled { opacity: .6; cursor: default; }
 .todo-row .ts-label { flex: 1; }
 .todo-row .ts-sub { display: block; font-size: .73rem; color: var(--ink-faint); margin-top: 1px; }
 
-/* generic small pill action (a game-detail row's own action, a payment
-   quick-action, etc.) — distinct from the full-width .btn above */
+/* A small pill action, unlike the full-width .btn. */
 button.action {
   padding: 7px 14px; border: none; border-radius: 8px;
   background: var(--accent-soft); color: var(--accent); font-size: .84rem;
@@ -244,14 +196,10 @@ button.action {
 }
 button.action.cancel { background: var(--bad-soft); color: var(--bad); }
 button.action.ghost { background: var(--surface); color: var(--ink-soft); border: 1px solid var(--rule-strong); }
-/* The same pill, tighter, for one that sits inside a list row rather
-   than under a card. Replaces .link-btn and .member-remove, which were
-   this shape redefined page by page. */
+/* The same pill, tighter, for inside a list row. */
 button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 
-/* organizer section nav — 總覽 / 帳務管理 / 成員管理 / 設定 are separate
-   pages sharing one season picker (same localStorage key), styled as a
-   segmented control so it reads as one place with tabs, not four links. */
+/* Organizer section nav: 總覽 / 名單 / 帳務 / 設定 as one segmented control. */
 .org-nav {
   display: flex; gap: 3px; margin: 0 0 10px; padding: 3px;
   background: var(--surface-2); border-radius: 10px; overflow-x: auto;
@@ -262,9 +210,9 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 }
 .org-nav-link.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); font-weight: 700; }
 
-/* season/club picker */
-/* The caret is drawn in, because appearance: none takes the platform's
-   away — without it these read as boxes of text nobody thinks to tap. */
+/* Season and club pickers */
+/* The caret is drawn in, since appearance: none removes the platform's
+and these must look tappable. */
 .season-picker {
   width: 100%; padding: 11px 30px 11px 12px; border: 1px solid var(--rule); border-radius: 10px;
   font-size: .95rem; color: var(--ink); appearance: none; text-overflow: ellipsis;
@@ -273,10 +221,8 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
     no-repeat right 11px center / 11px 8px;
 }
 .club-picker { margin-bottom: 8px; font-weight: 700; }
-/* Club and season on one row. Stacked, the two of them plus the
-   management tabs pushed the game card and the calendar off the
-   bottom of a phone screen, and the overview's whole point is
-   seeing both at once. */
+/* Club and season on one row, so the game card and calendar stay on
+screen. */
 .picker-row { display: flex; gap: 8px; margin-bottom: 12px; }
 .picker-row-labeled .picker-field { flex: 1 1 0; min-width: 0; }
 .picker-row-labeled .picker-field > label {
@@ -299,22 +245,19 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .picker-control.is-loading .season-picker {
   padding-right: 40px; background-image: none; color: var(--ink-soft);
 }
-/* An hour and a minute, side by side. A native time input prints the
-   phone's own clock (下午 06:30 on a Chinese phone) and no attribute
-   moves it, so the app spells 18:30 out itself. */
+/* Hour and minute selects side by side; a native time input shows the
+phone's own clock format. */
 .time-pair { display: flex; align-items: center; gap: 5px; }
 .time-pair .control { flex: 1 1 0; min-width: 0; padding-left: 8px; padding-right: 22px; }
 .time-pair span { color: var(--ink-faint); font-weight: 700; }
 .picker-row .season-picker { flex: 1 1 0; min-width: 0; margin-bottom: 0; }
 .identity { font-size: .8rem; color: var(--ink-soft); margin-bottom: 14px; min-height: 1.2em; }
 #error { color: var(--bad); font-size: .85rem; margin: 6px 0 0; min-height: 1em; }
-/* The reserved line is there so an arriving error doesn't shove the page
-   down. While there is no error it is 22px of nothing, and on the
-   overview that is 22px of calendar. */
+/* Reserved space for an error, collapsed while there is none. */
 #error:empty { min-height: 0; margin: 0; }
 
-/* avatar — initial-letter circle, used on rosters, headers, and the
-   profile page (large variant) */
+/* Avatar: an initial in a circle, on rosters, headers and the profile
+page. */
 .avatar {
   width: 30px; height: 30px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
   display: inline-flex; align-items: center; justify-content: center; font-size: .78rem; font-weight: 700;
@@ -322,18 +265,15 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 }
 .avatar.sm { width: 24px; height: 24px; font-size: .66rem; }
 .avatar.lg { width: 52px; height: 52px; font-size: 1.1rem; }
-/* A LINE profile picture, laid over the initial rather than replacing
-   it: same box, so nothing moves when it arrives, and if it fails to
-   load the <img> removes itself and the initial underneath is already
-   there. See avatarHtml in shared.js. */
+/* A LINE picture laid over the initial, so nothing moves when it loads
+and a failed picture leaves the initial. See avatarHtml. */
 .avatar.has-photo { position: relative; overflow: hidden; }
-/* A picker's groups (候補 / 球隊成員 / 訪客) and the people in them who
-   can't be chosen — shown, greyed, with the reason in the note. */
+/* A picker's groups (候補 / 球隊成員 / 訪客), and people who cannot be chosen,
+greyed with the reason. */
 .pick-group { font-size: .74rem; font-weight: 700; color: var(--ink-faint); letter-spacing: .04em; margin: 12px 2px 4px; }
 .pick-row.is-disabled { opacity: .45; cursor: default; }
 .pick-row.is-disabled .radio { visibility: hidden; }
-/* The management pages, opened by the developer on a club that isn't
-   theirs. Plain and unmissable rather than alarming. */
+/* Shown when the developer opens another club's management pages. */
 .dev-view {
   margin: 0 0 10px; padding: 7px 12px; border-radius: 9px;
   background: var(--warn-soft, var(--surface-2)); color: var(--warn, var(--ink));
@@ -344,55 +284,43 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   object-fit: cover; border-radius: 50%; background: var(--accent-soft);
 }
 
-/* app-top bar: club chip + avatar, echoed on every page */
+/* Top bar: club chip and avatar, on every page. */
 .app-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
 .app-top .avatar { cursor: pointer; }
 .club-chip {
   display: inline-flex; align-items: center; gap: 7px; border: none; background: var(--surface-2);
   color: var(--ink); font-size: .86rem; font-weight: 700; padding: 7px 12px 7px 8px; border-radius: 999px;
   cursor: pointer; font-family: var(--font-cjk);
-  /* max-width is the one that actually does the work. An inline-flex box
-     takes its width from its contents and will happily overflow a
-     narrower parent; nothing was compressing it, so min-width:0 alone
-     freed a box that was never being squeezed. Capping it at the grid
-     area is what finally pushes the pressure inward onto the name, which
-     can then ellipsis. */
+  /* max-width caps the chip at its grid area, so the name inside
+  ellipsizes instead of overflowing. */
   max-width: 100%;
   min-width: 0;
 }
 .club-chip .caret { color: var(--ink-faint); font-size: .7rem; flex: none; }
-/* min-width:0 is what actually lets the ellipsis happen: a flex item
-   will not shrink below its content without it, so the cap alone only
-   decided where the overflow started. */
+/* min-width: 0 lets the flex item shrink below its content, so the
+ellipsis can happen. */
 .club-chip-name { max-width: 11em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .club-dot {
   width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--surface);
   display: inline-flex; align-items: center; justify-content: center; font-size: .64rem; font-style: normal; font-weight: 700;
-  /* Fixed ornament: now that the chip can shrink, without this the
-     circle squashes into an ellipse — and the overlap rule measures only
-     the three top-level items, so it would never catch that. */
+  /* Fixed size, so the circle does not squash when the chip shrinks. */
   flex: none;
 }
 
-/* hero card: the next/selected game's headline facts */
-/* No entry animation. renderHero rewrites this element's markup on
-   every repaint, so a fade-in meant for the first paint replayed after
-   every action — taking leave flashed the whole card a moment after it
-   had already updated. The one deliberate animation here is .card-swap,
-   which fires only when you pick a different date. */
+/* Game card: the selected game's headline facts. */
+/* No entry animation: the card is redrawn on every repaint. .card-swap
+marks a change of date. */
 .hero { background: var(--surface); border-radius: 16px; padding: 16px; box-shadow: var(--shadow); border: 1px solid var(--rule); }
 .hero-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .hero-date { font-family: var(--font-num); font-size: 1.5rem; font-weight: 800; letter-spacing: -.01em; display: flex; align-items: baseline; gap: 8px; }
-/* "9/8" alone doesn't read as a date at a glance — the weekday is what
-   makes it land, and it's also the thing people actually plan around. */
+/* The weekday makes a date read at a glance. */
 .hero-weekday {
   font-family: var(--font-cjk); font-size: .92rem; font-weight: 700; color: var(--ink);
   background: var(--surface-2); padding: 3px 9px; border-radius: 7px;
 }
 .hero-when { font-size: .8rem; color: var(--ink-soft); margin-top: 4px; }
-/* 今天 / 明天 / 8 天後 — same family as the weekday chip (both answer
-   "when"), turned up to solid so the nearest game announces itself.
-   Deliberately not the accent colour: blue and pink mean gender here. */
+/* 今天 / 明天 / 8 天後, solid so the nearest game stands out. Not the accent
+colour: blue and pink mean gender here. */
 .hero-rel {
   font-size: .8rem; font-weight: 700; color: var(--surface); background: var(--ink);
   padding: 4px 11px; border-radius: 7px; white-space: nowrap;
@@ -416,7 +344,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .status-line.absent { background: var(--bad-soft); color: var(--bad); }
 .status-line.confirmed { background: var(--good-soft); color: var(--good); }
 
-/* balance line — a member's own running total, or a row in a settlement list */
+/* Balance line: a member's own total, or a row in a settlement list. */
 .balance { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; }
 .balance-label { font-size: .8rem; color: var(--ink-soft); }
 .balance-value, .balance-val { font-family: var(--font-num); font-weight: 800; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
@@ -426,7 +354,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .progress { height: 7px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin-top: 9px; }
 .progress i { display: block; height: 100%; background: var(--good); }
 
-/* month calendar (shared.js renderMonthCalendar draws these classes) */
+/* Month calendar, drawn by renderMonthCalendar. */
 .mcal { background: var(--surface); border: 1px solid var(--rule); border-radius: 13px; padding: 12px; }
 .mcal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: .84rem; font-weight: 700; }
 .mcal-nav {
@@ -434,14 +362,9 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   color: var(--ink-soft); cursor: pointer; line-height: 1;
 }
 .mcal-title { font-size: .84rem; font-weight: 700; }
-/* A fixed row height, not an aspect ratio. Under aspect-ratio the cell's
-   width was derived from its height and stopped matching the 1fr column
-   it sat in: seven cells came to 355px inside a 332px grid, so Saturday
-   hung 8px past the edge of the card — except in a month that opens on
-   a Sunday, where they fitted and every cell shrank from 49x40 to
-   46x37. Paging between the two reshaped the calendar, reported as
-   「切換月份可能會變形」. min-width: 0 lets a 1fr track shrink to its
-   share rather than stand on its content. */
+/* A fixed row height rather than an aspect ratio, so cells always match
+their 1fr columns and paging months never reshapes the calendar.
+min-width: 0 lets a track shrink to its share. */
 .mcal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; grid-auto-rows: 34px; }
 .mcal-grid.mcal-weekdays { grid-auto-rows: auto; }
 .mcal-weekdays div { text-align: center; font-size: .64rem; color: var(--ink-faint); padding-bottom: 4px; font-weight: 600; }
@@ -453,19 +376,15 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .mcal-cell.today { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 .mcal-cell.has-game { cursor: pointer; font-weight: 700; background: var(--surface-2); color: var(--ink); }
 .mcal-cell.has-game:active { transform: scale(.92); }
-/* The selected day. Filled, not outlined: a hairline ring on a 40px
-   cell is easy to miss, and this is the only thing tying the calendar to
-   the card above it — if you can't see which day is selected, tapping
-   around feels like nothing is happening. */
+/* The selected day, filled so it is easy to see which day the card shows. */
 .mcal-cell.on {
   background: var(--accent); color: var(--surface); font-weight: 800;
   box-shadow: 0 2px 7px rgba(21, 97, 143, .35);
 }
 .mcal-cell.on .mcal-dot { background: var(--surface); }
 .mcal-cell.on .mcal-dot.away { background: none; border-color: var(--surface); opacity: .9; }
-/* One dot, four meanings: has a game / short of players / full / you're
-   away. A cell is ~40px across, so a word in it is unreadable — and the
-   colour is doing the same job a label would. */
+/* One dot, four meanings: a game / short of players / full / you are
+away. A cell is too small for words. */
 .mcal-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); margin-top: 1px; flex: none; }
 .mcal-dot.short { background: var(--warn); }
 .mcal-dot.full { background: var(--good); }
@@ -476,27 +395,21 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 }
 .mcal-legend span { display: inline-flex; align-items: center; gap: 4px; font-size: .62rem; color: var(--ink-faint); }
 
-/* at-a-glance summary */
+/* At-a-glance summary. */
 .glance { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; margin: 4px 0 6px; }
 
-/* bottom sheet a tapped calendar day (or a modal action) opens into */
-/* `backwards`, not `both`, on these entrance animations. A fill that
-   outlives the animation keeps a transform on the sheet, and a transform
-   makes it the box every position:fixed picker inside it is placed
-   against: the 代打 picker opened over a short roster came out the
-   height of the sheet and lost its title off the top (2026-10-17). */
+/* Bottom sheet */
+/* `backwards`, not `both`: a fill that outlives the animation leaves a
+transform, which would make the sheet the containing block for the
+fixed pickers inside it. */
 .gsheet-backdrop {
   position: fixed; inset: 0; background: var(--scrim);
   display: flex; align-items: flex-end; justify-content: center;
   z-index: 50; animation: fadeIn .15s ease backwards;
 }
 .gsheet-backdrop[hidden] { display: none; }
-/* A sheet is as tall as it needs to be, and no taller — but a short
-   one still starts where a tall one starts, rather than hugging the
-   bottom edge of the phone. A game with three names used to sit in the
-   last inch of the screen with everything above it empty, which reads
-   as the content having fallen down there. min-height gives it a
-   floor; the flex column keeps its own content at the top of that. */
+/* As tall as its content, with a floor so a short sheet still starts
+where a tall one does; content stays at the top. */
 .gsheet {
   background: var(--surface); width: 100%; max-width: 560px;
   min-height: 46vh; max-height: 86vh; overflow-y: auto;
@@ -505,8 +418,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   display: flex; flex-direction: column; align-items: stretch;
   animation: slideUp .2s ease backwards;
 }
-/* Nothing inside stretches to fill the leftover space: the content sits
-   at the top and the empty room is below it, where it belongs. */
+/* Nothing stretches: content at the top, room below. */
 .gsheet > * { flex: none; }
 .gsheet h3 { margin: 0 0 12px; font-size: .95rem; }
 .gsheet-close {
@@ -515,11 +427,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   color: var(--ink-soft); font-size: 1rem; line-height: 1; cursor: pointer;
 }
 
-/* The season wizard takes the whole screen rather than the bottom half
-   of it. Four steps of decisions is not something you peek at from
-   under the page you were on - and leaving the club and season pickers
-   showing behind it is what made 開新一季 read as "still in the old
-   season" (2026-09-17). */
+/* The season wizard takes the whole screen and covers the pickers. */
 .gsheet-backdrop.full { align-items: stretch; }
 .gsheet.full {
   max-width: 640px; min-height: 100%; max-height: 100%;
@@ -538,31 +446,27 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   font-size: 1rem; line-height: 1; cursor: pointer;
 }
 
-/* one game's full detail inside the sheet */
+/* One game's detail inside the sheet. */
 .gdetail-head { display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px; }
 .gdetail-section-label { font-size: .72rem; color: var(--ink-soft); font-weight: 700; margin: 14px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
 
-/* The game sheet's three groups: 出席 / 請假 / 候補. The strip is the
-   summary — its counts are the "who's playing, who's away, who's
-   waiting" answer at a glance — and the panel below is whichever one
-   you asked for. */
+/* The game sheet's three groups (出席 / 請假 / 候補); the counts on the strip
+are the summary. */
 .gd-tabs {
   display: flex; gap: 6px; margin: 14px 0 10px;
   background: var(--surface-2); padding: 4px; border-radius: 12px;
 }
 .gd-tab {
   flex: 1; border: 0; background: transparent; cursor: pointer;
-  /* 16px so iOS doesn't zoom the page when one is tapped, and a 40px
-     floor so a thumb can hit it — both learned on a real phone. */
+  /* 16px so iOS does not zoom, and at least 40px tall for a thumb. */
   font-size: 1rem; min-height: 40px; padding: 6px 4px;
   border-radius: 9px; color: var(--ink-soft); font-weight: 600;
   white-space: nowrap;
 }
 .gd-tab b { font-weight: 800; }
 .gd-tab.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(21, 27, 38, .10); }
-/* A roster change can land in a group that is not open. Keep the chosen
-   tab stable and briefly point to the destination instead of switching
-   the sheet underneath the reader. */
+/* A roster change can land in a tab that is not open; point at the
+destination instead of switching. */
 @keyframes rosterChangeComplete {
   0%, 58% { color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
   100% { color: var(--ink-soft); box-shadow: inset 0 0 0 0 transparent; }
@@ -576,17 +480,13 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   animation: spin .7s linear infinite;
 }
 .gd-tab.roster-change-complete { animation: rosterChangeComplete .7s ease-out; }
-/* Explicit, because a class setting its own `display` beats a bare
-   [hidden] and that has silently broken a screen here before. */
+/* Explicit: a class's own `display` would beat a bare [hidden]. */
 .gd-panel[hidden] { display: none; }
 .gd-empty { padding: 22px 0; text-align: center; }
 .roster-row.absent { background: var(--bad-soft); color: var(--bad); }
 .roster-row.dropin { background: var(--good-soft); color: var(--good); }
-/* The right-hand end of a roster row: whatever note and controls this
-   particular row has. Always emitted, even when empty, so every row has
-   the same four flex children and therefore the same geometry — the
-   member rows used to be missing this slot entirely, which is why they
-   sat at a different height from the drop-in rows beside them. */
+/* The right-hand end of a roster row. Always present, even empty, so
+every row has the same children and height. */
 .roster-note:empty { display: none; }
 .roster-note {
   font-size: .74rem; font-weight: 400; opacity: .9; display: flex;
@@ -598,41 +498,23 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .gdetail-mystatus.waitlisted { background: var(--warn-soft); color: var(--warn); }
 .gdetail-locked { font-size: .78rem; color: var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 6px 10px; margin-top: 8px; }
 
-/* The organizer's 新增臨打: a trigger button opening the same shared
-   picker (renderPersonPicker/choosePerson) everything else on this sheet
-   uses, rather than its own bare name field and gender select — the
-   trigger itself borrows .su-add, the signup sheet's own "＋" button.
-   Used to be an inline row kept on the theory that a modal per person is
-   slower on the night than a field that stays put; in practice it was a
-   third, differently-shaped way to type a name on a sheet that already
-   has two proper pickers, and 訪客's own note field costs one tap more
-   than the row it replaced. */
+/* The organizer's 新增臨打: a button opening the shared person picker, styled
+like the signup sheet's ＋. */
 .add-dropin-picker:empty { display: none; }
 
-/* The attendance list: one numbered line per person who'll be on court,
-   so "how many, and who" is answered by looking rather than counting.
-   Absent members keep the same row shape with a dash for a number —
-   they're part of the same picture, just on the other side of it. */
+/* The attendance list: one numbered row per person on court; absent
+members keep the same shape with a dash. */
 .att-list { display: flex; flex-direction: column; gap: 3px; }
-/* Every row in this list is the same object, so every row is the same
-   height. It wasn't: a 代打 note is a flex child and its padding counts
-   toward the row, while the 訪客 tag is inline inside the name and its
-   padding doesn't — and once a note took horizontal space the name
-   beside it wrapped to a second line. Rows ended up 52px or 70px
-   depending on what happened to be in them, which is what makes a list
-   look untidy however good the individual rows are. */
+/* Every row has the same height: notes are inline (see rosterRow) and
+names never wrap. */
 .att-row {
-  /* Every row is the same object, so every row is the same height. What
-     used to break that was the note being a flex child rather than an
-     inline one — see rosterRow. */
   display: flex; align-items: center; gap: 8px; padding: 8px 10px; min-height: 46px;
   border-radius: 9px; background: var(--surface); border: 1px solid var(--rule); font-size: .87rem;
 }
 .att-row.dropin { background: var(--good-soft); border-color: transparent; }
 .att-row.absent { background: var(--surface-2); border-color: transparent; color: var(--ink-soft); }
-/* Used only on the row that has just arrived in this group. The row
-   keeps its normal height and final colours; the accent ring makes the
-   movement legible without making the whole list flash. */
+/* Only on a row that just arrived in this group: an accent ring, without
+resizing or flashing the list. */
 @keyframes rosterRowChanged {
   0% { transform: translateY(-4px); box-shadow: 0 0 0 2px var(--accent); }
   42% { transform: translateY(0); box-shadow: 0 0 0 2px var(--accent); }
@@ -641,18 +523,15 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .att-row.roster-change-pending { box-shadow: 0 0 0 1px var(--accent); }
 .att-row.roster-change-complete { animation: rosterRowChanged .7s ease-out; }
 
-/* The same arrival used by 本季名單 when a person moves between 固定成員
-   and 其他成員. Keeping it shared makes every roster movement read as the
-   same interaction instead of each page inventing its own transition. */
+/* The same arrival on 本季名單 when somebody moves between 固定成員 and 其他成員. */
 @keyframes rosterRowEnter {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 .roster-row-entering { animation: rosterRowEnter .2s ease both; }
 
-/* A change made from the hero card may happen while the roster sheet is
-   closed. Carry the same pending/completed rhythm on the card so the
-   immediate button change and the later success message stay connected. */
+/* The same pending and completed cues on the card, for changes made while
+the sheet is closed. */
 .roster-surface-pending .hero {
   box-shadow: 0 0 0 1px var(--accent), var(--shadow);
 }
@@ -672,44 +551,32 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   font-family: var(--font-num); font-size: .78rem; font-weight: 800; color: var(--ink-faint);
   min-width: 18px; text-align: right; font-variant-numeric: tabular-nums;
 }
-/* One line, always. A roster is scanned, and a name that wraps takes
-   the whole row's height with it. */
-/* Deliberately NOT a flex container: the tags inside it have to stay
-   inline, or their padding starts counting toward the row's height and
-   rows come out different sizes. The name alone truncates, as an
-   inline-block, so a long one gives way before the 代打 note does. */
+/* One line, and not a flex container: the tags inside stay inline so
+their padding does not change the row's height. Only the name itself
+truncates, so a long one gives way before the 代打 note. */
 .att-name { flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; }
 .att-who {
   display: inline-block; max-width: 100%; vertical-align: bottom;
   overflow: hidden; text-overflow: ellipsis;
 }
-/* Inline, like .guest-tag beside it — see rosterRow. A flex sibling
-   here is what made rows different heights. */
+/* Inline, like .guest-tag; see rosterRow. */
 .att-note {
   font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-left: 6px;
   background: var(--surface-2); color: var(--ink-soft); white-space: nowrap;
 }
 .att-row.dropin .att-note { background: var(--surface); color: var(--good); }
 .att-note.sub { background: var(--accent-soft); color: var(--accent); }
-/* Who brought a guest. Quieter than the 臨打/代打 label beside it on
-   purpose: that one says what this person is to the game, this one only
-   says who to ask about them, and it must not compete. */
-/* Qualified deliberately. `.att-row.dropin .att-note` above is (0,3,0)
-   and beat a plain `.att-note.by` (0,2,0), so on a 臨打 row this tag kept
-   the green pill's background while still taking this rule's zero side
-   padding — the text sat flush against the pill's edge and read as
-   overflowing it. Reported 2026-09-24 with a screenshot. Losing only
-   *some* declarations is what made it look like a sizing bug rather
-   than a cascade one. */
+/* Who brought a guest, quieter than the 代打 label. Qualified to match
+`.att-row.dropin .att-note` (0,3,0), which would otherwise keep its
+pill background. */
 .att-row .att-note.by,
 .att-row.dropin .att-note.by {
   background: none; padding: 2px 0; color: var(--ink-faint); font-weight: 400;
 }
 .att-note.gap { background: var(--bad-soft); color: var(--bad); }
 
-/* A row with something to do opens in place, downward, onto at most two
-   buttons (see rosterRow). The chevron says the row opens: large,
-   tinted, the only thing on the right; it turns into ✕ while open. */
+/* A row with actions opens downward onto at most two buttons; the chevron
+becomes ✕ while open. */
 .att-row.has-acts { cursor: pointer; flex-wrap: wrap; row-gap: 0; align-content: center; -webkit-tap-highlight-color: transparent; }
 .att-row.has-acts:hover { border-color: var(--accent); }
 .att-row.open { border-color: var(--accent); }
@@ -722,8 +589,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .att-go svg { display: block; }
 .att-go .i-close, .att-row.open .att-go .i-open { display: none; }
 .att-row.open .att-go .i-close { display: block; }
-/* Below the name, the full width of the row. Collapsed to nothing, so a
-   closed row is exactly as tall as one with nothing to do. */
+/* Below the name, full width; collapsed to nothing when closed. */
 .row-acts {
   flex: 0 0 100%; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px;
   max-height: 0; opacity: 0; overflow: hidden; visibility: hidden;
@@ -745,7 +611,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) {
   .row-acts, .att-row.open .row-acts { transition: none; }
 }
-/* 固定成員 / 臨打 inside the 出席 list: what a row is, said once. */
+/* 固定成員 / 臨打 headings inside the 出席 list. */
 .att-sec {
   display: flex; align-items: baseline; justify-content: space-between; margin: 10px 4px 4px;
   font-size: .74rem; font-weight: 700; color: var(--ink-faint); letter-spacing: .04em;
@@ -754,8 +620,8 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .att-sec b { font-family: var(--font-num); font-size: .8rem; color: var(--ink-soft); }
 .picker-note { margin: 0 0 10px; font-size: .8rem; color: var(--ink-soft); }
 
-/* The game in one line at the top of the organizer's roster sheet —
-   see renderGameHeadLine. Clear of the sheet's ✕ on the right. */
+/* The game in one line at the top of the organizer's roster sheet
+(renderGameHeadLine), clear of the ✕. */
 .gd-head {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px;
   padding: 0 40px 10px 2px;
@@ -777,34 +643,11 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .gender-tag.male { color: var(--accent); }
 .gender-tag.female { color: var(--pink); }
 
-/* 候補 waitlist rows — numbered so the order (the thing people asked
-   about when several sign up at once) is the first thing the eye hits */
+/* 候補 rows, numbered so the order is the first thing seen. */
 
-/* A small action on a row — 編輯, 明細, 固定, 臨打, 移除, 複製.
-
-   It was an underlined word, and that is what 「不要太多可以按的功能都用
-   文字，多用點按鈕的感覺或純圖示就好」 was about (2026-09-18). On a row
-   where several things are pressable, underlined text does not read as a
-   control, and nothing on screen says where one target ends and the next
-   begins.
-
-   A tinted pill now, matching .pool-promote and .m-act's buttons, so the
-   app has one vocabulary for "small thing you can press" instead of
-   three. The visible edge also retires the old invisible-hit-area trick
-   — 9px of vertical padding pulled back out with an equal negative
-   margin. That existed because the text measured 17px tall, under half
-   of Apple's 44pt guidance, so taps missed; and it had to stay narrow
-   horizontally because neighbouring targets would otherwise overlap with
-   nothing showing it, and 遞補 sits beside 移除, where a stray tap
-   removes somebody. A pill draws its own boundary, so the gap between
-   two actions is legible and the target can simply be the right size.
-
-   Sized to clear the 32px tap target tests/visual/check.js enforces:
-   .76rem over a 1.25 line-height is ~15px, so 9px top and bottom puts
-   the pill at ~33px. Worth stating because the obvious padding for a
-   pill this size (7px) lands at ~29px and would swap an ugly control
-   for one that is actually harder to hit — which the check would catch,
-   but only if the numbers are written down rather than eyeballed. */
+/* A small action on a row (編輯, 明細, 固定, 臨打, 移除, 複製): a tinted pill, so
+each target has a visible edge. 9px vertical padding keeps it at about
+33px, above the 32px tap target tests/visual/check.js enforces. */
 .mini-action {
   border: none; border-radius: 8px; cursor: pointer; white-space: nowrap;
   background: var(--accent-soft); color: var(--accent);
@@ -813,8 +656,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 }
 .mini-action.danger { background: var(--bad-soft); color: var(--bad); }
 .mini-action:disabled { background: var(--surface-2); color: var(--ink-faint); cursor: default; }
-/* A hint on the left, a small action on the right. The save button used to
-   sit in a flex row beside the input, where .btn's width:100% ate the row. */
+/* A hint on the left, a small action on the right. */
 .under-field { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 .under-field .hint { flex: 1; margin: 0; }
 .sub-form {
@@ -822,16 +664,12 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   background: var(--surface-2); border-radius: 10px;
 }
 .sub-form[hidden] { display: none; }
-/* How often this person has played with you, beside their name — the
-   only way to tell two 王小明 apart in a picker. Pushed to the far end
-   so the names still line up. */
+/* How often this person has played with the viewer, at the far end, to
+tell two people with one name apart. */
 .pk-note { margin-left: auto; font-size: .72rem; color: var(--ink-faint); white-space: nowrap; }
 .pk-note:empty { display: none; }
-/* The season wizard's member picker holds the same .pick-row as the
-   substitute picker does, and had no layout at all — the rows sat flush
-   against each other while the identical-looking list elsewhere had a
-   gap. No max-height here: a 30-person roster scrolling inside a form is
-   worse than letting the page scroll. */
+/* The wizard's member picker. No max-height: the page scrolls instead of
+a list inside a form. */
 .pick { display: flex; flex-direction: column; gap: 3px; }
 .sub-pick { display: flex; flex-direction: column; gap: 3px; max-height: 180px; overflow-y: auto; }
 .pick-row {
@@ -840,9 +678,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 }
 .pick-row.on { border-color: var(--accent); background: var(--accent-soft); }
 .pick-row .pk-name { flex: 1; font-weight: 500; }
-/* What the club owes this person, or they owe it, while the organizer
-   decides whether they are in the new season — leaving somebody out is
-   a decision better made with their balance in view than after it. */
+/* Each person's balance while choosing the new season's roster. */
 .pick-row .pk-bal { font-family: var(--font-num); font-size: .72rem; font-variant-numeric: tabular-nums; }
 .pick-row .pk-bal.owe { color: var(--bad); }
 .pick-row .pk-bal.credit { color: var(--good); }
@@ -863,8 +699,8 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
   font-size: .84rem; font-weight: 700; cursor: pointer;
 }
 
-/* choice cards — two mutually exclusive actions with different money
-   outcomes (cancel-game refunded/unrefunded) */
+/* Choice cards: two exclusive actions with different money outcomes (a
+refunded or unrefunded cancellation). */
 .choice { display: flex; flex-direction: column; gap: 7px; }
 .choice-card {
   display: flex; gap: 10px; padding: 12px; border-radius: 11px; border: 1px solid var(--rule);
@@ -876,7 +712,7 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 .ch-body { font-size: .76rem; color: var(--ink-soft); margin-top: 3px; line-height: 1.55; display: block; }
 .ch-body b { color: var(--ink); font-variant-numeric: tabular-nums; }
 
-/* profile page */
+/* Profile page */
 .prof { display: flex; align-items: center; gap: 13px; padding: 2px 0 16px; }
 .prof-name { font-size: 1.05rem; font-weight: 700; }
 .prof-sub { font-size: .76rem; color: var(--ink-soft); margin-top: 3px; }
@@ -888,12 +724,11 @@ button.action.sm { padding: 5px 11px; font-size: .77rem; white-space: nowrap; }
 }
 .control:disabled { background: var(--surface-2); color: var(--ink-soft); }
 textarea.control { resize: vertical; min-height: 90px; }
-/* iOS gives date/time inputs an intrinsic width wide enough to push a
-   two-up row past the screen edge — width:100% alone doesn't hold them
-   back, the appearance reset plus min-width:0 does. */
+/* iOS gives date and time inputs a wide intrinsic width; the appearance
+reset and min-width: 0 contain them. */
 .control[type="time"], .control[type="date"] { -webkit-appearance: none; appearance: none; min-width: 0; }
-/* flex-basis over flex:1 so a pair that genuinely can't fit side by side
-   wraps to two rows instead of overflowing. */
+/* A basis rather than flex: 1, so a pair that cannot fit wraps instead of
+overflowing. */
 .field-pair { display: flex; gap: 10px; flex-wrap: wrap; }
 .field-pair .field { flex: 1 1 130px; min-width: 0; margin-bottom: 0; }
 .seg-pick { display: flex; gap: 6px; }
@@ -902,23 +737,20 @@ textarea.control { resize: vertical; min-height: 90px; }
   color: var(--ink-soft); font-size: .82rem; font-weight: 600; cursor: pointer;
 }
 .seg-pick button.selected { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
-/* Inside a money row: a choice made now and written later (季末結算),
-   kept visibly apart from .m-act's solid buttons, which record on tap. */
+/* Inside a money row: a choice written later (季末結算), unlike .m-act's
+buttons, which record on tap. */
 .m-row .seg-pick { margin-top: 9px; }
 .m-row .seg-pick button { padding: 7px; font-size: .78rem; }
 
-/* club rows — the switcher sheet and the profile page's club list share this */
+/* Club rows, shared by the club sheet and the profile page. */
 .club-row {
   display: flex; align-items: center; gap: 10px; padding: 11px; border-radius: 11px;
   border: 1px solid var(--rule); margin-bottom: 7px; background: var(--surface); text-align: left; width: 100%; cursor: pointer;
 }
 .club-row.on { border-color: var(--accent); background: var(--accent-soft); }
 .club-row.display { cursor: default; }
-/* min-width:0 is what makes the ellipsis work at all. A flex item's
-   min-width defaults to auto, which refuses to shrink below its own
-   content, so text-overflow never fires and a long club name pushes the
-   row wider or wraps to a second line instead. Same pattern as
-   .pool-who. Reported 2026-09-19: 「如果下面文字太長還會換行，會很醜」. */
+/* min-width: 0 lets a long club name ellipsize instead of widening or
+wrapping the row. */
 .club-row .cr-name { flex: 1; min-width: 0; font-weight: 700; font-size: .88rem; }
 .club-row .cr-title,
 .club-row .cr-sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -932,13 +764,9 @@ textarea.control { resize: vertical; min-height: 90px; }
 .bal.plus { color: var(--good); }
 .bal.minus { color: var(--bad); }
 
-/* a join-pool / not-yet-a-fixed-member row */
-/* One line per person. Three word-buttons wouldn't fit beside a name, so
-   stacking them was the first fix — but that made every person two rows
-   tall, and a club of twenty an endlessly long page. Square icon
-   buttons say the same thing in a quarter of the width; the words move
-   to the confirm dialog and to aria-label, which is where they still
-   have to exist. */
+/* A member not yet on the roster */
+/* One line per person, with icon buttons; their words are in aria-label
+and the confirm dialog. */
 .pool-row {
   display: flex; align-items: center; gap: 8px; min-height: 46px;
   padding: 6px 8px 6px 10px; border-radius: 10px; background: var(--surface);
@@ -967,12 +795,12 @@ textarea.control { resize: vertical; min-height: 90px; }
 .link-box code { flex: 1; font-size: .74rem; color: var(--ink-soft); font-family: var(--font-num); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .link-box button { border: none; background: var(--accent); color: var(--surface); font-size: .76rem; font-weight: 700; padding: 7px 12px; border-radius: 7px; cursor: pointer; }
 
-/* 帳務 · 季費 money rows */
+/* 帳務 money rows */
 .money { display: flex; flex-direction: column; gap: 6px; }
 .m-row { background: var(--surface); border: 1px solid var(--rule); border-radius: 11px; padding: 11px 12px; }
 .m-top { display: flex; align-items: center; gap: 9px; }
 .m-name { flex: 1; font-weight: 700; font-size: .88rem; }
-/* Money screen only — who to collect a guest's cash from. */
+/* Who to collect a guest's cash from. */
 .m-brought {
   margin-left: 6px; font-size: .66rem; font-weight: 700; color: var(--ink-soft);
   background: var(--surface-2); border-radius: 999px; padding: 2px 7px; white-space: nowrap;
@@ -993,13 +821,12 @@ textarea.control { resize: vertical; min-height: 90px; }
 .m-done { display: flex; align-items: center; gap: 6px; font-size: .76rem; color: var(--good); font-weight: 700; margin-top: 8px; }
 .m-keep { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 9px; font-size: .78rem; color: var(--ink-soft); }
 
-/* 管理員 · 設定 rows */
+/* 設定 rows */
 .set-row { display: flex; align-items: center; gap: 10px; padding: 11px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 11px; margin-bottom: 5px; }
 .set-label { flex: 1; font-size: .85rem; }
 .set-sub { display: block; font-size: .73rem; color: var(--ink-faint); margin-top: 1px; }
 .set-go { color: var(--ink-faint); font-size: .85rem; }
-/* Two things you can do to one row — 編輯 beside 取消 — kept at a
-   thumb's distance from each other so neither is hit by accident. */
+/* Two actions on one row, spaced so neither is hit by accident. */
 .row-actions { display: flex; align-items: center; gap: 6px; }
 .warn-box { font-size: .75rem; color: var(--warn); background: var(--warn-soft); border-radius: 9px; padding: 9px 11px; margin-top: 11px; line-height: 1.55; }
 
@@ -1009,42 +836,23 @@ textarea.control { resize: vertical; min-height: 90px; }
 }
 .empty { color: var(--ink-soft); font-size: .85rem; padding: 20px 0; text-align: center; }
 
-/* Loading, said out loud. An empty screen has three possible meanings —
-   still fetching, genuinely empty, or broken — and they have to look
-   different or every one of them reads as broken. This covers the first;
-   .empty-state covers the second and third. */
+/* Loading, shown clearly, so it never looks like an empty or broken page
+(.empty-state covers those). */
 .page-state {
   display: flex; flex-direction: column; align-items: center; gap: 12px;
   padding: 44px 20px; color: var(--ink-soft); font-size: .85rem; text-align: center;
 }
 .page-state p { margin: 0; max-width: 34ch; line-height: 1.6; }
-/* `display` matters far more here than it looks. An <i> is display:inline
-   by default, and width/height are *ignored* on an inline box — so the
-   spinner collapsed to nothing but its own 2px borders and rendered as a
-   thin vertical sliver that could not visibly rotate. Every earlier use
-   happened to sit inside .page-state or .block-state, both display:flex,
-   and a flex item is blockified automatically; that hid the bug until a
-   spinner was finally placed inside an ordinary block — the club
-   picker's sub-line — and it showed up on a phone on 2026-09-19.
-   flex:none for the same reason .club-dot and .todo-dot carry it: a flex
-   item with a fixed size still shrinks without it. */
+/* inline-block: width and height do nothing on an inline <i>. flex: none
+so it keeps its size inside a flex row. */
 .spinner {
   display: inline-block; vertical-align: middle; flex: none;
   width: 26px; height: 26px; border-radius: 50%;
   border: 2.5px solid var(--rule); border-top-color: var(--accent);
   animation: spin .8s linear infinite;
 }
-/* One section still waiting, rather than the whole screen. .page-state
-   owns the page and pads 44px to centre itself in it; this sits inside a
-   block that already has its own heading, so it stays short enough that
-   being replaced by a row or two barely moves the page.
-
-   It exists because the page-level spinner only ever covered whichever
-   request answered first. Once the season came from cache and landed
-   almost instantly, that spinner flashed away while 待核准 was still
-   three hops behind — leaving a gap that filled itself seconds later and
-   shoved everything down. 「如果有東西不能馬上顯現，至少你要把轉圈做出
-   來」, 2026-09-18. */
+/* One section still loading, inside a block with its own heading: short,
+so replacing it barely moves the page. */
 .block-state {
   display: flex; align-items: center; gap: 9px;
   padding: 12px 2px; color: var(--ink-faint); font-size: .8rem;
@@ -1053,10 +861,8 @@ textarea.control { resize: vertical; min-height: 90px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
 
-/* What a page shows before there's anything to show. Deliberately not a
-   bare "沒有資料" line: an organizer opening a brand-new club needs to be
-   told what the next step is and taken there, not left staring at empty
-   cards wondering whether the app is broken. */
+/* What a page shows before there is anything to show: what to do next,
+not a bare 沒有資料. */
 .empty-state {
   background: var(--surface); border: 1px dashed var(--rule-strong); border-radius: 14px;
   padding: 26px 20px; text-align: center;
@@ -1066,7 +872,7 @@ textarea.control { resize: vertical; min-height: 90px; }
 .empty-state .btn { max-width: 240px; margin-left: auto; margin-right: auto; }
 a.btn { display: block; text-decoration: none; text-align: center; }
 
-/* 開新一季 wizard: a stepper, a date generator, and the chips it makes */
+/* 開新一季 wizard: stepper, date generator, and its chips. */
 .stepper { display: flex; align-items: center; gap: 6px; margin-bottom: 18px; }
 .step { display: flex; align-items: center; gap: 6px; font-size: .78rem; color: var(--ink-faint); }
 .step i {
@@ -1095,15 +901,15 @@ a.btn { display: block; text-decoration: none; text-align: center; }
 .chip.add { background: none; border: 1px dashed var(--rule-strong); color: var(--ink-soft); cursor: pointer; padding: 5px 10px; }
 .chip .chip-ac { opacity: 1; font-size: .7rem; padding: 3px 8px; border: 1px solid var(--rule-strong); border-radius: 999px; color: var(--ink-faint); }
 .chip .chip-ac.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
-/* The same badge quoted inside a sentence, so the hint can name the
-   control it is talking about rather than describing it in words. */
+/* The same badge inside a sentence, so a hint can show the control it
+means. */
 .hint .chip-ac {
   display: inline-block; font-size: .7rem; line-height: 1.4; padding: 1px 8px;
   border: 1px solid var(--rule-strong); border-radius: 999px; color: var(--ink-faint); vertical-align: 1px;
 }
 .hint .chip-ac.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
 
-/* a tap-to-toggle checkbox row, for picking this season's members */
+/* A tap-to-toggle checkbox row, for picking the season's members. */
 .box {
   width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--rule-strong);
   display: grid; place-items: center; flex: none; font-size: .7rem; color: transparent;
@@ -1111,62 +917,34 @@ a.btn { display: block; text-decoration: none; text-align: center; }
 }
 .pick-row.on .box { background: var(--accent); border-color: var(--accent); color: var(--surface); }
 
-/* inner segmented control — 季費 / 當天臨打 / 季末結算 within the 帳務 page */
+/* Inner segmented control: 季費 / 當天臨打 / 季末結算 on the 帳務 page. */
 .seg { display: flex; gap: 3px; background: var(--surface-2); padding: 3px; border-radius: 9px; margin-bottom: 14px; }
 .seg span { flex: 1; text-align: center; font-size: .8rem; font-weight: 600; padding: 7px 4px; border-radius: 7px; color: var(--ink-soft); cursor: pointer; }
 .seg span.on { background: var(--accent); color: var(--surface); font-weight: 700; }
-/* 季末結算 is used once in a season, so while the season is still
-   running it drops to a footnote's weight — still there, still tappable,
-   just not competing with the two tabs used every week.
-
-   Quiet means dimmer, never narrower. It first shrank the tab and grew
-   it back when selected, which meant the three tabs changed width
-   depending on which one you had tapped: the control moved under your
-   finger every time you switched. Reported the next morning, 2026-09-18,
-   and it was the right complaint — a segmented control's whole job is to
-   hold still. Widths are equal and fixed now; only the colour says which
-   one is resting.
-
-   The `.on` pairing is not redundant: `.seg span.quiet` and
-   `.seg span.on` have identical specificity, so without it the later
-   rule would win and an opened 季末結算 would keep the faint colour it
-   has while closed. */
+/* 季末結算 is quieter while the season runs: dimmer, never narrower, so the
+tabs keep equal widths. `.on` is paired because `.seg span.quiet` and
+`.seg span.on` have equal specificity. */
 .seg span.quiet { color: var(--ink-faint); }
 .seg span.quiet.on { color: var(--surface); font-weight: 700; }
 
-/* small pill summary row, used by the organizer overview/settings pages
-   to show season parameters at a glance */
+/* A small pill summary row for season parameters. */
 .pill { background: var(--surface); border: 1px solid var(--rule); border-radius: 20px; padding: 5px 12px; font-size: .78rem; color: var(--ink-soft); }
 .pill strong { color: var(--ink); font-weight: 700; }
 .pill.settled { background: var(--good-soft); color: var(--good); border-color: transparent; }
 
-/* iOS Safari zooms the entire page whenever a focused field's font size
-   is under 16px — and it does not zoom back out afterwards, so the app
-   stays cropped for the rest of the session once anyone types anything.
-   Every field in this project was between 13px and 15.2px, which is why
-   it happened on every single input.
-
-   16px is the only value that stops it; there is no opt-out short of
-   `maximum-scale=1` on the viewport, which would disable pinch-zoom for
-   everyone and fails WCAG 1.4.4. !important because .control and
-   friends set their own size with class-level specificity, and because
-   the rule has to hold for fields added later without anyone having to
-   remember it. On a phone this is also just a better size to type into;
-   on a desktop the change is invisible.
-
-   Buttons, checkboxes, radios and file inputs are excluded: they take
-   no text entry, so they never trigger the zoom, and they carry sizes
-   the layout depends on. */
+/* iOS Safari zooms the page when a focused field's font is under 16px and
+does not zoom back. 16px is the only fix that keeps pinch-zoom (WCAG
+1.4.4); !important so it holds for every field, including future ones.
+Buttons, checkboxes, radios and file inputs take no text and are
+excluded. */
 input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="button"]):not([type="submit"]),
 select,
 textarea {
   font-size: 16px !important;
 }
 
-/* ---- the signup sheet: "+1, and I'm bringing two friends" ----
-   Everything here lives in its own sheet rather than inline under a
-   game, because the roster below a game runs to 18 names and anything
-   placed after it is effectively hidden. */
+/* The signup sheet ("+1, and two friends"), its own sheet because
+anything below a full roster is hidden. */
 .su-when { margin: 3px 0 0; font-size: .76rem; color: var(--ink-soft); }
 .su-cap { margin: 14px 0 4px; }
 .su-cap-line { display: flex; justify-content: space-between; align-items: baseline; font-size: .8rem; margin-bottom: 6px; }
@@ -1209,9 +987,8 @@ textarea {
   font-size: .64rem; font-weight: 700; color: var(--warn); background: var(--surface);
   border-radius: 999px; padding: 2px 7px; white-space: nowrap; flex: none;
 }
-/* Offered, never applied on its own: a typed name always means a new
-   person, because putting one player's fee on another's ledger can't be
-   undone while a duplicate row merely looks untidy. */
+/* Offered, never applied automatically: a typed name always means a new
+person. */
 .su-same {
   border: none; background: none; color: var(--accent); font-size: .7rem; font-weight: 700;
   text-align: left; padding: 0 0 0 20px; cursor: pointer; font-family: var(--font-cjk);
@@ -1221,23 +998,12 @@ textarea {
   margin: 15px 0 11px; padding-top: 12px; border-top: 1px solid var(--rule); font-size: .82rem;
 }
 .su-total-text { display: flex; flex-direction: column; gap: 2px; }
-/* One size, one colour, in every state — see renderSignup in
-   member.html. There used to be a .waiting variant that shrank this and
-   turned it amber when the whole signup was queued, which is half of
-   what made a full game's sheet look like a different screen. */
+/* One size and colour in every state; see renderSignup. */
 .su-amt { font-family: var(--font-num); font-size: 1.2rem; font-weight: 800; }
 .su-breakdown { color: var(--ink-faint); font-size: .72rem; }
 
-/* Tapping a date changes the card above the calendar, and without a cue
-   the change is easy to miss — especially when two dates have the same
-   headcount and only the date line differs. A brief lift is enough to
-   say "this is the thing that just changed", and it's skipped entirely
-   under prefers-reduced-motion by the global rule above. */
-/* The card is the only thing that changes when you tap a date, and a
-   3px lift was too quiet to notice — two dates with the same headcount
-   differ only in the date line. The accent ring says "this is what you
-   just changed" in the same colour as the day you pressed, which is
-   what ties the two together. */
+/* Tapping a date changes the card; an accent ring in the selected day's
+colour marks it. Skipped under prefers-reduced-motion. */
 @keyframes cardSwap {
   0%   { transform: scale(.985); box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
   60%  { transform: scale(1);    box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
@@ -1245,20 +1011,14 @@ textarea {
 }
 .card-swap { animation: cardSwap .42s ease-out; }
 
-/* ---- a game card's own controls ----
-   They live inside the card, under a rule, because they act on *this*
-   date and nothing else — floating them underneath made them read as
-   page-level buttons that happened to be nearby, and gave three
-   controls three different widths and weights. One row, equal weight,
-   equal width; 名單 is navigation rather than an action, so it sits
-   apart, quiet, with a chevron. */
+/* A game card's controls, inside the card under a rule: one row of equal
+buttons; 名單 is navigation, set apart. */
 .hero-actions {
   display: flex; gap: 8px; margin-top: 13px; padding-top: 13px;
   border-top: 1px solid var(--rule);
 }
-/* Two of these is the usual case; taking leave puts three in the row
-   (指定代打 / 取消請假 / ＋帶朋友), so the label shrinks a little rather
-   than overflowing the card. */
+/* Usually two; three after taking leave, so the label shrinks a little
+rather than overflowing. */
 .hact {
   flex: 1 1 0; min-width: 0; padding: 11px 6px; border: none; border-radius: 10px;
   font-family: var(--font-cjk); font-size: clamp(.78rem, 3.4vw, .88rem);
@@ -1276,8 +1036,7 @@ textarea {
   font-size: .82rem; font-weight: 600; cursor: pointer;
 }
 .hero-more .chev { color: var(--ink-faint); }
-/* Where you stand on this game, said once, above the buttons that
-   change it. */
+/* Where the viewer stands on this game, above the buttons that change it. */
 .hero-status {
   margin-top: 11px; padding: 8px 11px; border-radius: 9px;
   font-size: .8rem; font-weight: 700;
@@ -1287,11 +1046,7 @@ textarea {
 .hero-status.confirmed { background: var(--good-soft); color: var(--good); }
 .hero-status.waiting { background: var(--warn-soft); color: var(--warn); }
 
-/* The waitlist is a roster too. It had no background and no border while
-   the attendance list beside it had both, so three queued names read as
-   stray text under eighteen cards — people looked straight past it and
-   reported the waitlist as missing. Same row, dashed edge and a queue
-   position instead of a seat number. */
+/* The queue uses the same row, with a dashed edge and a queue position. */
 .att-row.queued {
   background: var(--surface); border-style: dashed; border-color: var(--rule-strong);
   color: var(--ink-soft);
@@ -1299,19 +1054,12 @@ textarea {
 .att-row.queued .att-num { color: var(--warn); }
 .att-row.me { box-shadow: inset 0 0 0 1.5px var(--accent); }
 
-/* ---- one screen on a phone ----
-   The member page ran to about 760px against roughly 700 of usable LIFF
-   height, so the calendar was always half off-screen. The balance used
-   to be a labelled section of its own at the bottom, ~80px, for one
-   number. It sits in the season row instead: that row already says
-   which season this is, and the balance belongs to that season. */
+/* The balance sits in the season row instead of a section of its own, so
+the member page fits one phone screen. */
 .season-row {
   margin-bottom: 12px; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .season-row .season-picker { flex: 1; min-width: 0; margin: 0; text-overflow: ellipsis; }
-/* Two lines so the value has something to be the value *of* — 已結清
-   on its own says nothing, and that is the state most members are in
-   most of the time. Same height as the picker beside it, so saying more
-   costs no space at all. */
+/* Two lines: a label and the value. Same height as the picker beside it. */
 .balance-chip {
   flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
   border: 1px solid var(--rule); border-radius: 11px; padding: 6px 11px;
@@ -1332,9 +1080,7 @@ textarea {
 .balance-chip.even { background: var(--surface-2); border-color: transparent; }
 .balance-chip.even .bc-value { color: var(--ink-soft); }
 
-/* The ledger behind the balance chip. Tapping it used to open the
-   profile page, which shows the same number again one screen further
-   away; what you want is what made it up. */
+/* The breakdown behind the balance chip. */
 .lg-total {
   display: flex; align-items: baseline; justify-content: space-between;
   margin: 14px 0 12px; padding: 12px 14px; border-radius: 12px;
@@ -1353,10 +1099,8 @@ textarea {
 .lg-amt { font-family: var(--font-num); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .lg-amt.plus { color: var(--good); }
 .lg-amt.minus { color: var(--ink); }
-/* 預估退費 — deliberately not styled like .lg-total. That block is the
-   headline and states money that exists; this one is a forecast that can
-   go down again when a stand-in cancels, so it reads as a note under the
-   breakdown rather than as a second balance competing with the first. */
+/* 預估退費: styled as a note, not like .lg-total, because it is a forecast,
+not money that exists. */
 .lg-estimate {
   margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--rule);
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
@@ -1371,14 +1115,8 @@ textarea {
 
 .bc-chev { color: var(--ink-faint); margin-left: 5px; font-weight: 600; }
 
-/* ---- a season's terms on the management screen ----
-   One line, under the card. This used to be three figure tiles sitting
-   above that line — 場地費總額, 每人每場, 最低人數 — and every one of
-   those numbers is also on the settings page, where it can actually be
-   changed rather than only read. That was three tiles of height on the
-   screen an organizer opens most often, spent restating something they
-   cannot act on from there. The tiles went on 2026-09-17; the settled
-   state stays a state, so it still reads as one. */
+/* A season's terms on the management screen, as one line; they are
+changed on the settings page. */
 .sm-line {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   margin-top: 9px; font-size: .78rem; color: var(--ink-soft);
@@ -1389,14 +1127,8 @@ textarea {
 }
 .sm-state.done { background: var(--good-soft); color: var(--good); }
 
-/* Toasts — see shared.js toast(). Fixed to the bottom because that is
-   the half of a phone a thumb already covers, and above everything so a
-   failure raised from inside a sheet is still readable. */
-/* Messages arrive at the top, not over the bottom of the screen.
-   Bottom is where every sheet puts its list and its confirm button, so
-   a toast landed squarely on the names being read and on the control
-   about to be pressed — reported as 擋住名單，很礙眼. Above everything
-   (z-index over the sheets) so it is never itself hidden. */
+/* Toasts (see toast()) appear at the top, away from the lists and buttons
+at the bottom of every sheet, and above the sheets. */
 .toasts {
   position: fixed; left: 0; right: 0; top: 0; z-index: 80;
   display: flex; flex-direction: column; align-items: center; gap: 8px;
@@ -1416,13 +1148,8 @@ textarea {
 .toast.out { opacity: 0; transform: translateY(-6px); transition: opacity .2s, transform .2s; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 
-/* "Still saving", for a change that is already on screen.
-   An optimistic tap repaints in the same frame, so the button it was
-   made on no longer exists by the time a spinner would go on it — see
-   beginPendingWrite. This is the one place that wait is admitted to, and
-   it is deliberately quiet: the action worked, the person can carry on,
-   and the only news is that the server has not confirmed it yet. Below
-   the toasts so a real message is never hidden behind it. */
+/* "Still saving", for a change already on screen (see beginPendingWrite).
+Quiet, and below the toasts. */
 .pending-chip {
   position: fixed; top: 10px; left: 50%; z-index: 79;
   transform: translate(-50%, -14px);
@@ -1446,22 +1173,15 @@ textarea {
 }
 
 
-/* ---- a game's air conditioning ----
-   A switch rather than a button: a button shows what you *can do*, a
-   switch shows what the game currently *is*. The organizer opens this
-   card to work on the roster anyway, so the state being permanently
-   legible there is what makes them notice a wrong one — no separate
-   "have you confirmed this?" flag needed. Only rendered when the club
-   actually pays for air conditioning; a switch that moves no money is
-   clutter. */
+/* A game's air conditioning, as a switch: it shows what the game
+currently is. Only when the club pays for air conditioning. */
 .ac-switch {
   display: flex; align-items: center; gap: 10px;
   margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rule);
 }
 .ac-switch .lbl { font-size: .84rem; font-weight: 700; flex: none; }
 .ac-seg { display: flex; gap: 2px; background: var(--surface-2); padding: 3px; border-radius: 10px; flex: none; }
-/* Both the same fixed width, each with its icon, so switching never
-   makes either button grow or shrink (2026-10-21). */
+/* Equal fixed widths, so switching never resizes either button. */
 .ac-seg button {
   width: 52px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
   border: none; background: none; padding: 6px 0; border-radius: 8px; cursor: pointer;
@@ -1470,7 +1190,7 @@ textarea {
 .ac-seg button svg { flex: none; }
 .ac-seg button.cool[aria-pressed="true"] { background: var(--accent); color: var(--surface); }
 .ac-seg button.plain[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .14); }
-/* The gap cut around the slash of the 關 icon takes the colour behind it. */
+/* The gap around the slash of the off icon takes the colour behind it. */
 .ac-seg .cut { stroke: var(--surface-2); }
 .ac-seg button.plain[aria-pressed="true"] .cut { stroke: var(--surface); }
 .ac-cost {
@@ -1482,18 +1202,14 @@ textarea {
 .ac-cost b.zero { color: var(--ink-soft); }
 .ac-switch { flex-wrap: wrap; }
 .ac-switch .lbl { font-size: .9rem; }
-/* Explains the price beside it, so a member seeing 235 instead of 205
-   doesn't have to ask why. */
+/* Explains why a night costs more. */
 .meta-pill.ac {
   background: var(--accent-soft); color: var(--accent); font-weight: 700;
   display: inline-flex; align-items: center; gap: 4px;
 }
 
-/* A picker that owns the screen while it is open.
-   Choosing who stands in for somebody is a decision of its own, and it
-   was a panel wedged between two roster rows — you scrolled a list
-   inside a list, on a phone, with the names you were comparing pushed
-   off screen. Same shape as every other sheet here. */
+/* A picker that takes the screen while open, shaped like every other
+sheet. */
 .picker-backdrop {
   position: fixed; inset: 0; background: var(--scrim); z-index: 60;
   display: flex; align-items: flex-end; justify-content: center;
@@ -1514,13 +1230,10 @@ textarea {
 }
 .picker .sub-pick { display: flex; flex-direction: column; gap: 4px; }
 .picker-manual { display: flex; gap: 8px; margin: 4px 0 2px; }
-/* min-width:0 is the whole fix. A text input carries a default
-   intrinsic width (roughly 20 characters), and a flex item will not
-   shrink below its own min-content size — so `flex: 1` held the input
-   at that width and pushed the 性別 select off the right edge of the
-   sheet. Seen on a phone; the visual check now measures for it. */
+/* min-width: 0, or the input's default width pushes the gender select off
+the sheet. */
 .picker-manual input { flex: 1 1 auto; min-width: 0; }
-/* 16px, or iOS zooms the page the moment one is focused. */
+/* 16px, or iOS zooms on focus. */
 .picker-manual input, .picker-manual select {
   font-size: 1rem; padding: 10px 12px; border: 1px solid var(--rule);
   border-radius: 9px; background: var(--surface); color: var(--ink);
@@ -1528,7 +1241,7 @@ textarea {
 }
 .picker-manual select { flex: 0 0 92px; }
 
-/* The signup list: one row per person, add through the shared picker. */
+/* The signup list: one row per person. */
 .su-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .su-add {
   width: 100%; margin-top: 8px; padding: 11px; border: 1px dashed var(--rule-strong);
@@ -1537,26 +1250,19 @@ textarea {
 }
 .su-drop {
   border: none; background: none; color: var(--ink-faint); cursor: pointer;
-  /* 32px so a thumb can hit it; the glyph stays small. */
+  /* 32px for a thumb; the glyph stays small. */
   width: 32px; height: 32px; border-radius: 50%; font-size: .9rem; flex: none;
 }
 .su-drop:hover { background: var(--bad-soft); color: var(--bad); }
 
-/* A control waiting on the network: its label fades out, a spinner
-   takes its place, and it stops accepting taps.
-   The class only lands after a short delay (see BUSY_AFTER_MS), so a
-   fast action just happens rather than flashing a spinner at you. */
+/* A control waiting on the network: label hidden, spinner shown, taps
+ignored. Applied after a short delay (BUSY_AFTER_MS). */
 .is-busy { position: relative; pointer-events: none; }
 .is-busy > *,
 .is-busy::first-line { opacity: 0; }
-/* A button's label is a bare text node, which no selector can reach —
-   fading the colour is what hides it, and the box keeps its size so
-   nothing around it moves while it waits. */
-/* No transition on the colour. The delay before this class lands is
-   what makes it feel considered; fading on top of that only means the
-   label is half-visible under the spinner for a moment — and made the
-   state impossible to measure, since a computed colour mid-transition
-   is neither one thing nor the other. */
+/* The label is a bare text node, so it is hidden by making the colour
+transparent; the box keeps its size. No transition, so it is never half
+visible. */
 .is-busy { color: transparent !important; }
 .is-busy::after {
   content: ""; position: absolute; top: 50%; left: 50%;
@@ -1564,7 +1270,7 @@ textarea {
   border: 2px solid var(--ink-soft); border-right-color: transparent;
   border-radius: 50%; animation: spin .6s linear infinite;
 }
-/* On a filled button the spinner has to read against the fill. */
+/* On a filled button the spinner must read against the fill. */
 .btn-primary.is-busy::after, button.action.is-busy::after {
   border-color: currentColor; border-right-color: transparent;
   filter: none; opacity: .85;
@@ -1574,11 +1280,8 @@ textarea {
   .is-busy::after { animation-duration: 1.6s; }
 }
 
-/* Grouped list cards — one line per row, the value on the right, the row
-   itself the control. First used by 個人資料 (proposal round 3,
-   2026-10-20), where every setting had been a heading over a full-width
-   button, with a grey note under most of them: dense, and read as
-   pressure rather than as a list of facts. */
+/* Grouped list cards: one line per row, the value on the right, the row
+itself the control. */
 .lgroup { font-size: .85rem; font-weight: 700; color: var(--ink-soft); margin: 20px 4px 8px; }
 .lcard { background: var(--surface); border: 1px solid var(--rule); border-radius: 16px; overflow: hidden; }
 .lrow {
@@ -1589,7 +1292,7 @@ textarea {
 .lrow + .lrow, .lrow + .lrow-edit, .lrow-edit + .lrow { border-top: 1px solid var(--rule); }
 .lrow.static { cursor: default; }
 .lrow-k { flex: 1; min-width: 0; font-weight: 500; display: flex; align-items: center; }
-/* Only the name gives way on a narrow screen; a tag beside it stays whole. */
+/* Only the name shortens on a narrow screen. */
 .lrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lrow-k .role-tag { flex: none; }
 .lrow-v { color: var(--ink-soft); font-weight: 700; white-space: nowrap; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
@@ -1618,10 +1321,7 @@ textarea {
 .me-head .me-name { font-size: 1.3rem; font-weight: 700; }
 
 
-/* ---- 設定 (proposal round 3, 2026-10-21) ----
-   Values are read, not edited in place: every block shows its figures and
-   an 編輯 opens a sheet. Fewer, larger words; the notes live in the
-   sheets, where they are about to matter. */
+/* 設定: values are shown, and 編輯 opens a sheet to change them. */
 .st-tabs { margin-bottom: 14px; }
 .st-card { background: var(--surface); border: 1px solid var(--rule); border-radius: 16px; padding: 16px; margin-bottom: 12px; }
 .st-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
@@ -1671,10 +1371,9 @@ textarea {
 .st-danger .btn { margin-top: 0; }
 .st-note { font-size: .88rem; color: var(--ink-soft); margin: 0 0 12px; }
 
-/* One even grid of the season's games, seven to a row: shared by the
-   場次 card, the 修改預定 sheet and the wizard's dates step, so all
-   three look and work the same. A filled square has the air
-   conditioning booked. */
+/* The season's games as an even grid, seven to a row, shared by the 場次
+card, the 修改預定 sheet and the wizard. A filled square has the air
+conditioning booked. */
 .day-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 10px; font-size: .85rem; color: var(--ink-soft); }
 .day-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .day-legend i { width: 12px; height: 12px; border-radius: 4px; border: 1.5px solid var(--rule-strong); background: var(--surface); }
