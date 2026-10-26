@@ -190,6 +190,41 @@ function report(name, problems) {
     ]);
     await ctx.close();
 
+    // --- the 我的帳務 chip belongs to the club on screen ---
+    //
+    // Choosing a club on this screen does not reload the page, so a
+    // ledger loaded before the choice was for whichever club was
+    // remembered, or for none. Checked both ways: nothing remembered, and
+    // a different club remembered than the one chosen.
+    const chipMatchesLedger = (p) =>
+      p.evaluate(async () => {
+        await new Promise((r) => setTimeout(r, 2500));
+        const res = await fetch(`${apiBase()}/clubs/${currentClubId()}/players/${myPlayerId}/ledger`, {
+          headers: authHeader(),
+        });
+        const n = ledgerUpTo(await res.json(), currentSeason).total;
+        const want = n === 0 ? "已結清" : n > 0 ? `餘額 +$${n}` : `應繳 $${Math.abs(n)}`;
+        const chip = document.getElementById("balance-chip");
+        const got = chip.hidden ? "（沒有顯示）" : chip.querySelector(".bc-value").textContent.replace("›", "").trim();
+        return got === want ? [] : [`帳務顯示「${got}」，這一隊的帳是「${want}」`];
+      });
+    for (const [label, remembered, chosen] of [
+      ["沒記住球隊，選了第一隊", null, clubs[0]],
+      ["記住一隊，從選單換到另一隊", clubs[0], clubs[1]],
+    ]) {
+      ctx = await browser.newContext({ viewport: { width: 390, height: 900 } });
+      if (remembered) {
+        await ctx.addInitScript((id) => localStorage.setItem("vf_club", String(id)), remembered.id);
+      }
+      page = await ctx.newPage();
+      page.on("pageerror", (e) => errors.push(`JS: ${String(e).slice(0, 140)}`));
+      await page.goto(`${BASE}/member.html?as=${encodeURIComponent(WHO)}&pick=1`);
+      await page.click(`[data-pick-club="${chosen.id}"]`, { timeout: 25000 });
+      await page.waitForSelector("#hero-wrap .hero, #hero-wrap .empty-state", { timeout: 25000 });
+      report(`帳務跟著選的球隊：${label}`, await chipMatchesLedger(page));
+      await ctx.close();
+    }
+
     report("沒有 console 錯誤", errors);
   } finally {
     await browser.close();

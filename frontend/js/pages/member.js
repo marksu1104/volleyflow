@@ -332,6 +332,8 @@ initClubAndSeasonPickers(
     stopLoadingEscalation();
     renderClubChip();
     renderManageButton();
+    // The club may have been chosen after the ledger was first loaded.
+    if (String(currentClubId()) !== String(myLedgerClubId)) loadMyLedger();
     if (id) loadSeason(id);
     else renderNoSeason();
   },
@@ -1308,15 +1310,25 @@ document.getElementById("su-go").addEventListener("click", async () => {
  */
 let myLedger = null;
 let ledgerReady = null;
+/** The club `myLedger` belongs to. A ledger is per club, so it is
+ * reloaded whenever the club on screen is a different one. */
+let myLedgerClubId = null;
 
 /** Fetches the ledger without painting, so the chip goes up with
  * everything else.
  */
 function loadMyLedger() {
-  if (!myPlayerId || !currentClubId()) return Promise.resolve();
+  const clubId = currentClubId();
+  if (!myPlayerId || !clubId) return Promise.resolve();
+  if (String(clubId) !== String(myLedgerClubId)) {
+    myLedger = null;
+    myLedgerClubId = clubId;
+  }
   ledgerReady = getJsonSWR(
-    `${API_BASE}/clubs/${currentClubId()}/players/${myPlayerId}/ledger`,
+    `${API_BASE}/clubs/${clubId}/players/${myPlayerId}/ledger`,
     (ledger) => {
+      // An answer for a club no longer on screen is dropped.
+      if (String(clubId) !== String(currentClubId())) return;
       myLedger = ledger;
       // Repaint only after the first render.
       if (seasonLoaded) paintBalance();
@@ -1328,7 +1340,7 @@ function loadMyLedger() {
 
 function paintBalance() {
   const chip = document.getElementById("balance-chip");
-  if (!myLedger) {
+  if (!myLedger || String(myLedgerClubId) !== String(currentClubId())) {
     chip.hidden = true;
     return;
   }
