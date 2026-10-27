@@ -100,12 +100,11 @@ def test_a_member_is_not_billed_twice_for_a_night_they_signed_up_for(
 def test_a_signup_an_absence_left_cancelled_is_never_restored_later(
     client: TestClient,
 ) -> None:
-    # Found by the browser sweep on 2026-09-16: removing a member
-    # answered 500. A game the member took leave from is skipped by the
-    # restore — the absence is the later word on that night — but the
-    # marker stayed on the row, so the next round trip marked a second
-    # row for the same game and the restore put both of them back: the
-    # same person twice on one slot.
+    # Regression: removing a member answered 500. A game the member took
+    # leave from is skipped by the restore — the absence is the later
+    # word on that night — but the marker stayed on the row, so the next
+    # round trip marked a second row for the same game and the restore
+    # put both of them back: the same person twice on one slot.
     season = start_season(client, member_names=["Alice"], capacity=18)
     game = season["games"][0]
     carol = client.post(

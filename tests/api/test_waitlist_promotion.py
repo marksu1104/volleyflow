@@ -100,9 +100,8 @@ def test_promoting_into_a_slot_that_is_genuinely_open_needs_no_swap(
     client: TestClient, db_session: Session
 ) -> None:
     # Nobody has to come off. Raising the capacity through the API offers
-    # the new room to the queue since 2026-10-14, so an open slot with
-    # somebody still queued is now left only by data from before that —
-    # made here directly, the way such a game exists.
+    # the new room to the queue, so an open slot with somebody still
+    # queued exists only in older data — made here directly.
     season = start_season(client, member_names=["Alice"], capacity=1)
     game_id = season["games"][0]["id"]
     carol = client.post(
@@ -123,8 +122,8 @@ def test_promoting_into_a_slot_that_is_genuinely_open_needs_no_swap(
 def test_a_full_game_refuses_a_promotion_that_names_nobody_to_replace(
     client: TestClient,
 ) -> None:
-    # The capacity cap is a rule, not a suggestion — this is the decision
-    # recorded on 2026-09-10: warn clearly rather than quietly overfill.
+    # The capacity cap is a rule, not a suggestion: refuse clearly rather
+    # than quietly overfill.
     _, game_id, [carol] = _full_game_with_queue(client, ["Carol"])
 
     response = client.post(f"/waitlist/{carol['id']}/promote", json={})
@@ -201,11 +200,9 @@ def _future(weeks: int) -> str:
 def test_taking_a_member_off_the_roster_offers_their_place_to_the_queue(
     client: TestClient,
 ) -> None:
-    """Asked for on 2026-09-12, after the removal fix turned up a game
-    sitting at 2 on a court for 3 with somebody still queued for it.
-
-    The attendance rules list an absence and a cancelled signup as the moments
-    a slot is offered on; a removal frees one just as squarely.
+    """A removal frees a slot as squarely as an absence or a cancelled
+    signup; without this, a game could sit at 2 on a court for 3 with
+    somebody still queued for it.
     """
     season = start_season(
         client,

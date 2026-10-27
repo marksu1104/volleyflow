@@ -1,9 +1,5 @@
 // Choosing a club before being shown one.
 //
-// Change C of the 2026-09-18 menu redesign, approved with A, B and D and
-// then missed — the organizer found it, not the developer, which is the
-// reason this check exists at all.
-//
 // The rule has two halves and they fail in opposite directions, neither
 // of which raises an error:
 //
@@ -68,12 +64,11 @@ function report(name, problems) {
     report("有兩隊以上就先問要看哪一隊", asked ? [] : ["沒有出現選擇畫面"]);
 
     if (asked) {
-      // The spinner has to actually be a circle. It rendered as a
-      // zero-width sliver until 2026-09-19, because .spinner set width
-      // and height but no `display`, and an <i> is inline — where both
-      // are ignored. Measuring the box is the only way to catch that:
-      // the element is present and carries the right class either way,
-      // so every existence check passed while it looked broken.
+      // The spinner has to actually be a circle. An <i> is inline, where
+      // the width and height .spinner sets are ignored, so without a
+      // `display` it is a zero-width sliver. Only measuring the box
+      // catches that: the element is present and carries the right class
+      // either way, so every existence check passes while it looks broken.
       const box = await page
         .$eval("[id^=pick-when-] .spinner", (el) => {
           const r = el.getBoundingClientRect();

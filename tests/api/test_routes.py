@@ -378,9 +378,9 @@ def test_get_season_reflects_absences_signups_and_waitlist(
             "player_id": bob_signup.json()["player_id"],
             "player_name": "Bob",
             "gender": None,
-            # The roster names whoever signed a guest up, since
-            # 2026-09-23. Null when they signed themselves up, which is
-            # most rows; here the organizer did it, so it is their name.
+            # The roster names whoever signed a guest up. Null when they
+            # signed themselves up, which is most rows; here the
+            # organizer did it, so it is their name.
             "avatar_url": None,
             "brought_by_name": "Test Organizer",
             # He is a 臨打, not anybody's 代打 — see the absence above.
@@ -455,10 +455,9 @@ def test_cancelling_an_absence_puts_the_stand_in_back_in_the_queue(
     """The member is playing after all, so the slot they released closes
     again and Bob returns to where he was waiting.
 
-    This used to be refused outright ("ask the organizer"), which was a
-    dead end — the app offers no way to ask, so a member who could play
-    after all was simply stuck. Changed 2026-09-10; the change deadline
-    is what limits the churn, not an outright block.
+    Refusing it outright would be a dead end: the app offers no way to
+    ask the organizer, so a member who could play after all would be
+    stuck. The change deadline is what limits the churn.
     """
     season = _start_season(client, member_names=["Alice"], capacity=1)
     game_id = season["games"][0]["id"]
@@ -2232,11 +2231,9 @@ def test_a_club_member_can_read_the_club(client: TestClient) -> None:
 def test_a_club_cannot_be_read_by_somebody_outside_it(
     client: TestClient,
 ) -> None:
-    """GET /clubs/{id} used to answer anyone signed in, for an invite
-    prompt that needed a name before joining. That prompt reads
-    GET /invites/{token} now — see test_invites.py — and a club's name by
-    its id is for its members, or anybody could list every club by trying
-    ids in order."""
+    """A club's name by its id is for its members, or anybody could list
+    every club by trying ids in order. The invite prompt, which needs a
+    name before joining, reads GET /invites/{token} — see test_invites.py."""
     club = create_club(client, name="晴光館")
     stranger = identify(client, "Stranger")
 
@@ -2293,7 +2290,7 @@ def test_delete_season_rejects_one_somebody_has_paid_into(
     client: TestClient,
 ) -> None:
     # The fee charges go with the season; cash the organizer received
-    # must not. Deleting used to take the payment with it.
+    # must not, so a season with a payment on it cannot be deleted.
     season = _start_season(client, member_names=["Alice"])
     alice_id = season["member_ids"][0]
     client.post(
@@ -2412,13 +2409,12 @@ def test_an_organizer_can_set_gender_for_someone_with_no_line_account(
 def test_an_organizer_may_set_gender_for_a_member_with_a_line_account(
     client: TestClient,
 ) -> None:
-    """Reversed on 2026-09-30, at the organizer's request. This used to be
-    refused on the reasoning that anyone who can open the app owns their
-    own profile — but the roster's male/female split is what a night gets
-    planned around, and a member who never filled theirs in left it wrong
-    with no way for the organizer to put it right.
+    """Anyone who can open the app owns their own profile, with one
+    exception: the roster's male/female split is what a night gets
+    planned around, and a member who never filled theirs in would leave
+    it wrong with no way for the organizer to put it right.
 
-    Renaming did *not* come with it; the test below still refuses that.
+    Renaming is not part of the exception; the test below refuses it.
     """
     club = create_club(client)
     carol = identify(client, "Carol")
@@ -2729,9 +2725,9 @@ def test_the_join_pool_shows_who_asked_to_be_a_fixed_member(
 
 # --- reporting a problem ---------------------------------------------------
 #
-# Stored for the developer to read, not pushed over LINE (2026-09-15): a
-# push per report, two with a screenshot, came out of the same 200 a month
-# the short-roster alert needs.
+# Stored for the developer to read, not pushed over LINE: a push per
+# report, two with a screenshot, would come out of the same 200 a month
+# the notifications need.
 
 _PNG = (
     "data:image/png;base64,"
@@ -2878,9 +2874,8 @@ def test_nobody_but_the_developer_can_mark_reports_read(
 def test_a_screenshot_is_kept_and_only_the_developer_can_see_it(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """It used to be public, because LINE's servers had to fetch it to draw
-    an image message. Nothing outside the app fetches it now, and a
-    screenshot can show somebody's name and balance."""
+    """Nothing outside the app needs to fetch a screenshot, and one can
+    show somebody's name and balance."""
     dev = _developer(client, monkeypatch)
     alice = identify(client, "Alice")
     client.post(
@@ -3004,8 +2999,8 @@ def test_signing_up_a_group_charges_each_of_them(client: TestClient) -> None:
 def test_the_same_name_twice_in_one_signup_is_one_person_signed_up_twice(
     client: TestClient,
 ) -> None:
-    # Within a club a name is one person (decided 2026-09-16), so this is
-    # the same 小明 twice, and nobody in the group is signed up.
+    # Within a club a name is one person, so this is the same 小明 twice,
+    # and nobody in the group is signed up.
     season = _start_season(client, member_names=["Alice"], capacity=18)
     game_id = season["games"][0]["id"]
 

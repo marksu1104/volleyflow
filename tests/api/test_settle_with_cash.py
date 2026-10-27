@@ -1,8 +1,8 @@
 """Squaring up in cash while settling, rather than afterwards.
 
-Settling used to write the absence refunds and stop there; collecting or
-handing back the difference was a second errand down the member list.
-The organizer asked for one pass: decide per person, then settle.
+Settling is one pass: decide per person, then settle, rather than
+writing the refunds first and collecting or handing back the difference
+as a second errand down the member list.
 
 The case that matters most here is the one that writes nothing — a
 balance left alone is what carries into the next season, and 「保留至下一

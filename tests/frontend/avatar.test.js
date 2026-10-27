@@ -1,5 +1,5 @@
 // LINE profile pictures in place of initials, and initials that survive
-// names starting with an emoji (2026-10-07).
+// names starting with an emoji.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");

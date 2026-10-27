@@ -1,5 +1,6 @@
-// The calendar stays on the month you moved to. It used to jump back to
-// the next game's month on every repaint, including the one a tap causes.
+// The calendar stays on the month you moved to, rather than jumping back
+// to the next game's month on every repaint, including the one a tap
+// causes.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");

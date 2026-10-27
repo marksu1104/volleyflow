@@ -89,10 +89,8 @@ def _signed_with_the_public_fallback(club_id: int) -> str:
 def test_a_token_signed_with_the_public_fallback_is_refused(
     client: TestClient,
 ) -> None:
-    """The production finding of 2026-09-15, as a test: a token signed with
-    the fallback in this repository was sent to the live API and accepted,
-    because the real secret had never been set there. With a secret of its
-    own configured, the public one proves nothing."""
+    """The fallback secret is in this repository, so a token signed with
+    it proves nothing wherever a real secret is configured."""
     club = create_club(client)
 
     response = client.get(f"/invites/{_signed_with_the_public_fallback(club['id'])}")
@@ -161,9 +159,8 @@ def test_joining_with_the_clubs_link_works(client: TestClient) -> None:
 
 
 def test_joining_by_id_alone_is_refused(client: TestClient) -> None:
-    """The hole the token existed to close, and didn't until 2026-09-15:
-    the shared link hid the id, but the endpoint took a bare one from
-    anybody signed in."""
+    """The hole the token exists to close: a link that merely hid the id
+    would still let anybody signed in join with a bare one."""
     club = create_club(client)
     carol = identify(client, "Carol")
 

@@ -137,8 +137,8 @@ def test_the_organizer_can_still_record_what_happened(client: TestClient) -> Non
 def test_a_new_season_closes_changes_24_hours_before_the_game(
     client: TestClient,
 ) -> None:
-    # Every season has a deadline now (2026-10-05): the roster status and
-    # the promotion notices are sent when it passes.
+    # Every season has a deadline: the roster status and the promotion
+    # notices are sent when it passes.
     response = client.post(
         "/clubs/{}/seasons".format(start_season(client)["club_id"]),
         json={
@@ -198,8 +198,8 @@ def test_changes_close_the_given_hours_before_the_game_starts(
 def test_the_member_screen_lock_does_not_depend_on_who_is_looking(
     client: TestClient,
 ) -> None:
-    """Reported 2026-10-16: the organizer, on the member screen, could
-    still take leave on a night already played — `locked` is answered per
+    """Regression: the organizer, on the member screen, could still take
+    leave on a night already played — `locked` is answered per
     caller and is never true for the organizer. `past_deadline` is the
     same for everyone, and the member screen locks on it; the management
     screen keeps `locked`, where the organizer corrects a night."""

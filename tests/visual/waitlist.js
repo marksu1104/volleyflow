@@ -111,8 +111,7 @@ function inDays(days) {
     ]);
 
     // What the signup sheet quotes on a full game. $0 is a price, and it
-    // reads as "this is free" on a night that charges a share a head —
-    // reported from real use on 2026-09-16.
+    // reads as "this is free" on a night that charges a share a head.
     await page.click("#game-sheet-backdrop .gsheet-close");
     await page.waitForSelector("#game-sheet-backdrop", { state: "hidden", timeout: 10000 });
     await page.evaluate((id) => openSignup(id), game.id);
@@ -124,14 +123,11 @@ function inDays(days) {
       go: document.getElementById("su-go").textContent,
     }));
     // This member is already playing, so the sheet does not put them in
-    // the list — it opens empty, which is the state the screenshot on
-    // 2026-09-16 was of. Somebody who is *not* already playing opens the
-    // same sheet pre-filled with themselves, and the two looked like
-    // different screens until 2026-09-17; the bar keeps one grammar in
-    // every state now — 合計, a figure, and a breakdown — so the queue is
-    // named underneath rather than replacing the total. What must never
-    // appear is $0, which reads as "this is free" on a night that
-    // charges a share a head.
+    // the list — it opens empty. Somebody who is *not* already playing
+    // opens the same sheet pre-filled with themselves; the bar keeps one
+    // grammar in every state — 合計, a figure, and a breakdown — so the
+    // queue is named underneath rather than replacing the total. What
+    // must never appear is $0.
     report("額滿時的報名單不會用 $0 回答", [
       ...(quote.amount.includes("$0") ? ["金額寫著 $0"] : []),
       ...(quote.go.includes("候補") ? [] : [`按鈕寫的是「${quote.go}」`]),

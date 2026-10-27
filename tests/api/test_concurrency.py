@@ -48,21 +48,14 @@ had the same two references; it is part of drop_ins now.)
 def _cleanup(club_id: int, season_id: int) -> None:
     """Delete this run's rows — and anything a run that died left behind.
 
-    The last statement used to be a global `DELETE FROM players WHERE
-    name LIKE 'ConcurrencyTest-%'` while every delete above it was scoped
-    to *this* club and season. That asymmetry holds only as long as no
-    run ever fails. One did, on 2026-09-17, when the dev branch was
-    missing three columns the models had started selecting: it left
-    waitlist_entries and club_members behind for players that the next
-    run then tried to delete, and Postgres refused. Every run after that
-    failed at the same statement, on residue it had not created and
-    could not reach — one red run turning into permanently red CI.
-
-    So the sweep is symmetric now: find the test players, delete
-    everything referencing them wherever it lives, then delete them.
-    That also clears whatever an earlier failure stranded, which is the
-    only way this database ever gets tidied — nobody holds credentials
-    for it outside CI.
+    The sweep is symmetric: find the test players, delete everything
+    referencing them wherever it lives, then delete them. A cleanup that
+    deletes rows by club and season but players by name works only while
+    no run ever fails: once one does, the rows it strands make every
+    later run fail at the final delete, and one red run becomes
+    permanently red CI. Sweeping by player also clears whatever an
+    earlier failure stranded, which is the only way this database ever
+    gets tidied — nobody holds credentials for it outside CI.
     """
     with get_session() as db:
         game_ids = [
@@ -244,7 +237,7 @@ def test_adding_the_same_member_twice_at_once_is_refused_not_a_crash(
 def test_two_removals_at_once_promote_two_different_people(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The 500 tests/visual/smoke.js hit on 2026-09-16, without a browser.
+    """Regression: a 500 the browser smoke check hit, without a browser.
 
     Every path that frees a slot offers it to the queue, and the offer
     reads "who is first in line" and writes a drop-in for them. Two of

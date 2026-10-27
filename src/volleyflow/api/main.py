@@ -6,7 +6,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from volleyflow.api.error_reporting import ErrorReportingMiddleware, store_error_event
-from volleyflow.api.line_webhook import router as line_webhook_router
 from volleyflow.api.routes import router
 
 # Swagger UI and the OpenAPI schema map the whole API, so they are off
@@ -48,7 +47,6 @@ app.add_middleware(
 )
 
 app.include_router(router)
-app.include_router(line_webhook_router)
 
 
 @app.get("/health")

@@ -63,10 +63,10 @@ test("owing money offers to collect it, and shows why", () => {
 });
 
 test("the 季費 page leaves out a season booked for later", () => {
-  // Reported 2026-09-17: a club running its 10~12月 season with a 1~3月
-  // season already booked saw January's unpaid fee on October's 季費
-  // page. A season's fees land on the ledger the moment it is created.
-  // Here: 3055 owed for this season, 2000 for a season not yet started.
+  // A season's fees land on the ledger the moment it is created, so a
+  // club running 10~12月 with 1~3月 already booked must not see January's
+  // fee on October's 季費 page. Here: 3055 owed for this season, 2000 for
+  // a season not yet started.
   const split = splitLedger(row(-5055, -3055, -3055, -3055));
 
   assert.equal(split.due, -3055);
@@ -102,18 +102,17 @@ test("what last season left unpaid is collected with this season's fee", () => {
 });
 
 test("季末結算 squares this season and earlier ones, not a season booked later", () => {
-  // Reported 2026-10-02: settling October with January booked showed
-  // everyone owing January's fee, and 已收 would have recorded it as
-  // October's money. 470 of credit from before, 2000 owed for later.
+  // Settling October with January booked must not ask for January's
+  // fee, or 已收 would record it as October's money. 470 of credit from
+  // before, 2000 owed for later.
   const split = splitLedger(row(-4585, -3055, -3055, -2585));
 
   assert.equal(split.due, -2585);
   assert.match(moneyRowHtml(1, "林書妤", "female", split, null, null), /應收 \$2585/);
 });
 
-// 當天臨打, one night at a time (2026-10-16). It used to show and collect
-// a guest's whole season of drop-in fees, so 已收 on one night marked
-// every night paid.
+// 當天臨打, one night at a time: a guest's whole season of drop-in fees on
+// one row would let 已收 on one night mark every night paid.
 const guest = (seasonTotal, nights) => ({ ...row(seasonTotal, seasonTotal, 0), nights });
 
 test("當天臨打 asks only for the night on screen, and books it to that night", () => {

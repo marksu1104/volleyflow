@@ -1,12 +1,10 @@
 // Two tabs, two clubs. Opening a second club in a second tab must not
 // move the first tab underneath itself.
 //
-// Reported on 2026-09-17: a club created minutes earlier showed 21
-// members and told its own organizer they were not the organizer. It was
-// not the database — the club id lived in localStorage, which every tab
-// of a browser shares, so the second tab rewrote it and the first tab
-// went on fetching the *other* club's roster under this club's season.
-// See rememberedId in js/common/clubs.js.
+// localStorage is shared by every tab of a browser, so a club id kept
+// only there lets the second tab rewrite it and the first tab go on
+// fetching the *other* club's roster under this club's season. See
+// rememberedId in js/common/clubs.js.
 
 const { chromium } = require("playwright");
 

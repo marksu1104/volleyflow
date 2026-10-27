@@ -361,9 +361,9 @@ test("the picker really applies the filter it is handed", async () => {
 });
 
 test("the management pages offer a club the developer merely belongs to", () => {
-  // Reported 2026-10-12: GET /clubs listed such a club as role "member",
-  // the management pages kept organizer clubs only, and its 管理 opened
-  // the developer's own club instead. The mark is what lets it through.
+  // GET /clubs lists such a club as role "member", and the management
+  // pages keep organizer clubs only; the developer_view mark is what lets
+  // it through.
   const { managesClub } = load();
 
   assert.equal(managesClub({ role: "organizer", developer_view: false }), true);

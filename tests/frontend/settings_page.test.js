@@ -1,7 +1,7 @@
-// 設定, redesigned 2026-10-21: values on cards, edits in sheets, the
-// season's dates as one grid shared with the wizard. These pin what the
-// redesign must not lose — every existing control still reachable in the
-// states where it was, and none offered where the server would refuse.
+// 設定: values on cards, edits in sheets, the season's dates as one grid
+// shared with the wizard. These pin that every control is reachable in
+// the states where it applies, and none is offered where the server would
+// refuse.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -210,8 +210,7 @@ test("the 含冷氣 pill carries the snowflake", () => {
 test("a first season's summary draws a member's name as text, not markup", async () => {
   // A member chooses their own name, and the organizer is the one who
   // opens this summary: markup in a name would run in the organizer's
-  // session. Found 2026-10-26 — the next-season branch escaped, this one
-  // did not.
+  // session.
   const api = wizard("0");
   const name = '<img src=x onerror="alert(1)">';
   globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => [{ id: 1, name }] });

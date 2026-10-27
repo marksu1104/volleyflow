@@ -98,9 +98,8 @@ test("an uncovered absence is called out as a gap", () => {
 });
 
 test("the game sheet tags nobody for having no account", () => {
-  // 「訪客」 sat on fixed members the organizer had typed in — the one
-  // place it was wrong — and never on a guest somebody brought, whose row
-  // already says who brought them (2026-10-20).
+  // A guest somebody brought already says who brought them, and a fixed
+  // member the organizer typed in is not a guest, so no row needs 「訪客」.
   const html = render();
   assert.doesNotMatch(html, /訪客|guest-tag/);
 });
@@ -228,8 +227,7 @@ test("without a waitlist handler the queue shows no remove button", () => {
 });
 
 // The three groups are tabs, so the counts are always on screen and no
-// group is buried under the eighteen names of another. Reported as "I
-// can't see in one page who's away, who's covering, who's queued".
+// group is buried under the eighteen names of another.
 test("the tab strip carries all three counts at once", () => {
   const { season, game } = fixture();
   const el = makeElement();
@@ -454,11 +452,10 @@ test("only the organizer is offered 遞補 on a queued person", () => {
   assert.match(asOrganizer.innerHTML, /data-promote-waitlist="300"/);
 });
 
-// 代打 and 臨打 stopped being the same thing on 2026-09-10. A drop-in
-// who signed themselves up covers nobody in particular — the FIFO match
-// that refunds an absence is a money rule, not an arrangement between
-// two people, and showing it as one told members a stranger was "their"
-// substitute.
+// 代打 and 臨打 are different things. A drop-in who signed themselves up
+// covers nobody in particular — the FIFO match that refunds an absence is
+// a money rule, not an arrangement between two people, and showing it as
+// one would tell members a stranger was "their" substitute.
 test("somebody who signed themselves up is 臨打, not anybody's 代打", () => {
   const { season, game } = fixture();
   game.confirmed_drop_ins = [

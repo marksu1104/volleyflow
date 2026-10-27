@@ -69,8 +69,8 @@ test("a season already over has no card at all", () => {
 });
 
 test("switching club or season clears the old figures and shows 載入中", () => {
-  // Reported 2026-10-03: the previous season's money stayed on screen
-  // until the new one arrived, so the switch looked like it hadn't taken.
+  // Otherwise the previous season's money stays on screen until the new
+  // one arrives, and the switch looks like it hasn't taken.
   const api = load("organizer-ledger.html");
   api.elements["ledger-tabs"].hidden = false;
 

@@ -34,11 +34,11 @@ def test_starting_a_season_charges_each_members_season_fee(
 def test_adding_a_member_charges_them_and_leaves_everyone_else_alone(
     client: TestClient,
 ) -> None:
-    # The rule changed on 2026-09-10: the venue cost is divided by the
-    # season's capacity, not by however many are on the roster today. So
-    # a new member costs the club nothing to add and nobody else's bill
-    # moves. Before, one person joining or leaving silently re-priced
-    # every other member's whole season.
+    # The venue cost is divided by the season's capacity, not by however
+    # many are on the roster today, so a new member costs the club nothing
+    # to add and nobody else's bill moves. Splitting by headcount would
+    # let one person joining or leaving re-price every other member's
+    # whole season.
     season = start_season(
         client,
         total_venue_cost="10000",
@@ -97,10 +97,9 @@ def test_removing_a_member_reverses_their_charge_and_leaves_everyone_else_alone(
 def test_a_drop_in_filling_an_empty_slot_leaves_the_members_price_alone(
     client: TestClient,
 ) -> None:
-    # Reported from real use: a roster short of capacity had every
-    # member's night jump from $205 to $218 — while a drop-in stood in
-    # the empty slot and paid the same $205. The club was collecting the
-    # gap twice.
+    # Regression: a roster short of capacity had every member's night
+    # jump from $205 to $218 — while a drop-in stood in the empty slot and
+    # paid the same $205. The club was collecting the gap twice.
     season = start_season(
         client,
         total_venue_cost="10000",

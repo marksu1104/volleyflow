@@ -115,9 +115,9 @@ def test_a_promotion_before_the_deadline_is_held_until_it(
 def test_after_the_deadline_a_promotion_is_told_by_the_next_run_once(
     client: TestClient, sent_messages: SentMessages, db_session: Session
 ) -> None:
-    """Not by the route any more (2026-10-14): the organizer's next tap
-    can undo a promotion, so the job tells whoever is still on court when
-    it runs, ten minutes at most later — and only once."""
+    """Not by the route: the organizer's next tap can undo a promotion,
+    so the job tells whoever is still on court when it runs, ten minutes
+    at most later — and only once."""
     _season, game_id, carol = _queued_behind_a_full_game(client)
     _past_the_deadline(db_session, game_id)
 
@@ -132,10 +132,10 @@ def test_after_the_deadline_a_promotion_is_told_by_the_next_run_once(
 def test_a_promotion_undone_before_the_next_run_is_never_announced(
     client: TestClient, sent_messages: SentMessages, db_session: Session
 ) -> None:
-    """Reported 2026-10-14: after the deadline the organizer took leave
-    for somebody, a queued guest came off the queue and was told at once,
-    then the organizer named a 代打 and they went straight back to the queue —
-    holding a message saying he was playing."""
+    """After the deadline the organizer takes leave for somebody, a
+    queued guest comes off the queue, then the organizer names a 代打 and
+    the guest goes straight back. Told at once, they would be left
+    holding a message saying they were playing."""
     _season, game_id, frank = _queued_behind_a_full_game(client, "Frank")
     _past_the_deadline(db_session, game_id)
     absence = client.post(
@@ -155,8 +155,8 @@ def test_a_promotion_undone_before_the_next_run_is_never_announced(
 def test_taking_leave_back_and_forth_announces_the_promotion_once(
     client: TestClient, sent_messages: SentMessages, db_session: Session
 ) -> None:
-    # The same report: leave taken, taken back, taken again promoted the
-    # same person twice, and each promotion used to send its own message.
+    # Leave taken, taken back and taken again promotes the same person
+    # twice; they are told once.
     _season, game_id, frank = _queued_behind_a_full_game(client, "Frank")
     _past_the_deadline(db_session, game_id)
     first = client.post(
@@ -320,10 +320,11 @@ def test_taking_somebody_off_the_roster_promotes_into_each_night_separately(
     _next_run(db_session)
 
     assert removed.status_code == 204, removed.text
-    dates = sorted(text for _user_id, text in sent_messages)
-    assert len(dates) == 2, "Alice's place opened at both games"
-    assert _month_day(first) in dates[0]
-    assert _month_day(second) in dates[1]
+    texts = [text for _user_id, text in sent_messages]
+    assert len(texts) == 2, "Alice's place opened at both games"
+    # Matched per night, not by sorting the texts: "11/11" sorts before "11/4".
+    for night in (first, second):
+        assert sum(f"場次：{_month_day(night)}（" in t for t in texts) == 1, night
 
 
 def test_calling_a_game_off_tells_the_people_expected_at_it(
@@ -359,9 +360,8 @@ def _settled_season(client: TestClient) -> dict[str, Any]:
 def test_settling_a_season_says_nothing_by_itself(
     client: TestClient, sent_messages: SentMessages
 ) -> None:
-    """Settling used to push to every member, and later offered a
-    settlement notice of its own. Both are gone: whatever a member keeps
-    for next season is told once, in next season's 繳費通知."""
+    """Whatever a member keeps for next season is told once, in next
+    season's 繳費通知, so settling itself sends nothing."""
     _settled_season(client)
 
     assert sent_messages == []

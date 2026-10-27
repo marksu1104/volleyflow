@@ -1,5 +1,5 @@
 // Asking to join from an invite link sends the link's token and what the
-// person asked to be. Since 2026-09-16 the organizer then lets them in;
+// person asked to be. The organizer then lets them in;
 // tests/visual/join.js walks the whole flow in a browser.
 
 const test = require("node:test");

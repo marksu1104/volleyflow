@@ -109,7 +109,7 @@ def test_several_bringers_across_games_each_keep_their_own_tag(
 def _named_from_the_queue(
     client: TestClient,
 ) -> tuple[dict[str, Any], int, dict[str, Any], dict[str, Any]]:
-    """The sequence production went through on 2026-10-03.
+    """A full game whose queue is reshuffled by a leave and a 代打.
 
     A full game. 先到的 queues on their own, then 會員丙 queues 朋友丁.
     固定甲 takes leave and the queue fills the slot with 先到的. Then
@@ -216,8 +216,8 @@ def test_a_substitute_the_member_names_is_brought_by_that_member(
 def test_a_substitute_the_organizer_names_is_brought_by_the_organizer(
     client: TestClient,
 ) -> None:
-    # Whoever puts somebody on the list answers for them (2026-10-03) —
-    # one rule for every signup, 代打 included.
+    # Whoever puts somebody on the list answers for them — one rule for
+    # every signup, 代打 included.
     season, _member, absence = _season_with_a_leave(client)
 
     client.put(f"/absences/{absence['id']}/substitute", json={"player_name": "代打戊"})

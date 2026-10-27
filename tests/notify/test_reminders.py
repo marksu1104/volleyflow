@@ -1,14 +1,10 @@
 """Tests for the messages the app sends.
 
-There is no group message — the organizer asked for it to be dropped.
-The roster status goes to the club's organizers at each game's change
-deadline (2026-10-05, replacing a check at 9am for short games), and the
-promotion notices wait for that deadline too.
-
-It used to tell one person, named by an environment variable, whatever
-club the game was in — right while the app ran one club, wrong from the
-day it became multi-tenant. These tests are mostly about who hears, and
-who doesn't.
+Every notice is a private message; there is no group message. The
+roster status goes to the club's organizers at each game's change
+deadline, and the promotion notices wait for that deadline too. These
+tests are mostly about who hears, and who doesn't — always somebody in
+the game's own club.
 
 push_to_user is monkeypatched so nothing here ever hits the real LINE
 API — see the sent_messages fixture.
@@ -38,14 +34,10 @@ from volleyflow.schedule import GameStatus
 SentMessages = list[tuple[str, str]]
 
 
-# The sent_messages fixture moved to tests/conftest.py on 2026-09-25, so
-# it covers the whole suite rather than this file alone. It had to: the
-# API routes send pushes of their own now (a waitlist promotion, a
-# settled season), and those tests were reaching the real line_client,
-# raising KeyError on the missing token inside the notifier's own
-# try/except, and passing anyway. Two autouse fixtures patching the same
-# attribute would also have made which one wins depend on ordering, and
-# the losing one's list is silently never written to.
+# The sent_messages fixture lives in tests/conftest.py so it covers the
+# whole suite: a test that reaches a push must stop at the fake, not at a
+# missing token swallowed by the notifier's own try/except. One autouse
+# fixture, not two, so which patch wins never depends on ordering.
 
 
 def _season(
@@ -168,7 +160,7 @@ def test_every_organizer_of_the_club_is_told(
 def test_an_ordinary_member_is_not_sent_the_roster_status(
     db_session: Session, sent_messages: SentMessages
 ) -> None:
-    # Organizers only, at the organizer's choice (2026-10-05).
+    # The roster status goes to organizers only.
     season = _season(db_session)
     member = PlayerRow(name="Member", line_user_id="Umember")
     db_session.add(member)
@@ -203,7 +195,7 @@ def test_the_roster_status_counts_who_is_playing_away_and_queued(
     db_session: Session, sent_messages: SentMessages
 ) -> None:
     """Members minus live absences plus drop-ins. A cancelled absence is
-    not an absence: it used to be counted as one."""
+    not an absence."""
     season = _season(db_session, minimum_roster=3, club_name="晴光館")
     alice = _member(db_session, season, "Alice")
     bob = _member(db_session, season, "Bob")
@@ -279,8 +271,7 @@ def test_a_full_game_says_so_and_a_short_one_is_flagged(
 def test_nothing_is_sent_to_a_group_even_if_one_is_configured(
     db_session: Session, sent_messages: SentMessages, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A leftover LINE_GROUP_ID must not resurrect the message the
-    organizer asked to be rid of."""
+    """A leftover LINE_GROUP_ID must not resurrect a group message."""
     monkeypatch.setenv("LINE_GROUP_ID", "Cgroup123")
     assert not hasattr(reminders, "push_to_group")
     season = _season(db_session)
@@ -403,7 +394,7 @@ def test_at_the_deadline_everyone_promoted_hears_and_so_does_who_signed_them_up(
     reminders.send_deadline_notices(db_session, _at(date(2026, 8, 24), 20, 5))
 
     # The same words as the person themselves gets; who signed them up
-    # is not the news (2026-10-05).
+    # is not the news.
     to_bringer = dict(sent_messages)["Ubringer"]
     assert to_bringer.splitlines()[:5] == [
         "【晴光館】遞補通知",
@@ -609,9 +600,8 @@ def test_one_removal_can_promote_people_into_different_nights(
 def test_one_unreachable_promoted_player_does_not_stop_the_others(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Same failure the organizer alert was fixed for on 2026-09-15: LINE
-    # raises for anybody who hasn't added the Official Account, and one
-    # of them must not swallow everyone after them in the list.
+    # LINE raises for anybody who hasn't added the Official Account, and
+    # one of them must not swallow everyone after them in the list.
     delivered: list[str] = []
 
     def push(user_id: str, text: str) -> None:

@@ -61,8 +61,8 @@ def test_somebody_elses_guests_are_not_mine(client: TestClient) -> None:
 def test_typing_the_same_name_twice_brings_the_same_person(
     client: TestClient,
 ) -> None:
-    # Within a club a name is one person (decided 2026-09-16), so typing a
-    # friend's name again is the same friend: one row, one ledger.
+    # Within a club a name is one person, so typing a friend's name again
+    # is the same friend: one row, one ledger.
     season = start_season(client, member_names=["Alice"], capacity=18)
     host = _member(client, season, "Host")
     _bring(client, season["games"][0]["id"], host, "阿凱")

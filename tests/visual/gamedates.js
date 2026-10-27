@@ -61,10 +61,10 @@ const seasonOf = async (id) => (await fetch(`${API}/seasons/${id}`, { headers: a
     await page.waitForTimeout(900);
 
     // The club-name field, checked here because this is the only
-    // permanent check that opens the settings page. It was once a row
-    // that collapsed into itself — `.btn { width: 100% }` — so its shape
-    // is worth measuring, not just its presence.
-    // The name is edited in its own sheet on the 球隊 tab (2026-10-21).
+    // permanent check that opens the settings page. A stray
+    // `.btn { width: 100% }` can collapse its row into itself, so its
+    // shape is worth measuring, not just its presence. The name is edited
+    // in its own sheet on the 球隊 tab.
     await page.click('[data-set-tab="club"]');
     await page.click("#club-panel .lrow");
     await page.waitForSelector("#club-backdrop:not([hidden])", { timeout: 10000 });

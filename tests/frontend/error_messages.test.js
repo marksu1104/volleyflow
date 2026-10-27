@@ -49,12 +49,8 @@ const KNOWN_MESSAGES = [
   "This absence was cancelled",
   "Already cancelled",
   "Past this season's change deadline for this game",
-  // The wording seasons.py actually raises. The example here used to read
-  // "…: 2026-08-18, 2026-08-25 already 18 on court. Cancel a signup on
-  // those games, or raise the capacity first." — a third wording that
-  // matched neither the API nor the pattern meant to catch it. All three
-  // had drifted apart, and the old assertion could not see it because the
-  // fallback is itself Chinese.
+  // Copied from what seasons.py raises, not paraphrased: an example that
+  // matches neither the API nor the pattern tests nothing.
   "No room for another member on 2026-08-18, and there is no drop-in to move back to the waitlist.",
   "19 fixed members is more than the capacity of 18",
   "Can't lower capacity to 5 — 8 people are already on the roster or on a game's court",
@@ -96,23 +92,12 @@ const KNOWN_MESSAGES = [
   "Screenshot isn't valid base64",
   "Screenshot must be a PNG, JPEG or WebP",
   "No such screenshot",
-  // Added 2026-09-25. Every HTTPException in the API was rendered from
-  // the AST and run through the table; these six reached a screen in
-  // English. test_error_catalogue.py now fails if a new raise site is
-  // added without a line here, which is how the first five got missed.
   "Game is already cancelled",
   "This season already has 18 fixed members for 18 slots. Raise the capacity or take somebody off the roster first.",
   "The developer overview isn't configured on this server",
   "Only the developer can read this",
   "Reading reports isn't configured on this server",
   "Only the developer can read reports",
-  // Added 2026-09-25 by test_error_catalogue.py, which compares this list
-  // against every HTTPException in the API. All of these already had a
-  // pattern — what was missing was an example here, so nothing would have
-  // noticed if the wording drifted. Two of them show why that matters:
-  // the API says "No drop-in with id 42 in this game" and this list only
-  // had "No drop-in with id 42", and the venue-cost refusal grew a
-  // "— check …" tail that no example carried.
   "Already asked to join — waiting for the organizer",
   "Both are down for the same game — sort that game out first",
   "Invite links aren't configured on this server",
@@ -132,23 +117,15 @@ const KNOWN_MESSAGES = [
   "This settlement has already been undone",
   "Waiting for the organizer to approve you",
   "阿凱 is no longer in this club",
-  // Added 2026-09-30 with 冷氣場次: a date that names no game in this
-  // season, which is how a typo in the correction comes back.
+  // A typo in a 冷氣場次 correction: a date that names no game.
   "No game on 2026-12-25 in this season",
-  // Added 2026-09-30 with settling in one pass: cash aimed at somebody
-  // who isn't in the season it is settling.
+  // Cash aimed at somebody who isn't in the season being settled.
   "Player 42 is not a member of this season",
 ];
 
-// isChinese alone was never enough, and this test spent weeks proving it:
-// the fallback is 「操作失敗（…）」, which *is* Chinese, so every message
-// passed whether a pattern matched it or not. "Season already settled"
-// sat in the list above the whole time while its pattern —
-// /^Season i?s? already settled$/ — could not match it, because dropping
-// both optionals asks for two spaces. Checking for the fallback prefix is
-// what the comment at the top of this file always described; the
-// assertion simply didn't do it. Found 2026-09-25 by running every
-// HTTPException in the API through the table instead of reading it.
+// isChinese alone is not enough: the fallback is 「操作失敗（…）」, which
+// *is* Chinese, so every message would pass whether a pattern matched it
+// or not. The fallback prefix is what tells a translation from a miss.
 test("every known backend message translates to Chinese", () => {
   const untranslated = KNOWN_MESSAGES.filter((msg) => {
     const out = translateApiError(msg);

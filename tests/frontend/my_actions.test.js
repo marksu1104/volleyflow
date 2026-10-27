@@ -254,7 +254,7 @@ test("a cooled night says what the extra is for", () => {
 });
 
 test("the extra is split between the slots, not the names on the roster so far", () => {
-  // Two people on an 18-slot season used to be told +$270 a night.
+  // Two people on an 18-slot season pay +$30 a night, not +$270.
   const season = { ac_surcharge: "540", capacity: 18, members: new Array(2) };
 
   const html = acPill(season, { air_conditioned: true });

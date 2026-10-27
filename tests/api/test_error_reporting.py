@@ -1,4 +1,4 @@
-"""A 500 in production used to be invisible — see
+"""Recording a 500 in production — see
 src/volleyflow/api/error_reporting.py for why. What is tested here is
 that the middleware ordering in main.py doesn't quietly break CORS on
 exactly the responses where a broken frontend most needs to read the
@@ -6,9 +6,9 @@ real error (see ErrorReportingMiddleware's docstring for the trap this
 avoids), that the crash is written down with the line that raised it,
 and that nothing is pushed to anybody over LINE.
 
-The LINE crash report was removed on 2026-09-12 at the organizer's
-request: unasked-for messages that meant nothing to the person getting
-them, each one spending a push from the free tier's 200 a month.
+There is no crash report over LINE: an unasked-for message means
+nothing to the person getting it, and each one spends a push from the
+free tier's 200 a month.
 """
 
 import logging

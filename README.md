@@ -174,9 +174,6 @@ production and then triggers the Render deploy, in that order. The
 frontend deploys to GitHub Pages when anything under `frontend/`
 changes.
 
-## Roadmap
+## License
 
-- **A group-message assistant**: read a free-form message from the LINE
-  group ("I'm out next Tuesday, and sign up my friend") and turn it into
-  calls to the existing API. The model would only interpret; every amount
-  would still come from the rules engine.
+[MIT](LICENSE)

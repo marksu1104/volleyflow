@@ -122,7 +122,6 @@ def test_is_reachable_says_it_cannot_tell_when_line_answers_some_other_way(
 
 
 def test_there_is_no_way_to_push_to_a_group(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The organizer asked for the group message to be dropped, so the
-    # client has no function that could send one — see line_client's own
-    # note where push_to_group used to be.
+    # Nothing goes to a group chat, so the client has no function that
+    # could send there — see the note in line_client.
     assert not hasattr(line_client, "push_to_group")

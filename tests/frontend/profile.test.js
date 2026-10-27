@@ -1,10 +1,9 @@
 // The 我的球隊 rows on 個人資料 — one line per club, carrying that club's
 // balance.
 //
-// This file exists because the card had no coverage at all while
-// displaying money. The balance used to be fetched per club and passed
-// in separately; it now rides on the club row itself (GET
-// /players/{id}/clubs), which removed an N+1 and a second repaint.
+// The balance rides on the club row itself (GET /players/{id}/clubs)
+// rather than being fetched per club, which avoids an N+1 and a second
+// repaint.
 //
 // The case worth guarding is the one nothing else can see: getJsonSWR
 // paints the *cached* list before the network answers, and a copy
@@ -103,8 +102,8 @@ test("a member is not labelled", () => {
 });
 
 test("a club row opens that club's breakdown on the ledger page", () => {
-  // The rows are the way in to the money now; the separate 查看各隊明細
-  // button went with the round-three redesign (2026-10-20).
+  // The rows are the way in to the money; there is no separate
+  // 查看各隊明細 button.
   const html = clubRowHtml(club({ id: 42, balance: "-100" }));
 
   assert.match(html, /<a class="lrow" href="ledger\.html\?club=42">/);

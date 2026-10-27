@@ -77,9 +77,8 @@ def test_only_the_one_who_queued_a_guest_is_told_they_can_remove_them(
 def test_the_queue_names_who_brought_a_guest_and_nobody_for_yourself(
     client: TestClient,
 ) -> None:
-    # The confirmed drop-ins have carried this since 2026-09-23; the queue
-    # did not, so a guest the organizer queued for somebody looked
-    # exactly like a stranger who had signed up on their own.
+    # Without it, a guest the organizer queued for somebody looks exactly
+    # like a stranger who signed up on their own.
     club, season = _club(client, capacity=1)
     member = _member(client, club, "會員乙")
     game_id = season["games"][0]["id"]

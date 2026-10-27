@@ -1,6 +1,6 @@
-// 後台總覽 (developer.html), rebuilt 2026-10-22: the audit trail read as
-// sentences, the server's errors, and a club list that folds away clubs
-// with nothing on their books.
+// 後台總覽 (developer.html): the audit trail read as sentences, the
+// server's errors, and a club list that folds away clubs with nothing on
+// their books.
 //
 // The sentences are where a wrong word would hide. Each action key is
 // written by the server (routes/_audit.py) and has to read with the same

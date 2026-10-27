@@ -157,8 +157,8 @@ test("it restarts at most once in a few minutes, rather than reload forever", as
 });
 
 test("a cached read no longer hides an expired session", async () => {
-  // It used to swallow the refusal and keep showing the old copy: no
-  // error, just data that quietly stopped changing.
+  // Swallowing the refusal would keep showing the old copy: no error,
+  // just data that quietly stops changing.
   const { getJsonSWR, writeCache } = load();
   const calls = watch();
   globalThis.liff = liffWithToken(HOUR, calls);

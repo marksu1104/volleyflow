@@ -1,10 +1,9 @@
 // Opening an invite link, asking to join, and being let in by the
 // organizer — the way a stranger actually gets into a club.
 //
-// Joining changed twice: on 2026-09-15 it started requiring the link's
-// token (an id alone let anybody join every club), and on 2026-09-16 it
-// stopped letting people straight in: asking puts them in a queue and the
-// organizer approves. The API side is in tests/api/test_join_approval.py
+// Joining needs the link's token (an id alone would let anybody join
+// every club), and asking puts somebody in a queue until the organizer
+// approves. The API side is in tests/api/test_join_approval.py
 // and test_tenant_isolation.py; what only a browser can show is whether a
 // real person can get from a shared link to the club without getting lost.
 //

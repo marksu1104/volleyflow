@@ -61,12 +61,10 @@ def sqlite_engine() -> Iterator[Engine]:
     )
 
     # SQLite parses REFERENCES and then ignores it: foreign keys are off
-    # unless every connection asks for them. Without this the whole API
-    # suite — the fuzz sweep included — happily wrote rows pointing at
-    # players that didn't exist, and the first anyone knew of it was a
-    # 500 from Neon in front of a real organizer (2026-09-12,
-    # season_members_player_id_fkey). A test database that enforces less
-    # than the real one is a test database that certifies bugs.
+    # unless every connection asks for them. Without this the suite would
+    # happily write rows pointing at players that don't exist, and the
+    # first sign would be a foreign-key 500 from Postgres in production. A
+    # test database that enforces less than the real one certifies bugs.
     @event.listens_for(engine, "connect")
     def _enforce_foreign_keys(connection: Any, _record: Any) -> None:
         cursor = connection.cursor()

@@ -59,8 +59,8 @@ const num = (v) => Number(v);
     await page.waitForSelector("#settings-form:not([hidden])", { timeout: 25000 });
     await page.waitForTimeout(900);
 
-    // Since 2026-10-21 the club's name and deleting it live on the 球隊
-    // tab, the delete folded under 進階. Measured rather than assumed: a
+    // The club's name and deleting it live on the 球隊 tab, the delete
+    // folded under 進階. Measured rather than assumed: a
     // panel that manages its own visibility is exactly the kind that
     // silently stops appearing.
     await page.click('[data-set-tab="club"]');

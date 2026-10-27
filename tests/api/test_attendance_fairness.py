@@ -139,9 +139,9 @@ def test_taking_a_place_back_never_releases_somebody_elses_substitute(
 def test_cancelling_an_arranged_substitute_returns_them_to_their_place_in_the_queue(
     client: TestClient,
 ) -> None:
-    # Reported from real use: picking the third person in the queue as
-    # your 代打 and then cancelling deleted them from the game. They had
-    # given up their queue place to take the slot and got nothing back.
+    # Regression: naming the third person in the queue as a 代打 and then
+    # cancelling deleted them from the game. They gave up their queue
+    # place to take the slot, so cancelling must give it back.
     season = start_season(client, member_names=["Alice"], capacity=1)
     game_id = season["games"][0]["id"]
     first = client.post(
@@ -173,9 +173,9 @@ def test_cancelling_an_arranged_substitute_returns_them_to_their_place_in_the_qu
 def test_replacing_a_substitute_returns_the_replaced_one_to_the_queue(
     client: TestClient,
 ) -> None:
-    # Reported as "換來換去候補會不見". Cancelling a substitute gave the
-    # queue place back; replacing one with somebody else did not, and
-    # the person replaced was deleted from the game.
+    # Regression: cancelling a substitute gave the queue place back, but
+    # replacing one with somebody else did not, and the person replaced
+    # was deleted from the game.
     season = start_season(client, member_names=["Alice"], capacity=1)
     game_id = season["games"][0]["id"]
     first = client.post(

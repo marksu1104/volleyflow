@@ -53,9 +53,8 @@ check("名單列的文字沒有被裁掉", (m) =>
 
 check("「誰報名的」標籤沒有被別條規則蓋掉", (m) => {
   // Guard first: a fixture with no such tag would make every assertion
-  // below vacuously true, which is the failure mode that cost the most
-  // time on 2026-09-23 — a probe that measured nothing read exactly like
-  // a probe that found nothing wrong.
+  // below vacuously true — a probe that measures nothing reads exactly
+  // like a probe that finds nothing wrong.
   if (!m.byTags.length) return "fixture 裡沒有「誰報名的」標籤，這條檢查量不到東西";
   const loud = m.byTags.filter(
     (t) => t.bg !== "rgba(0, 0, 0, 0)" && t.bg !== "transparent"
@@ -155,16 +154,14 @@ check("標題列的球隊名、品牌、頭像不會疊在一起", (m) => {
 
 // How close a button's label is to breaking, not whether it has broken.
 //
-// Reported 2026-09-19 from an Android narrower than the organizer's
-// iPhone: 申請當固定成員 broke after 申請當固定成 while 申請臨打 beside
-// it stayed on one line. Nothing else here catches that — the button
-// grows to fit a second line, so it never overflows and never trips
-// 沒有元素超出畫面.
+// On an Android narrower than an iPhone, 申請當固定成員 can break after
+// 申請當固定成 while 申請臨打 beside it stays on one line. Nothing else
+// here catches that — the button grows to fit a second line, so it never
+// overflows and never trips 沒有元素超出畫面.
 //
-// The first version of this rule asked `lines > 1` and was measured at
-// 390, which is worthless: the long labels fill 0.77 of their box at 390
-// and 0.87 at 360, so they stay on one line with or without
-// white-space:nowrap, and the rule would have passed no matter what.
+// Asking `lines > 1` at 390 would be worthless: the long labels fill 0.77
+// of their box at 390 and 0.87 at 360, so they stay on one line with or
+// without white-space:nowrap, and the rule would pass no matter what.
 // Measured at 320 they fill exactly 1.00 — no slack at all. A font a
 // shade wider than desktop Chromium's, or a phone with text scaling on,
 // is all it takes. That is why it broke on Android and not on an iPhone.

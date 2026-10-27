@@ -232,9 +232,7 @@ def test_nobody_signed_in_can_touch_it_at_all(client: TestClient) -> None:
 def test_the_developer_may_run_any_club(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Reversed on 2026-10-09. The developer used to get no way into a
-    club beyond its problem reports; the organizer then asked for a
-    back office that can see everything and step in when needed. So the
+    """The back office can see everything and step in when needed, so the
     developer passes every organizer check (_runs_club) — and only the
     developer: the one LINE id in DEVELOPER_LINE_USER_ID, never a role
     anybody can be given through the app."""
@@ -260,10 +258,9 @@ def test_the_developer_may_run_any_club(
 def test_a_club_the_developer_merely_belongs_to_is_marked_for_them(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Reported 2026-10-12: the developer had joined another club as a
-    plain member, so GET /clubs listed it as role "member" with no mark,
-    the management pages filtered it out, and its 管理 opened the
-    developer's own club instead."""
+    """Regression: a club the developer had joined as a plain member was
+    listed by GET /clubs as role "member" with no mark, so the management
+    pages filtered it out and its 管理 opened the developer's own club."""
     a = _club_a(client)
     dev = identify(client, "Developer")
     monkeypatch.setenv("DEVELOPER_LINE_USER_ID", dev["token"])
@@ -334,7 +331,6 @@ NOT_CLUB_SCOPED = {
     ("GET", "/invites/X"): "an HMAC-signed token; answers with a club name only",
     ("POST", "/players/identify"): "verifies the LINE ID token itself",
     ("GET", "/players/me/line-reachable"): "the caller's own account",
-    ("POST", "/line/webhook"): "LINE's signature on the body",
     ("POST", "/reports"): "anybody signed in may report a problem",
     ("GET", "/reports"): "developer only",
     ("POST", "/reports/read"): "developer only",

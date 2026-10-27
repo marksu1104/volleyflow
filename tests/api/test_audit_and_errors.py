@@ -1,5 +1,5 @@
-"""The developer's overview, second part (2026-10-22): the audit trail,
-the server's errors, and the figures that say whether anything is in use.
+"""The developer overview's audit trail, the server's errors, and the
+figures that say whether anything is in use.
 
 The trail is written in the same transaction as each change, so what is
 tested is that the change and its record arrive together, with the names

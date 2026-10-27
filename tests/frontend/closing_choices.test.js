@@ -69,9 +69,8 @@ test("every row starts on 保留至下一季", () => {
 });
 
 test("a choice here looks like a choice, not like 已收 on the 季費 tab", () => {
-  // Asked for on 2026-10-02: 已收 on 季費 records the moment it is
-  // pressed; these record only when 結算此季 is. They used the same
-  // solid green, so a picked option read as money already booked.
+  // 已收 on 季費 records the moment it is pressed; these record only when
+  // 結算此季 is. The same solid green would read as money already booked.
   const { list } = setup();
 
   assert.doesNotMatch(list.innerHTML, /class="paid"/);

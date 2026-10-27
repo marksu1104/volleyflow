@@ -1,10 +1,9 @@
-// Two things reported from real use on 2026-10-16:
-//  * the organizer, on the member screen, could still take leave on a
-//    night already played — `locked` is answered per caller and is never
-//    true for them; the member screen now also locks on past_deadline;
-//  * the organizer could not name an ordinary club member as somebody's
-//    代打 — the picker offered only the queue and the guests they had
-//    signed up before.
+// Two rules for the organizer:
+//  * on the member screen they are held to the change deadline like
+//    anyone else — `locked` is answered per caller and is never true for
+//    them, so the member screen also locks on past_deadline;
+//  * they may name any ordinary club member as somebody's 代打, not only
+//    the queue and the guests they signed up before.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");

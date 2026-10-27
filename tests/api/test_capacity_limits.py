@@ -48,9 +48,9 @@ def test_a_season_with_exactly_capacity_members_is_fine(client: TestClient) -> N
 
 
 def test_a_name_given_twice_becomes_one_member(client: TestClient) -> None:
-    # A roster is a set. The same person named twice used to build two
-    # identical season_members rows and fail on the primary key — a 500
-    # for something that isn't even an error.
+    # A roster is a set. Regression: naming the same person twice built
+    # two identical season_members rows and failed on the primary key — a
+    # 500 for something that isn't even an error.
     club = create_club(client)
 
     response = client.post(
@@ -87,9 +87,8 @@ def test_adding_someone_already_on_the_roster_is_refused_not_a_crash(
 def test_removing_a_member_a_drop_in_was_covering_can_be_undone(
     client: TestClient,
 ) -> None:
-    """Reported from real use, 2026-09-12: 18 members, remove one, the
-    roster reads 17 — and adding them back says to raise the capacity to
-    19.
+    """Regression: 18 members, remove one, the roster reads 17 — and
+    adding them back said to raise the capacity to 19.
 
     Removing them closes their leave but leaves their substitute on
     court, so the game stays at capacity while the roster is one short.
@@ -342,10 +341,9 @@ def test_capacity_can_always_be_raised(client: TestClient) -> None:
 
 
 def test_raising_the_capacity_lets_the_queue_in_order(client: TestClient) -> None:
-    """Asked for on 2026-10-14: raising the capacity left people queued
-    behind empty places. More room is a slot opening like any other, so
-    the queue gets it the way an absence would give it — first queued,
-    first in, charged at the share the new capacity sets."""
+    """More room is a slot opening like any other, so the queue gets it
+    the way an absence would give it — first queued, first in, charged at
+    the share the new capacity sets."""
     today = datetime.now(ZoneInfo("Asia/Taipei")).date()
     tomorrow = (today + timedelta(days=1)).isoformat()
     season = start_season(

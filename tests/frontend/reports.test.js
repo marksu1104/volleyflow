@@ -1,7 +1,7 @@
 // The developer's page for reading problem reports.
 //
-// Reports used to be pushed over LINE, spending one or two of the free
-// tier's 200 monthly messages each. They are stored and read here now.
+// Reports are stored and read here rather than pushed over LINE, which
+// would spend one or two of the free tier's 200 monthly messages each.
 // The thing this page must get right is that every word on it came from
 // somebody else — typed into a box, or sent by their browser — and the
 // one person reading it is the developer.

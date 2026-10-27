@@ -99,10 +99,9 @@ test("money from another season is its own line, not mixed in", () => {
 });
 
 test("a season booked for later is left out, not called 上季", () => {
-  // Reported 2026-09-17 and again in 2026-10: a season booked for
-  // January has its fees charged as soon as it is created. It used to
-  // be shown as 其他季別 and counted in the headline, so a member read
-  // as owing January's fee in October.
+  // A season booked for January has its fees charged as soon as it is
+  // created. Showing it as 其他季別 and counting it in the headline would
+  // tell a member they owe January's fee in October.
   const page = load("member.html");
   const season = { id: 1, games: [game({})] };
   const ledger = {

@@ -89,8 +89,8 @@ test("unpaid season fees are counted from the balances, and sit last", () => {
 });
 
 test("a fee belonging to another season is not this season's 待辦", () => {
-  // Reported 2026-09-17, the same bug as the 帳務 page's. Balances are
-  // fetched with ?season_id=, so season_total is the season on screen
+  // The same rule as the 帳務 page. Balances are fetched with
+  // ?season_id=, so season_total is the season on screen
   // while balance spans every season the club has ever run — including
   // ones booked for later, whose fees are already charged.
   const todos = buildTodos(

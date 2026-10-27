@@ -355,10 +355,8 @@ test("no page's script writes the production URL into itself", () => {
 });
 
 // "This is working": a control that waits on the network says so, stops
-// taking taps, and lets go whatever happens. Reported twice as buttons
-// feeling unresponsive, both times because the state was applied by
-// hand at some call sites and forgotten at others — it is claimed by
-// postJson/deleteJson now, so no write can skip it.
+// taking taps, and lets go whatever happens. postJson/deleteJson apply
+// the state themselves, so no call site can forget it.
 test("a control that is waiting is disabled and marked busy", () => {
   const { markBusy } = load();
   const btn = makeElement();

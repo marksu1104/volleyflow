@@ -2,11 +2,9 @@
 // database with nothing in it.
 //
 // This is the state every real user meets once and nobody ever sees
-// again, which is exactly why it rots. It went unnoticed until the
-// database was emptied for launch (2026-09-13): 帳務 and 名單 both said
-// 「這個球隊尚未開季」 and offered to copy an invite link — for a club
-// that did not exist. Every other check here runs against seed data, so
-// none of them could have caught it.
+// again, which is exactly why it rots: every other check here runs
+// against seed data, so none of them can catch a page that, say, offers
+// to copy an invite link for a club that does not exist.
 //
 // What it asserts, per page:
 //   * it says there is no club yet, and not something else;

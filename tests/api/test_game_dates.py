@@ -179,9 +179,9 @@ def test_a_night_can_move_and_change_venue_in_one_request(client: TestClient) ->
 def test_changing_a_nights_venue_charges_nobody_anything(client: TestClient) -> None:
     # The venue's *name* and the time are display-only, so an edit that
     # changes nobody's math writes nothing (docs/billing-rules.md). What
-    # a different court *costs* is a separate field — venue_cost_delta,
-    # added 2026-09-17 — and it is the only thing on this endpoint that
-    # moves money; the tests below cover that. This one is what catches
+    # a different court *costs* is a separate field, venue_cost_delta,
+    # and it is the only thing on this endpoint that moves money; the
+    # tests below cover that. This one is what catches
     # the display-only three quietly acquiring a price.
     season = start_season(
         client, game_dates=[_in(30), _in(37)], member_names=["Alice"], capacity=2

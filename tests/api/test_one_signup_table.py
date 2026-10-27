@@ -1,10 +1,10 @@
-"""Playing and waiting are one table (2026-10-07).
+"""Playing and waiting are one table.
 
 A move between court and queue changes a signup's `status` and nothing
-else. Before, it deleted a row in one table and copied fields into a new
-row in the other, along at least five paths, and two real bugs were a
-field one of them forgot. These pin the new shape: the same row, every
-field intact, and the two lists never mistaken for each other.
+else. Copying a row between two tables would have to carry every field
+along each path that moves somebody, and a field one of them forgets is
+a bug. These pin the shape: the same row, every field intact, and the
+two lists never mistaken for each other.
 """
 
 from datetime import datetime
@@ -116,8 +116,7 @@ def test_the_billing_engine_refuses_a_queued_signup() -> None:
 
 
 def test_the_roster_carries_each_line_users_picture(client: TestClient) -> None:
-    # Shown in place of their initial (2026-10-07); nobody without LINE
-    # has one.
+    # Shown in place of their initial; nobody without LINE has one.
     season = start_season(
         client, member_names=["固定甲"], capacity=2, game_dates=["2031-01-07"]
     )

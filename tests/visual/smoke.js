@@ -42,8 +42,7 @@ const PAGES = [
   // Where anyone reports a problem, linked from the page above and from
   // the LINE rich menu. Safe to press everything on: the only action is
   // 送出回報, which refuses an empty description with a toast rather than
-  // sending anything. Added 2026-09-18 with the page itself — a screen
-  // no check ever opens is a screen that breaks quietly.
+  // sending anything. A screen no check ever opens breaks quietly.
   "report.html",
   // The developer's report reader. Without DEVELOPER_LINE_USER_ID set on
   // the local API it shows its "not configured" state — which is itself
@@ -225,7 +224,7 @@ async function auditPage(browser, path) {
     // described in PAGES above, not an application crash. Keep the
     // exception exact so any other 5xx still fails the audit: only GETs,
     // only these pages, only their own developer-only reads (the
-    // overview reads four of them since 2026-10-22).
+    // overview reads four of them).
     const expectedUnconfigured =
       r.status() === 503 &&
       method === "GET" &&

@@ -1,6 +1,6 @@
-// Tapping a row opens it in place onto at most two buttons (2026-10-20,
-// replacing a menu from the bottom of the screen). 銷假 is 取消請假, and
-// 指定代打 on somebody still playing takes leave in the same step.
+// Tapping a row opens it in place onto at most two buttons. 銷假 is
+// 取消請假, and 指定代打 on somebody still playing takes leave in the same
+// step.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");

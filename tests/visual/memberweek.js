@@ -324,10 +324,9 @@ function inDays(days) {
     });
     // The drawn row *and* the object it was drawn from. A red here is
     // either "the server never sent brought_by_name" or "it arrived and
-    // the row ignored it", and those have different fixes; on
-    // 2026-09-23 it cost two rounds of guessing to tell them apart,
-    // because the signup path draws a frontend-built object rather than
-    // the server's row.
+    // the row ignored it", and those have different fixes — hard to tell
+    // apart because the signup path draws a frontend-built object rather
+    // than the server's row.
     const guestRow = await page.evaluate((guest) => {
       const rows = [...document.querySelectorAll('[data-gd-panel="attending"] .att-row')];
       const row = rows.find((r) => r.innerText.includes(guest));
@@ -348,9 +347,7 @@ function inDays(days) {
     // stale copy rather than what the API just said. Asking the API
     // directly is what separates the three explanations — the server
     // never sent the field, the server sent it and the cache overruled
-    // it, or both were right and the row ignored it — which cost several
-    // rounds of guessing on 2026-09-23 when only the first two sources
-    // were on show.
+    // it, or both were right and the row ignored it.
     const fresh = await get(`/seasons/${season.id}`);
     let served = "（伺服器的名單裡沒有這個人）";
     for (const g of fresh.games || []) {

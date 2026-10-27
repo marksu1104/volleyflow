@@ -57,8 +57,7 @@ def _seed(session: Session) -> None:
     # Flushed in three waves, parents before children. models.py declares
     # no relationship(), so the ORM sorts its mappers alphabetically by
     # class name and would otherwise insert absences before players and
-    # games — which SQLite used to accept silently and Postgres never
-    # would.
+    # games, which a database enforcing foreign keys refuses.
     club = ClubRow(id=1, name="測試球隊", created_at=datetime(2026, 1, 1))
     session.add(club)
     session.add(PlayerRow(id=1, name="周恆"))
@@ -350,15 +349,14 @@ def _rows_per_table(engine: Engine) -> dict[str, int]:
 def test_every_table_survives_a_round_trip_including_binary_data(
     _use_sqlite: Engine, tmp_path: Path
 ) -> None:
-    """Found by CI on 2026-09-15: the backup could not write a database
-    that held a single screenshot. `problem_reports.image` is the one
-    binary column, JSON has no bytes, and nothing encoded them — the dump
-    raised "Don't know how to back up a bytes" and wrote nothing.
+    """`problem_reports.image` is the one binary column and JSON has no
+    bytes, so the dump has to encode them; without that, a database
+    holding a single screenshot raises "Don't know how to back up a bytes"
+    and writes nothing.
 
-    It hid for as long as it did because the round trip above seeds most
-    tables, not all of them, and every database the drill had been run
-    against happened to have no screenshots in it. So this one seeds a row
-    in **every** table and says so: a table added later that nobody gives
+    The round trip above seeds most tables, not all of them, so this one
+    seeds a row in **every** table and says so: a table added later that
+    nobody gives
     a row here fails the first assertion, rather than quietly being the
     next column type nobody checked.
     """
@@ -428,8 +426,9 @@ def test_every_table_survives_a_round_trip_including_binary_data(
 def test_a_dump_from_before_the_queue_joined_drop_ins_keeps_the_queue(
     _use_sqlite: Engine, tmp_path: Path
 ) -> None:
-    """A backup taken before 2026-10-07 has `waitlist_entries` and a
-    drop-in's `from_waitlist_at`. Restoring follows today's tables, so
+    """A backup from before migration c9d1e5f2a374 (one signup table) has
+    `waitlist_entries` and a drop-in's `from_waitlist_at`. Restoring
+    follows today's tables, so
     without translating the old shape every queued person would be
     skipped — lost by the script whose job is to lose nothing."""
     with Session(_use_sqlite) as session:

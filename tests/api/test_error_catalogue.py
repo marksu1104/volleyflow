@@ -22,11 +22,7 @@ API = ROOT / "src" / "volleyflow" / "api"
 CATALOGUE = ROOT / "tests" / "frontend" / "error_messages.test.js"
 
 # Messages no person can ever read, so no person needs them in Chinese.
-EXEMPT = {
-    # LINE's webhook signature check. This answers LINE's servers, never a
-    # browser; a human being never sees it.
-    "Invalid LINE signature",
-}
+EXEMPT: set[str] = set()
 
 
 def _render(node: ast.AST) -> str | None:

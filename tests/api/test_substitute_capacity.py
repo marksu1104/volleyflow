@@ -146,15 +146,12 @@ def test_somebody_elses_named_substitute_is_never_bumped(client: TestClient) -> 
 def test_a_full_game_of_named_substitutes_refuses_rather_than_overfilling(
     client: TestClient, db_session: Session
 ) -> None:
-    # This is a safety net for a row that predates two rules added on
-    # 2026-09-12: start_season now refuses more members than capacity,
-    # and update_season refuses lowering capacity below the roster or any
-    # game's current attendance (see test_capacity_limits.py). Together
-    # they mean capacity >= roster size always, through every route the
-    # app itself offers — so "two members, one slot" can no longer be
-    # built by calling the API, only by a row already in that state from
-    # before those checks existed. Simulated here with a direct write,
-    # since the API correctly won't do it anymore.
+    # A safety net for a row the API can no longer build: start_season
+    # refuses more members than capacity, and update_season refuses
+    # lowering capacity below the roster or any game's current attendance
+    # (see test_capacity_limits.py). "Two members, one slot" exists only
+    # in data written before those checks, so it is made here with a
+    # direct write.
     season = start_season(client, member_names=["Alice", "Bob"], capacity=2)
     game_id = season["games"][0]["id"]
     absence = client.post(

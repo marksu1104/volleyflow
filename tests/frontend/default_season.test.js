@@ -1,10 +1,9 @@
 // Which season a page opens on.
 //
-// The picker used to take whichever season the API listed first, and the
-// API lists newest-created first — so booking next season in advance
-// moved every page's default onto a season nobody had played yet. These
-// pin the order of preference instead: being played now, then about to
-// start, then most recently finished.
+// The API lists newest-created first, so taking whichever season it
+// lists first would move every page onto next season as soon as it is
+// booked. These pin the order of preference instead: being played now,
+// then about to start, then most recently finished.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
