@@ -485,6 +485,67 @@ def test_cancelling_an_absence_puts_the_stand_in_back_in_the_queue(
     assert ledger["balance"] == "0", "charged when promoted, refunded when released"
 
 
+def test_cancelling_an_absence_keeps_the_stand_in_when_another_slot_is_open(
+    client: TestClient,
+) -> None:
+    """Regression: Bob was sent to the queue although Steven's absence
+    still left a place open, so the game showed a free slot and a
+    queue at once.
+    """
+    season = _start_season(client, member_names=["Alice", "Steven", "Dan"], capacity=3)
+    game_id = season["games"][0]["id"]
+    alice_absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    bob = client.post(
+        "/drop-ins", json={"player_name": "Bob", "game_id": game_id}
+    ).json()
+    client.post("/absences", json={"player_name": "Steven", "game_id": game_id})
+
+    response = client.post(f"/absences/{alice_absence['id']}/cancel")
+
+    assert response.status_code == 200
+    game = next(
+        g
+        for g in client.get(f"/seasons/{season['id']}").json()["games"]
+        if g["id"] == game_id
+    )
+    assert [d["player_name"] for d in game["confirmed_drop_ins"]] == ["Bob"]
+    assert game["waitlist_entries"] == []
+    ledger = client.get(
+        f"/clubs/{season['club_id']}/players/{bob['player_id']}/ledger"
+    ).json()
+    assert ledger["balance"] != "0", "still playing, so still charged"
+
+
+def test_cancelling_an_absence_keeps_a_named_substitute_as_a_plain_drop_in(
+    client: TestClient,
+) -> None:
+    season = _start_season(client, member_names=["Alice", "Steven", "Dan"], capacity=3)
+    game_id = season["games"][0]["id"]
+    alice_absence = client.post(
+        "/absences", json={"player_name": "Alice", "game_id": game_id}
+    ).json()
+    client.put(
+        f"/absences/{alice_absence['id']}/substitute", json={"player_name": "Dave"}
+    )
+    client.post("/absences", json={"player_name": "Steven", "game_id": game_id})
+
+    response = client.post(f"/absences/{alice_absence['id']}/cancel")
+
+    assert response.status_code == 200
+    assert response.json()["released_player_id"] is None
+    game = next(
+        g
+        for g in client.get(f"/seasons/{season['id']}").json()["games"]
+        if g["id"] == game_id
+    )
+    assert [(d["player_name"], d["covering"]) for d in game["confirmed_drop_ins"]] == [
+        ("Dave", None)
+    ], "no longer Alice's 代打, since Alice is playing"
+    assert game["waitlist_entries"] == []
+
+
 def test_cancel_absence_for_unknown_id_returns_404(client: TestClient) -> None:
     create_club(client)
 

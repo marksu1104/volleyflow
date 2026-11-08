@@ -1,13 +1,12 @@
 """Several people acting on the same game at once, and acting badly.
 
-Asked for on 2026-09-11: "模擬使用者甚至多使用者的狀態下，複雜跟嚴格有
-點亂來的操作是否還是可以操作的很滑順，不會有錯誤". Every test here runs
-a plausible-but-messy sequence and then checks the invariants that must
-hold no matter what happened:
+Every test here runs a plausible-but-messy sequence and then checks the
+invariants that must hold no matter what happened:
 
 * nobody is on the court and in the queue at the same time
 * nobody is on the court twice
 * the court never holds more than the capacity
+* nobody waits in the queue while a place on court is open
 * everybody not playing owes nothing for that game
 * the club never collects more than the venue cost from one night
 
@@ -47,6 +46,9 @@ def check_invariants(client: TestClient, season: dict[str, Any]) -> dict[str, An
     assert len(queued) == len(set(queued)), f"queued twice: {queued}"
     assert len(playing) <= detail["capacity"], (
         f"{len(playing)} people on a court for {detail['capacity']}"
+    )
+    assert not queued or len(playing) == detail["capacity"], (
+        f"{queued} waiting while {len(playing)} of {detail['capacity']} play"
     )
 
     # Money: a drop-in fee is a charge against a player, so the total can
@@ -130,8 +132,10 @@ def test_a_member_and_the_organizer_fighting_over_one_absence(
     client.put(f"/absences/{absence['id']}/substitute", json={"player_name": "Yuki"})
     client.post(f"/absences/{absence['id']}/cancel", headers=as_alice)
 
+    # The second place was never Alice's, so Yuki keeps it as an ordinary
+    # drop-in rather than queueing for a slot that is open.
     state = check_invariants(client, season)
-    assert state["playing"] == ["Alice"], "she is playing and nobody is standing in"
+    assert state["playing"] == ["Alice", "Yuki"]
 
 
 def test_a_full_game_churned_by_several_people_stays_within_capacity(

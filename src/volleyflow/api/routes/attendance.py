@@ -149,10 +149,12 @@ def cancel_absence(
 ) -> AbsenceCancelOut:
     """The member is attending after all.
 
-    Whoever was standing in the slot goes back to the queue at their
-    original place, with their fee reversed: the slot opened only
-    because this member released it, so taking the release back closes
-    it. The change deadline still applies.
+    The slot they released closes again. If that would put the game
+    over capacity, whoever was standing in it goes back to the queue at
+    their original place, with their fee reversed. If another absence
+    still leaves a place open, nobody has to leave: whoever stood in
+    keeps playing, and a named 代打 stays on as an ordinary drop-in.
+    The change deadline still applies.
     """
     absence = db.get(AbsenceRow, absence_id)
     if absence is None:
@@ -169,7 +171,16 @@ def cancel_absence(
     _require_season_open(season)
     _require_within_change_deadline(db, game, season, current_player)
 
-    released_player_id = _release_whoever_is_covering(db, absence, season)
+    # Checked before the absence is cancelled: an open slot now means the
+    # member's return still fits.
+    released_player_id = None
+    if _has_open_slot(db, game, season):
+        for arranged in db.query(DropInRow).filter(
+            DropInRow.covers_absence_id == absence.id, DropInRow.playing()
+        ):
+            arranged.covers_absence_id = None
+    else:
+        released_player_id = _release_whoever_is_covering(db, absence, season)
 
     absence.cancelled_at = _now()
     db.commit()
