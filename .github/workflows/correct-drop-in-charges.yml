@@ -1,0 +1,40 @@
+name: Correct drop-in charges
+
+# One-off, run by hand. A drop-in used to keep whatever they were charged
+# at signup when their night was re-priced afterwards; the API now
+# corrects that as it happens, and this corrects the signups charged
+# before it did. Lists them unless "apply" is ticked, so the list can be
+# checked before anything is written. Prints ids and amounts only,
+# because this repository's logs are public.
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Write the corrections (unticked lists them only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: correct-drop-in-charges
+
+jobs:
+  correct:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: List or correct
+        run: uv run python scripts/correct_drop_in_charges.py ${{ inputs.apply && '--apply' || '' }}
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}

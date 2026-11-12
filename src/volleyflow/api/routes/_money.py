@@ -516,8 +516,33 @@ def _sync_drop_in_charges(db: Session, season_row: SeasonRow) -> None:
 
     A drop-in pays for the night they play at that night's price, and an
     absence they cover is refunded at the same price, so the two must
-    move together. Cancelled games are left alone: what a called-off
-    night costs a drop-in is not a price.
+    move together.
+    """
+    now = _now()
+    for drop_in, share in _stale_drop_in_charges(db, season_row):
+        assert drop_in.charged_amount is not None  # filtered out otherwise
+        db.add(
+            LedgerEntryRow(
+                player_id=drop_in.player_id,
+                club_id=season_row.club_id,
+                entry_type=EntryType.DROP_IN_FEE_CHARGED,
+                amount=drop_in.charged_amount - share,
+                recorded_at=now,
+                season_id=season_row.id,
+                note=f"Drop-in fee adjustment for game {drop_in.game_id}",
+            )
+        )
+        drop_in.charged_amount = share
+
+
+def _stale_drop_in_charges(
+    db: Session, season_row: SeasonRow
+) -> list[tuple[DropInRow, Decimal]]:
+    """Each confirmed drop-in whose charge is not their night's current
+    price, with that price. Reads only.
+
+    Cancelled games are left out: what a called-off night costs a
+    drop-in is not a price.
     """
     game_rows = db.query(GameRow).filter(GameRow.season_id == season_row.id).all()
     member_rows = (
@@ -528,26 +553,14 @@ def _sync_drop_in_charges(db: Session, season_row: SeasonRow) -> None:
     )
     shares = season_shares(season_from_rows(season_row, game_rows, member_rows))
     scheduled = [g.id for g in game_rows if g.status == GameStatus.SCHEDULED]
-    now = _now()
-    for drop_in in db.query(DropInRow).filter(
-        DropInRow.game_id.in_(scheduled), DropInRow.playing()
-    ):
-        share = shares[drop_in.game_id]
-        charged = drop_in.charged_amount
-        if charged is None or charged == share:
-            continue
-        db.add(
-            LedgerEntryRow(
-                player_id=drop_in.player_id,
-                club_id=season_row.club_id,
-                entry_type=EntryType.DROP_IN_FEE_CHARGED,
-                amount=charged - share,
-                recorded_at=now,
-                season_id=season_row.id,
-                note=f"Drop-in fee adjustment for game {drop_in.game_id}",
-            )
-        )
-        drop_in.charged_amount = share
+    return [
+        (drop_in, shares[drop_in.game_id])
+        for drop_in in db.query(DropInRow)
+        .filter(DropInRow.game_id.in_(scheduled), DropInRow.playing())
+        .order_by(DropInRow.id)
+        if drop_in.charged_amount is not None
+        and drop_in.charged_amount != shares[drop_in.game_id]
+    ]
 
 
 def _sync_member_season_fee_ledger(
