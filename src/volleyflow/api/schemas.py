@@ -802,6 +802,15 @@ class AuditEventOut(BaseModel):
     detail: str | None
 
 
+class DeveloperNightOut(BaseModel):
+    """A club's game night that has attendance on the record, for
+    reading the trail one night at a time."""
+
+    club_id: int
+    club_name: str | None
+    night: date
+
+
 class PlayerBalanceOut(BaseModel):
     """One player's money in one club, summed several ways at once in a
     single query for everyone on the ledger page.

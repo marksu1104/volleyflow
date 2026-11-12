@@ -96,6 +96,7 @@ const KNOWN_MESSAGES = [
   "This season already has 18 fixed members for 18 slots. Raise the capacity or take somebody off the roster first.",
   "The developer overview isn't configured on this server",
   "Only the developer can read this",
+  "A night is read with its club",
   "Reading reports isn't configured on this server",
   "Only the developer can read reports",
   "Already asked to join — waiting for the organizer",

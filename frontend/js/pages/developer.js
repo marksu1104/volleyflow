@@ -68,6 +68,20 @@ const PAGE_NAMES = {
 
 const ACTIVITY_SHOWN = 10;
 
+/** routes/_audit.py ATTENDANCE_ACTIONS: each names its night in `detail`. */
+const ATTENDANCE = new Set([
+  "absence_recorded",
+  "absence_cancelled",
+  "substitute_named",
+  "signed_up",
+  "queued",
+  "drop_in_cancelled",
+  "waitlist_left",
+  "promoted",
+  "promoted_by_organizer",
+  "returned_to_queue",
+]);
+
 let allClubs = [];
 let showEmptyClubs = false;
 
@@ -99,7 +113,7 @@ function locationLabel(where) {
 
 /** One audit row as a sentence, using the words of the button that
  * made it (收款、復原、場地費照算…). Plain text; the caller escapes. */
-function activitySentence(e) {
+function activitySentence(e, withNight = true) {
   const who = e.actor_name || "（已刪除的帳號）";
   const subject = e.subject_name || "（已刪除的成員）";
   const n = Number(e.amount);
@@ -155,12 +169,50 @@ function activitySentence(e) {
     case "roster_removed":
       return `${who} 將 ${subject} 移出固定成員`;
     default:
-      return `${who} 執行 ${e.action}`;
+      return attendanceSentence(e, who, subject, withNight) || `${who} 執行 ${e.action}`;
   }
 }
 
-/** Money moved, somebody or something went, or anything else. */
+/** An attendance change. Somebody acting for themselves reads as one
+ * name; a place moved by somebody else's action names whose it was.
+ * `withNight` false when the night is already the list's heading. */
+function attendanceSentence(e, who, subject, withNight = true) {
+  const self = e.actor_name && e.actor_name === e.subject_name;
+  const night = withNight && e.detail ? `${shortDate(e.detail)} 場次` : "";
+  const tail = night ? `（${night}）` : "";
+  const cause = `（${who} 的操作${night ? `，${night}` : ""}）`;
+  switch (e.action) {
+    case "absence_recorded":
+      return self ? `${who} 請假${tail}` : `${who} 登記 ${subject} 請假${tail}`;
+    case "absence_cancelled":
+      return self ? `${who} 取消請假${tail}` : `${who} 取消 ${subject} 的請假${tail}`;
+    case "substitute_named":
+      return `${who} 指定 ${subject} 為代打${tail}`;
+    case "signed_up":
+      return self ? `${who} 報名${tail}` : `${who} 幫 ${subject} 報名${tail}`;
+    case "queued":
+      return self
+        ? `${who} 報名，進入候補${tail}`
+        : `${who} 幫 ${subject} 報名，進入候補${tail}`;
+    case "drop_in_cancelled":
+      return self ? `${who} 取消報名${tail}` : `${who} 取消 ${subject} 的報名${tail}`;
+    case "waitlist_left":
+      return self ? `${who} 退出候補${tail}` : `${who} 將 ${subject} 移出候補${tail}`;
+    case "promoted":
+      return `${subject} 由候補遞補上場${cause}`;
+    case "promoted_by_organizer":
+      return `${who} 將 ${subject} 由候補遞補上場${tail}`;
+    case "returned_to_queue":
+      return `${subject} 退回候補${cause}`;
+    default:
+      return "";
+  }
+}
+
+/** Money moved, somebody or something went, or anything else. A place
+ * changing hands is ordinary traffic, so attendance takes no colour. */
 function activityKind(action) {
+  if (ATTENDANCE.has(action)) return "";
   if (/^(payment|ac_|venue_cost|fee_notice)/.test(action)) return "money";
   if (/(removed|deleted|cancelled)/.test(action)) return "remove";
   return "";
@@ -195,13 +247,13 @@ function errorsHtml(errors) {
   return errors.map(errorRowHtml).join("");
 }
 
-function activityRowHtml(e) {
+function activityRowHtml(e, withNight = true) {
   const where = e.club_name ? `・${escapeHtml(e.club_name)}` : "";
   return `
     <div class="act-row">
       <span class="act-dot ${activityKind(e.action)}" aria-hidden="true"></span>
       <div class="act-main">
-        <div class="act-text">${escapeHtml(activitySentence(e))}</div>
+        <div class="act-text">${escapeHtml(activitySentence(e, withNight))}</div>
         <div class="act-meta">${escapeHtml(stampTime(e.occurred_at))}${where}</div>
       </div>
     </div>`;
@@ -212,7 +264,34 @@ function activityHtml(events, expanded) {
     return '<div class="lrow static"><span class="lrow-k">尚無操作紀錄</span></div>';
   }
   const shown = expanded ? events : events.slice(0, ACTIVITY_SHOWN);
-  return shown.map(activityRowHtml).join("");
+  return shown.map((e) => activityRowHtml(e)).join("");
+}
+
+/** One night's record, oldest first as the server sends it. The night is
+ * the picker's label, so no line repeats it. */
+function nightActivityHtml(events) {
+  if (!events.length) {
+    return '<div class="lrow static"><span class="lrow-k">這一場沒有操作紀錄</span></div>';
+  }
+  return events.map((e) => activityRowHtml(e, false)).join("");
+}
+
+/** "11/10（週二）・塔塔" for one choice in the night picker. */
+function nightLabel(n) {
+  const club = n.club_name ? `・${n.club_name}` : "";
+  return `${describeDate(n.night).label}${club}`;
+}
+
+function nightOptionsHtml(nights) {
+  return (
+    '<option value="">全部操作</option>' +
+    nights
+      .map(
+        (n) =>
+          `<option value="${n.club_id}|${escapeHtml(n.night)}">${escapeHtml(nightLabel(n))}</option>`
+      )
+      .join("")
+  );
 }
 
 /** A club that never got going: nothing ever charged or paid in it
@@ -326,20 +405,44 @@ async function fillBlock(path, box, render) {
     fillBlock("/developer/errors", errors, (rows) => {
       errors.innerHTML = errorsHtml(rows);
     });
+    const more = document.getElementById("activity-more");
+    const picker = document.getElementById("activity-night");
+    let recent = [];
+    let expanded = false;
+    const drawRecent = () => {
+      activity.innerHTML = activityHtml(recent, expanded);
+      more.hidden = recent.length <= ACTIVITY_SHOWN;
+      more.textContent = expanded ? "只顯示最近 10 筆" : `顯示全部 ${recent.length} 筆`;
+    };
+    more.onclick = () => {
+      expanded = !expanded;
+      drawRecent();
+    };
     fillBlock("/developer/activity?limit=50", activity, (rows) => {
-      const more = document.getElementById("activity-more");
-      let expanded = false;
-      const draw = () => {
-        activity.innerHTML = activityHtml(rows, expanded);
-        more.hidden = rows.length <= ACTIVITY_SHOWN;
-        more.textContent = expanded ? "只顯示最近 10 筆" : `顯示全部 ${rows.length} 筆`;
-      };
-      more.onclick = () => {
-        expanded = !expanded;
-        draw();
-      };
-      draw();
+      recent = rows;
+      drawRecent();
     });
+    // The picker appears once there is a night to pick; until then, or if
+    // the nights cannot be read, the recent list stands alone as before.
+    fillBlock("/developer/activity/nights", document.createElement("div"), (nights) => {
+      if (!nights.length) return;
+      picker.innerHTML = nightOptionsHtml(nights);
+      picker.hidden = false;
+    });
+    picker.onchange = () => {
+      if (!picker.value) {
+        drawRecent();
+        return;
+      }
+      const [clubId, night] = picker.value.split("|");
+      more.hidden = true;
+      activity.innerHTML = blockLoadingHtml();
+      const query = `club_id=${encodeURIComponent(clubId)}&night=${encodeURIComponent(night)}`;
+      fillBlock(`/developer/activity?${query}`, activity, (rows) => {
+        // A later pick may have overtaken this answer.
+        if (picker.value === `${clubId}|${night}`) activity.innerHTML = nightActivityHtml(rows);
+      });
+    };
     fillBlock("/developer/clubs", clubs, (rows) => {
       allClubs = rows;
       renderClubs();

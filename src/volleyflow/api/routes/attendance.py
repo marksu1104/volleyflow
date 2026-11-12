@@ -24,6 +24,7 @@ from volleyflow.api.routes._attendance import (
     _require_season_open,
     _require_within_change_deadline,
 )
+from volleyflow.api.routes._audit import _audit_attendance
 from volleyflow.api.routes._money import (
     _record_drop_in_charge,
 )
@@ -100,6 +101,7 @@ def record_absence(
 
     absence = AbsenceRow(player_id=player.id, game_id=game.id, recorded_at=_now())
     db.add(absence)
+    _audit_attendance(db, current_player, "absence_recorded", game, season, player.id)
 
     # Naming the substitute in the same request gives the slot straight to
     # them, so nobody is promoted, charged and bumped a moment later. A
@@ -125,6 +127,7 @@ def record_absence(
         )
     else:
         promoted = _promote_from_waitlist(db, game.id)
+        _audit_attendance(db, current_player, "promoted", game, season, promoted)
 
     db.commit()
     db.refresh(absence)
@@ -183,6 +186,12 @@ def cancel_absence(
         released_player_id = _release_whoever_is_covering(db, absence, season)
 
     absence.cancelled_at = _now()
+    _audit_attendance(
+        db, current_player, "absence_cancelled", game, season, absence.player_id
+    )
+    _audit_attendance(
+        db, current_player, "returned_to_queue", game, season, released_player_id
+    )
     db.commit()
     db.refresh(absence)
 
@@ -265,6 +274,14 @@ def _name_substitute(
         # SQLAlchemy inserts before it updates, and the old row would
         # otherwise trip the one-row-per-person-per-game index.
         _off_the_court(db, existing, season)
+        _audit_attendance(
+            db,
+            current_player,
+            "returned_to_queue" if existing.status == QUEUED else "drop_in_cancelled",
+            game,
+            season,
+            existing.player_id,
+        )
 
     player = _get_or_create_player(db, season.club_id, payload.player_name)
     # Nobody may sign up a person who has a LINE account but themselves.
@@ -332,6 +349,10 @@ def _name_substitute(
         )
         db.add(drop_in)
     _record_drop_in_charge(db, drop_in, season, reverse=False)
+    _audit_attendance(
+        db, current_player, "returned_to_queue", game, season, displaced_player_id
+    )
+    _audit_attendance(db, current_player, "substitute_named", game, season, player.id)
     return drop_in, displaced_player_id, player
 
 
@@ -368,6 +389,7 @@ def sign_up(
         )
         db.add(drop_in)
         _record_drop_in_charge(db, drop_in, season, reverse=False)
+        _audit_attendance(db, current_player, "signed_up", game, season, player.id)
         db.commit()
         db.refresh(drop_in)
         return DropInOut(
@@ -384,6 +406,7 @@ def sign_up(
         brought_by_player_id=brought_by,
     )
     db.add(entry)
+    _audit_attendance(db, current_player, "queued", game, season, player.id)
     db.commit()
     db.refresh(entry)
     return DropInOut(
@@ -469,6 +492,7 @@ def _sign_up_each(
             )
             db.add(drop_in)
             _record_drop_in_charge(db, drop_in, season, reverse=False)
+            _audit_attendance(db, current_player, "signed_up", game, season, player.id)
             # Flushed so the next person sees this slot as taken.
             db.flush()
             results.append(
@@ -490,6 +514,7 @@ def _sign_up_each(
                 brought_by_player_id=brought_by,
             )
             db.add(wait)
+            _audit_attendance(db, current_player, "queued", game, season, player.id)
             db.flush()
             results.append(
                 DropInOut(
@@ -527,6 +552,7 @@ def leave_waitlist(
 
     player_id = entry.player_id
     entry.cancelled_at = _now()
+    _audit_attendance(db, current_player, "waitlist_left", game, season, player_id)
     db.commit()
     return WaitlistCancelOut(id=entry_id, player_id=player_id, game_id=game.id)
 
@@ -586,6 +612,12 @@ def promote_from_waitlist(
         )
 
     drop_in = _promote_entry(db, entry)
+    _audit_attendance(
+        db, current_player, "returned_to_queue", game, season, replaced_player_id
+    )
+    _audit_attendance(
+        db, current_player, "promoted_by_organizer", game, season, drop_in.player_id
+    )
     db.commit()
     db.refresh(drop_in)
 
@@ -635,7 +667,17 @@ def cancel_drop_in(
         drop_in.cancelled_at = taken_at
         _record_drop_in_charge(db, drop_in, season, reverse=True)
 
+    # Read before the promotion below, which may put them straight back.
+    _audit_attendance(
+        db,
+        current_player,
+        "returned_to_queue" if drop_in.status == QUEUED else "drop_in_cancelled",
+        game,
+        season,
+        drop_in.player_id,
+    )
     promoted = _promote_from_waitlist(db, drop_in.game_id)
+    _audit_attendance(db, current_player, "promoted", game, season, promoted)
 
     db.commit()
     db.refresh(drop_in)

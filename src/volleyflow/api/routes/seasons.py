@@ -23,7 +23,7 @@ from volleyflow.api.routes._attendance import (
     _offer_freed_slots_to_the_queue,
     _within_change_deadline,
 )
-from volleyflow.api.routes._audit import _audit, _season_span
+from volleyflow.api.routes._audit import _audit, _audit_attendance, _season_span
 from volleyflow.api.routes._money import (
     _previous_season,
     _sync_season_fee_ledger,
@@ -337,7 +337,10 @@ def update_season(
     # still to come. Done after the fee sync, so each promotion is charged
     # at the new share.
     if raised:
-        _offer_freed_slots_to_the_queue(db, season)
+        for game_id, promoted_id in _offer_freed_slots_to_the_queue(db, season):
+            game = db.get(GameRow, game_id)
+            assert game is not None
+            _audit_attendance(db, current_player, "promoted", game, season, promoted_id)
 
     # Changes that re-price the season are audited with their old value.
     for field, action in (

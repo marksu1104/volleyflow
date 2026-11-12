@@ -22,7 +22,7 @@ from volleyflow.api.routes._attendance import (
     _restore_retired_absences,
     _retired_absence_game_ids,
 )
-from volleyflow.api.routes._audit import _audit
+from volleyflow.api.routes._audit import _audit, _audit_attendance
 from volleyflow.api.routes._money import (
     _sync_member_season_fee_ledger,
 )
@@ -44,6 +44,7 @@ from volleyflow.db.models import (
     AbsenceRow,
     ClubMemberRow,
     DropInRow,
+    GameRow,
     PlayerRow,
     SeasonMemberRow,
     SeasonRow,
@@ -148,6 +149,9 @@ def add_member(
                 "drop-in to move back to the waitlist.",
             )
         displaced.append((game.id, game.date, displaced_player_id))
+        _audit_attendance(
+            db, current_player, "returned_to_queue", game, season, displaced_player_id
+        )
 
     db.add(SeasonMemberRow(season_id=season_id, player_id=player.id))
     try:
@@ -247,7 +251,10 @@ def remove_member(
     # full, and before the fee sync, so the promoted drop-ins' charges are
     # in the ledger it reads. Each promoted person is told their night by
     # the deadline job.
-    _offer_freed_slots_to_the_queue(db, season)
+    for game_id, promoted_id in _offer_freed_slots_to_the_queue(db, season):
+        game = db.get(GameRow, game_id)
+        assert game is not None
+        _audit_attendance(db, current_player, "promoted", game, season, promoted_id)
     _sync_member_season_fee_ledger(db, season, player_id, is_member=False)
     _audit(db, current_player, "roster_removed", season.club_id, subject_id=player_id)
     db.commit()

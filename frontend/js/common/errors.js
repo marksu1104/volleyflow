@@ -209,6 +209,7 @@ const _API_ERROR_PATTERNS = [
     () => "這個功能在伺服器上尚未設定",
   ],
   [/^Only the developer can read (this|reports)$/, () => "只有開發者可以看這一頁"],
+  [/^A night is read with its club$/, () => "請同時選擇球隊與場次"],
   [/^Problem reporting isn't configured yet$/, () => "回報功能尚未設定"],
   [/^Nothing to report$/, () => "沒有內容可以回報"],
   [

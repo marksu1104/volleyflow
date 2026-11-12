@@ -43,6 +43,7 @@
   .act-main { flex: 1; min-width: 0; }
   .act-text { font-size: .95rem; line-height: 1.5; overflow-wrap: anywhere; }
   .act-meta { margin-top: 2px; font-size: .8rem; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .night-pick { margin-bottom: 10px; }
 
   .club-search { margin-bottom: 10px; }
   .dclub .lrow-k { flex-direction: column; align-items: flex-start; gap: 2px; }
@@ -72,6 +73,9 @@
     <div class="lcard" id="errors"></div>
 
     <div class="lgroup">最近操作</div>
+    <select id="activity-night" class="control night-pick" aria-label="場次" hidden>
+      <option value="">全部操作</option>
+    </select>
     <div class="lcard" id="activity"></div>
     <button type="button" class="fold" id="activity-more" hidden></button>
 

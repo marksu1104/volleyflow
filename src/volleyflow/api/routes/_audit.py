@@ -15,7 +15,26 @@ from sqlalchemy.orm import Session
 from volleyflow.api.routes._people import _now
 from volleyflow.db.models import AuditEventRow, ClubRow, GameRow, PlayerRow, SeasonRow
 
-ACTIONS = frozenset(
+ATTENDANCE_ACTIONS = frozenset(
+    {
+        "absence_recorded",
+        "absence_cancelled",
+        "substitute_named",
+        "signed_up",
+        "queued",
+        "drop_in_cancelled",
+        "waitlist_left",
+        "promoted",
+        "promoted_by_organizer",
+        "returned_to_queue",
+    }
+)
+"""A place on court or in the queue changed at one game, named by its
+date in `detail`. The subject is whoever's place changed and the actor
+whoever pressed the button; a place that moves as a consequence
+(promoted, returned_to_queue) carries the actor whose action moved it."""
+
+MONEY_AND_ROSTER_ACTIONS = frozenset(
     {
         "payment",
         "payment_undone",
@@ -42,8 +61,10 @@ ACTIONS = frozenset(
         "roster_removed",
     }
 )
+
+ACTIONS = MONEY_AND_ROSTER_ACTIONS | ATTENDANCE_ACTIONS
 """Every action the trail records. developer.html turns each into a
-sentence, and tests/frontend/developer.test.js reads this list to check
+sentence, and tests/frontend/developer.test.js reads both lists to check
 that none is missing one."""
 
 
@@ -81,6 +102,29 @@ def _audit(
             amount=Decimal(amount) if amount is not None else None,
             detail=detail,
         )
+    )
+
+
+def _audit_attendance(
+    db: Session,
+    actor: PlayerRow,
+    action: str,
+    game: GameRow,
+    season: SeasonRow,
+    subject_id: int | None,
+) -> None:
+    """An attendance change at one game, named by its date in `detail`
+    so the trail can be read one night at a time. Nothing to record
+    when no place moved (`subject_id` None)."""
+    if subject_id is None:
+        return
+    _audit(
+        db,
+        actor,
+        action,
+        season.club_id,
+        subject_id=subject_id,
+        detail=game.date.isoformat(),
     )
 
 

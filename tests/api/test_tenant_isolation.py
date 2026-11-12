@@ -339,6 +339,7 @@ NOT_CLUB_SCOPED = {
     ("GET", "/developer/overview"): "developer only",
     ("GET", "/developer/errors"): "developer only",
     ("GET", "/developer/activity"): "developer only",
+    ("GET", "/developer/activity/nights"): "developer only",
 }
 
 

@@ -12,13 +12,14 @@ nothing imports a route module.
 
 import os
 from collections import defaultdict
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from volleyflow.api.dependencies import get_db
+from volleyflow.api.routes._audit import ATTENDANCE_ACTIONS
 from volleyflow.api.routes._people import (
     _TAIWAN,
     _today_in_taiwan,
@@ -29,6 +30,7 @@ from volleyflow.api.schemas import (
     AuditEventOut,
     DeveloperClubOut,
     DeveloperErrorOut,
+    DeveloperNightOut,
     DeveloperOverviewOut,
 )
 from volleyflow.db.models import (
@@ -214,17 +216,40 @@ def developer_errors(
 @router.get("/developer/activity", response_model=list[AuditEventOut])
 def developer_activity(
     limit: int = 50,
+    club_id: int | None = None,
+    night: date | None = None,
     db: Session = Depends(get_db),
     current_player: PlayerRow = Depends(get_current_player),
 ) -> list[AuditEventOut]:
-    """The audit trail, newest first; see db.models.AuditEventRow."""
+    """The audit trail, newest first; see db.models.AuditEventRow.
+
+    With `club_id` and `night`, everything on the record against that
+    club's night instead, oldest first, so it reads as what happened:
+    attendance, and the payments and air conditioning that name the
+    night too.
+    """
     _require_developer(current_player)
-    rows = (
-        db.query(AuditEventRow)
-        .order_by(AuditEventRow.occurred_at.desc(), AuditEventRow.id.desc())
-        .limit(max(1, min(limit, 200)))
-        .all()
-    )
+    if (club_id is None) != (night is None):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "A night is read with its club"
+        )
+    query = db.query(AuditEventRow)
+    if club_id is not None and night is not None:
+        rows = (
+            query.filter(
+                AuditEventRow.club_id == club_id,
+                AuditEventRow.detail == night.isoformat(),
+            )
+            .order_by(AuditEventRow.occurred_at, AuditEventRow.id)
+            .limit(500)
+            .all()
+        )
+    else:
+        rows = (
+            query.order_by(AuditEventRow.occurred_at.desc(), AuditEventRow.id.desc())
+            .limit(max(1, min(limit, 200)))
+            .all()
+        )
     return [
         AuditEventOut(
             occurred_at=row.occurred_at,
@@ -236,4 +261,35 @@ def developer_activity(
             detail=row.detail,
         )
         for row in rows
+    ]
+
+
+@router.get("/developer/activity/nights", response_model=list[DeveloperNightOut])
+def developer_activity_nights(
+    db: Session = Depends(get_db),
+    current_player: PlayerRow = Depends(get_current_player),
+) -> list[DeveloperNightOut]:
+    """The 30 most recent game nights with attendance on the record,
+    latest first, each with its club: the choices for reading the
+    trail one night at a time."""
+    _require_developer(current_player)
+    rows = (
+        db.query(
+            AuditEventRow.club_id,
+            func.max(AuditEventRow.club_name),
+            AuditEventRow.detail,
+        )
+        .filter(
+            AuditEventRow.action.in_(ATTENDANCE_ACTIONS),
+            AuditEventRow.club_id.is_not(None),
+            AuditEventRow.detail.is_not(None),
+        )
+        .group_by(AuditEventRow.club_id, AuditEventRow.detail)
+        .order_by(AuditEventRow.detail.desc(), AuditEventRow.club_id)
+        .limit(30)
+        .all()
+    )
+    return [
+        DeveloperNightOut(club_id=club_id, club_name=name, night=date.fromisoformat(d))
+        for club_id, name, d in rows
     ]

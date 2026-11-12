@@ -21,6 +21,8 @@ const {
   activitySentence,
   isEmptyClub,
   locationLabel,
+  nightActivityHtml,
+  nightLabel,
   pageName,
   visibleClubs,
 } = page;
@@ -40,10 +42,11 @@ test("every action the server records has a sentence of its own", () => {
     path.join(__dirname, "..", "..", "src", "volleyflow", "api", "routes", "_audit.py"),
     "utf8"
   );
-  const block = /ACTIONS = frozenset\(\s*\{([\s\S]*?)\}\s*\)/.exec(source);
-  assert.ok(block, "ACTIONS not found in _audit.py");
-  const actions = [...block[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
-  assert.ok(actions.length >= 20, `only ${actions.length} actions read`);
+  // MONEY_AND_ROSTER_ACTIONS and ATTENDANCE_ACTIONS, which make ACTIONS.
+  const blocks = [...source.matchAll(/^[A-Z_]*ACTIONS = frozenset\(\s*\{([\s\S]*?)\}\s*\)/gm)];
+  assert.equal(blocks.length, 2, "both action lists not found in _audit.py");
+  const actions = blocks.flatMap((b) => [...b[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]));
+  assert.ok(actions.length >= 30, `only ${actions.length} actions read`);
 
   for (const action of actions) {
     const sentence = activitySentence(
@@ -184,4 +187,44 @@ test("an error's page is named the way people know it", () => {
   assert.equal(pageName("organizer-ledger.html"), "管理・帳務");
   assert.equal(pageName(null), "頁面不明");
   assert.equal(pageName("new-page.html"), "new-page.html");
+});
+
+test("somebody acting for themselves reads as one name, for somebody else as two", () => {
+  const own = event({ action: "absence_recorded", actor_name: "成員乙", detail: "2026-11-10" });
+  const forOther = event({ action: "signed_up", detail: "2026-11-10" });
+
+  assert.equal(activitySentence(own), "成員乙 請假（11/10 場次）");
+  assert.equal(activitySentence(forOther), "管理員甲 幫 成員乙 報名（11/10 場次）");
+});
+
+test("a place moved by somebody else's action names whose action it was", () => {
+  const promoted = event({ action: "promoted", detail: "2026-11-10" });
+  const returned = event({ action: "returned_to_queue", detail: "2026-11-10" });
+
+  assert.equal(activitySentence(promoted), "成員乙 由候補遞補上場（管理員甲 的操作，11/10 場次）");
+  assert.equal(activitySentence(returned), "成員乙 退回候補（管理員甲 的操作，11/10 場次）");
+});
+
+test("one night's list leaves the night off each line", () => {
+  const html = nightActivityHtml([
+    event({ action: "absence_cancelled", actor_name: "成員乙", detail: "2026-11-10" }),
+    event({ action: "returned_to_queue", detail: "2026-11-10" }),
+  ]);
+
+  assert.match(html, /成員乙 取消請假</);
+  assert.match(html, /成員乙 退回候補（管理員甲 的操作）</);
+  assert.doesNotMatch(html, /11\/10/);
+});
+
+test("attendance is ordinary traffic and takes no colour", () => {
+  assert.equal(activityKind("absence_cancelled"), "");
+  assert.equal(activityKind("drop_in_cancelled"), "");
+  assert.equal(activityKind("game_cancelled"), "remove");
+});
+
+test("a night to pick names its date, weekday and club", () => {
+  assert.equal(
+    nightLabel({ club_id: 1, club_name: "週二排球", night: "2026-11-10" }),
+    "11/10（週二）・週二排球"
+  );
 });
