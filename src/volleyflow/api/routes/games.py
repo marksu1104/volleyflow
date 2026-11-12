@@ -101,9 +101,8 @@ def set_game_air_conditioning(
     """Records whether the air conditioning actually ran for this game.
 
     The venue charges for what it ran, so `total_venue_cost` moves by
-    `ac_surcharge` and every member's charge is corrected with an
-    adjustment entry. A drop-in already charged for the night keeps
-    what they paid; members absorb the difference.
+    `ac_surcharge`, and every member's and drop-in's charge is corrected
+    with an adjustment entry: a drop-in pays the night's real price.
     """
     game = _get_game_or_404(db, game_id)
     season = db.get(SeasonRow, game.season_id)

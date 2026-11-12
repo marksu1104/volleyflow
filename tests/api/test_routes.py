@@ -3581,6 +3581,128 @@ def test_a_drop_in_on_a_cooled_night_pays_the_cooled_price(
     assert results == [Decimal("1100"), Decimal("900")]
 
 
+def _priced_season_with_a_drop_in(client: TestClient) -> tuple[dict[str, Any], int]:
+    """Two games, the first forecast cooled; Dan signs up for it."""
+    season = _start_season(
+        client,
+        total_venue_cost="20000",
+        member_names=["Alice", "Bob"],
+        capacity=4,
+        game_dates=["2031-08-19", "2031-08-26"],
+    )
+    client.patch(f"/seasons/{season['id']}", json={"ac_surcharge": "1000"})
+    client.put(
+        f"/seasons/{season['id']}/air-conditioned-dates", json={"dates": ["2031-08-19"]}
+    )
+    dan = client.post(
+        "/drop-ins",
+        json={
+            "player_name": "Dan",
+            "game_id": season["games"][0]["id"],
+            "gender": "male",
+        },
+    ).json()
+    return season, dan["player_id"]
+
+
+def _night_price_and_owed(
+    client: TestClient, season: dict[str, Any], player_id: int
+) -> tuple[Decimal, Decimal]:
+    game_id = season["games"][0]["id"]
+    games = client.get(f"/seasons/{season['id']}").json()["games"]
+    share = next(Decimal(g["share"]) for g in games if g["id"] == game_id)
+    ledger = client.get(f"/clubs/{season['club_id']}/players/{player_id}/ledger").json()
+    return share, -Decimal(ledger["balance"])
+
+
+@pytest.mark.parametrize(
+    ("change", "method", "path", "body"),
+    [
+        (
+            "the AC did not run",
+            "put",
+            "/games/{game}/air-conditioning",
+            {"air_conditioned": False},
+        ),
+        (
+            "the forecast was corrected",
+            "put",
+            "/seasons/{season}/air-conditioned-dates",
+            {"dates": []},
+        ),
+        ("the capacity was raised", "patch", "/seasons/{season}", {"capacity": 6}),
+        (
+            "the venue cost changed",
+            "patch",
+            "/seasons/{season}",
+            {"total_venue_cost": "16000"},
+        ),
+        ("the surcharge rose", "patch", "/seasons/{season}", {"ac_surcharge": "2000"}),
+        (
+            "the night moved venue",
+            "patch",
+            "/games/{game}",
+            {"venue_cost_delta": "800"},
+        ),
+    ],
+)
+def test_a_drop_in_pays_the_nights_price_after_it_changes(
+    client: TestClient, change: str, method: str, path: str, body: dict[str, Any]
+) -> None:
+    season, dan = _priced_season_with_a_drop_in(client)
+    price_at_signup, _ = _night_price_and_owed(client, season, dan)
+    url = path.format(season=season["id"], game=season["games"][0]["id"])
+
+    response = getattr(client, method)(url, json=body)
+
+    assert response.status_code in (200, 204), response.text
+    price, owed = _night_price_and_owed(client, season, dan)
+    assert price != price_at_signup, f"{change} should re-price the night"
+    assert owed == price, change
+
+
+def test_a_covered_absence_refunds_what_the_drop_in_paid_after_a_price_rise(
+    client: TestClient,
+) -> None:
+    # The books: what the club hands Alice back for her night is what it
+    # took from Dan for the same night, so a later price rise cannot
+    # leave the club paying out more than it collected.
+    season, dan = _priced_season_with_a_drop_in(client)
+    client.post(
+        "/absences",
+        json={"player_name": "Alice", "game_id": season["games"][0]["id"]},
+    )
+
+    client.patch(f"/seasons/{season['id']}", json={"ac_surcharge": "2000"})
+
+    _, dan_paid = _night_price_and_owed(client, season, dan)
+    settlement = client.get(f"/seasons/{season['id']}/settlement").json()
+    alice = next(m for m in settlement["members"] if m["player_name"] == "Alice")
+    assert Decimal(alice["refund"]) == dan_paid
+
+
+def test_cancelling_a_drop_in_after_a_price_change_leaves_nothing_owed(
+    client: TestClient,
+) -> None:
+    season, dan = _priced_season_with_a_drop_in(client)
+    client.put(
+        f"/games/{season['games'][0]['id']}/air-conditioning",
+        json={"air_conditioned": False},
+    )
+    drop_in = next(
+        d
+        for d in client.get(f"/seasons/{season['id']}").json()["games"][0][
+            "confirmed_drop_ins"
+        ]
+        if d["player_name"] == "Dan"
+    )
+
+    client.post(f"/drop-ins/{drop_in['id']}/cancel")
+
+    _, owed = _night_price_and_owed(client, season, dan)
+    assert owed == 0, "the refund is what was charged after the adjustment"
+
+
 def test_changing_the_air_conditioning_price_is_blocked_after_settling(
     client: TestClient,
 ) -> None:

@@ -170,11 +170,18 @@ conditioning it ran) and corrects every member's charge with an
 adjustment entry — never by editing what they were already charged. See
 "Keeping the charge in sync when the inputs change" below.
 
-A drop-in already charged for that game keeps the amount they were
-charged. They pay the organizer in cash on the night, and chasing
-someone for another $30 — or handing it back — because the forecast was
-wrong costs more goodwill than the difference is worth. The members
-absorb it, which is what a season fee is for.
+A drop-in pays **that night's price as it stands**, so a drop-in already
+charged for the game gets an adjustment entry too, exactly like a
+member. The same holds for every other change that re-prices a night
+after somebody signed up: the forecast, the capacity, the venue cost,
+the surcharge, a different venue. Decided 2026-11-12, reversing an
+earlier rule that a drop-in kept whatever they were charged at signup.
+That rule assumed the cash had already changed hands, but most of these
+changes reach a night nobody has paid for yet, and it broke the books:
+a covered absence is refunded at the night's current price, so a price
+that rose after the signup refunded more than the drop-in paid. If a
+drop-in has already paid and the price then moves, their balance shows
+the difference, and the organizer settles it like any other balance.
 
 There are therefore two different corrections, and they must not be
 confused:
@@ -245,10 +252,9 @@ The screen must say so before the change is made: this is the one
 per-game edit that moves money, which is why the organizer asked for a
 warning on it and not on the venue's name or the hour.
 
-**A drop-in already charged for that night keeps what they were
-charged**, exactly as with the air conditioning, and for the same
-reason: chasing someone for another $45 after the fact costs more
-goodwill than the difference is worth. The members absorb it.
+**A drop-in already charged for that night is adjusted to the new
+price**, exactly as with the air conditioning and for the same reason:
+they pay what the night they play actually costs.
 
 **Cancellation.** The two cancelled statuses mean different things about
 the money, so the delta follows each one's meaning:
