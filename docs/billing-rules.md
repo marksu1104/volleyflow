@@ -203,9 +203,8 @@ previews a corrected forecast before it is saved through
 
 ### A different venue for one night
 
-Added 2026-09-17, at the organizer's request: 「有時候會換場地，那個場地
-的價錢不同」. A booking moves, the usual court is taken, and one night
-runs somewhere that costs a different amount.
+Added 2026-09-17. A booking moves, the usual court is taken, and one
+night runs somewhere that costs a different amount.
 
 `venue_cost_delta` is what that night costs the club **above a normal
 night**, and it behaves exactly like `ac_surcharge`, for the same
