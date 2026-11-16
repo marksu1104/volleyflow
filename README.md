@@ -95,6 +95,11 @@ lives in Postgres. The billing engine (`pricing.py`, `settlement.py`,
   never re-prices everyone else.
 - **The ledger is append-only.** Corrections are new adjustment entries,
   so every balance can be explained by reading its history.
+- **Every change says who made it.** Payments, roster changes and each
+  move between court, leave and the waitlist are recorded in the same
+  transaction as the change, with who pressed the button and whose place
+  moved, so a refused change leaves no record and an accepted one always
+  does.
 - **Billing never touches the database.** The money rules are pure
   functions, tested exhaustively and kept apart from the web layer by a
   lint rule that fails the build.
@@ -137,7 +142,7 @@ down.
 ## Testing
 
 ```bash
-uv run pytest                          # backend: about 650 tests
+uv run pytest                          # backend: about 680 tests
 node --test tests/frontend/*.test.js   # frontend logic: about 340 tests
 ```
 
